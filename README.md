@@ -74,6 +74,47 @@ curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/auth/me
 curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/users
 ```
 
+## OData Sync Pipeline
+
+Milestone 3 adds the BullMQ-based OData sync foundation. Local development defaults to
+`ODATA_SYNC_MODE=mock`, so the worker will not call Business Central unless
+`BC_ODATA_BASE_URL` and `BC_ODATA_OUTPUT_ENDPOINT` are configured and mock mode is disabled.
+
+Run the API and worker with Redis/Postgres up:
+
+```bash
+docker compose up -d postgres redis
+pnpm --filter @poip/api dev
+pnpm --filter @poip/worker dev
+```
+
+Trigger a local mock sync:
+
+```bash
+curl -i -c /tmp/poip.cookies \
+  -H "content-type: application/json" \
+  -d '{"email":"admin@example.local","password":"change-this"}' \
+  http://localhost:4000/api/v1/auth/login
+
+curl -i -b /tmp/poip.cookies \
+  -H "content-type: application/json" \
+  -d '{}' \
+  http://localhost:4000/api/v1/sync/odata/run
+
+curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/sync/status
+curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/sync/runs
+```
+
+Inspect database results:
+
+```bash
+docker exec -it poip-postgres psql -U ppic_app -d ppic_output_intelligence \
+  -c "select id, status, rows_fetched, rows_inserted, rows_updated, rows_skipped, error_message from sync_runs order by started_at desc limit 5;"
+
+docker exec -it poip-postgres psql -U ppic_app -d ppic_output_intelligence \
+  -c "select source_system, entry_no, posting_date, item_no, quantity, reject_kg from production_outputs order by created_at desc limit 10;"
+```
+
 ## Repository Layout
 
 ```text

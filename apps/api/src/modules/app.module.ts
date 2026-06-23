@@ -7,10 +7,11 @@ import { AuthGuard } from "./auth/auth.guard.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
+import { SyncModule } from "./sync/sync.module.js";
 import { UsersModule } from "./users/users.module.js";
 
 @Module({
-  imports: [DatabaseModule, AuditModule, AuthModule, UsersModule, HealthModule],
+  imports: [DatabaseModule, AuditModule, AuthModule, UsersModule, SyncModule, HealthModule],
   providers: [
     {
       provide: APP_GUARD,

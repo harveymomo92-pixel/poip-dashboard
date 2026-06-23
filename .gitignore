@@ -11,3 +11,6 @@ coverage/
 .dev-logs/
 uploads/
 .env
+
+# Local work logs
+.worklog/

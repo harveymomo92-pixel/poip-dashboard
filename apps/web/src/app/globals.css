@@ -171,6 +171,25 @@ dd {
   padding: 32px;
 }
 
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+h2 {
+  margin: 32px 0 0;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+
 .table {
   display: grid;
   gap: 8px;
@@ -187,6 +206,16 @@ dd {
   padding: 12px;
 }
 
+.sync-facts {
+  max-width: 100%;
+}
+
+.sync-row {
+  grid-template-columns:
+    minmax(120px, 0.9fr) minmax(150px, 1fr) minmax(150px, 1fr)
+    minmax(180px, 1.2fr) minmax(160px, 1fr);
+}
+
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -199,5 +228,9 @@ dd {
 
   .table-row {
     grid-template-columns: 1fr;
+  }
+
+  .panel-header {
+    display: grid;
   }
 }

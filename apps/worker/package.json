@@ -12,8 +12,11 @@
     "check:deps": "node ../../scripts/check-no-latest.mjs"
   },
   "dependencies": {
+    "@poip/db": "workspace:*",
     "@poip/domain": "workspace:0.1.0",
     "bullmq": "5.56.0",
+    "dotenv": "16.4.7",
+    "drizzle-orm": "0.44.2",
     "ioredis": "5.6.1"
   },
   "devDependencies": {

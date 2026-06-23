@@ -11,6 +11,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
         </div>
         <nav>
           <Link href="/overview">Overview</Link>
+          <Link href="/settings/sync">Sync</Link>
           <Link href="/settings/users">Users</Link>
         </nav>
       </aside>
