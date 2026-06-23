@@ -7,3 +7,5 @@ export * from "./kpi/dashboard.js";
 export * from "./parser-contract/index.js";
 export * from "./permissions/index.js";
 export * from "./sync/index.js";
+export * from "./targets/period.js";
+export * from "./targets/status.js";

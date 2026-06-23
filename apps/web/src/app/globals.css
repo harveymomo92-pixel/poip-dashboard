@@ -15,7 +15,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -33,6 +34,12 @@ button {
 button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.secondary-button {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1d2430;
 }
 
 a {
@@ -235,11 +242,13 @@ small {
   font-weight: 700;
 }
 
-.filters input {
+.filters input,
+.filters select {
   min-height: 40px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 0 10px;
+  background: #ffffff;
 }
 
 .kpi-grid {
@@ -326,6 +335,29 @@ small {
   margin-top: 16px;
 }
 
+.target-panel {
+  width: min(1320px, 100%);
+}
+
+.target-form {
+  margin-top: 24px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 8px;
+}
+
+.actions,
+.target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.target-row {
+  grid-template-columns:
+    minmax(170px, 1.3fr) 60px minmax(170px, 1.3fr) minmax(100px, 0.8fr)
+    minmax(100px, 0.8fr) minmax(280px, 1.6fr);
+}
+
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -346,12 +378,15 @@ small {
 
   .trend-row,
   .breakdown-row,
-  .output-row {
+  .output-row,
+  .target-row {
     grid-template-columns: 1fr;
   }
 
   .warning-panel,
-  .pagination {
+  .pagination,
+  .actions,
+  .target-actions {
     display: grid;
   }
 }

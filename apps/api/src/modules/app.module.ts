@@ -11,6 +11,7 @@ import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { OutputsModule } from "./outputs/outputs.module.js";
 import { SyncModule } from "./sync/sync.module.js";
+import { TargetsModule } from "./targets/targets.module.js";
 import { UsersModule } from "./users/users.module.js";
 
 @Module({
@@ -22,6 +23,7 @@ import { UsersModule } from "./users/users.module.js";
     DashboardModule,
     OutputsModule,
     SyncModule,
+    TargetsModule,
     DataQualityModule,
     HealthModule
   ],
