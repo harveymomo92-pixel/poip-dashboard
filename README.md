@@ -36,6 +36,9 @@ Web: http://localhost:3000
 API: http://localhost:4000/api/v1/health
 ```
 
+After `pnpm db:create-admin`, open `http://localhost:3000/login` and sign in with the
+admin credentials from `.env` or the command environment.
+
 ## Verification
 
 ```bash
@@ -57,6 +60,19 @@ ADMIN_EMAIL=admin@example.local ADMIN_NAME="System Admin" ADMIN_PASSWORD="change
 ```
 
 `pnpm db:create-admin` reads `ADMIN_EMAIL`, `ADMIN_NAME`, and `ADMIN_PASSWORD` from the environment or `.env`. Use a strong password outside local development.
+
+## Auth/RBAC Smoke Test
+
+```bash
+curl -i http://localhost:4000/api/v1/health
+curl -i http://localhost:4000/api/v1/auth/me
+curl -i -c /tmp/poip.cookies \
+  -H "content-type: application/json" \
+  -d '{"email":"admin@example.local","password":"change-this"}' \
+  http://localhost:4000/api/v1/auth/login
+curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/auth/me
+curl -i -b /tmp/poip.cookies http://localhost:4000/api/v1/users
+```
 
 ## Repository Layout
 

@@ -118,3 +118,19 @@ export const rolePermissionMatrix = {
   QC: ["dashboard.view", "output.view", "output.export", "downtime.view", "data_quality.view"],
   Viewer: ["dashboard.view", "output.view", "target.view", "downtime.view"]
 } as const satisfies Record<Role, readonly Permission[]>;
+
+export function isRole(value: string): value is Role {
+  return roles.includes(value as Role);
+}
+
+export function isPermission(value: string): value is Permission {
+  return permissions.includes(value as Permission);
+}
+
+export function getPermissionsForRoles(inputRoles: readonly Role[]): Permission[] {
+  return [...new Set(inputRoles.flatMap((role) => rolePermissionMatrix[role]))];
+}
+
+export function hasPermission(inputRoles: readonly Role[], permission: Permission): boolean {
+  return getPermissionsForRoles(inputRoles).includes(permission);
+}

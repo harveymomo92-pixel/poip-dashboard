@@ -1,4 +1,4 @@
-export interface ApiEnvelope<TData> {
+export interface ApiSuccessEnvelope<TData> {
   readonly ok: true;
   readonly data: TData;
   readonly meta: {
@@ -16,20 +16,5 @@ export interface ApiErrorEnvelope {
   };
   readonly meta: {
     readonly requestId: string;
-  };
-}
-
-export interface HealthResponse {
-  readonly status: "ok";
-  readonly service: "api";
-}
-
-export interface CurrentUserResponse {
-  readonly user: {
-    readonly id: string;
-    readonly email: string;
-    readonly name: string;
-    readonly roles: readonly string[];
-    readonly permissions: readonly string[];
   };
 }

@@ -1,28 +1,10 @@
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { hashPassword } from "@poip/domain";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
 import { createDatabase } from "./client.js";
 import { getDatabaseUrl } from "./env.js";
 import { roles, userRoles, users } from "./schema.js";
-
-const scrypt = promisify(scryptCallback);
-const keyLength = 64;
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const derivedKey = (await scrypt(password, salt, keyLength)) as Buffer;
-  return `scrypt:${salt}:${derivedKey.toString("hex")}`;
-}
-
-export async function verifyPassword(password: string, passwordHash: string): Promise<boolean> {
-  const [algorithm, salt, storedKey] = passwordHash.split(":");
-  if (algorithm !== "scrypt" || !salt || !storedKey) return false;
-
-  const stored = Buffer.from(storedKey, "hex");
-  const derived = (await scrypt(password, salt, stored.length)) as Buffer;
-  return stored.length === derived.length && timingSafeEqual(stored, derived);
-}
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];

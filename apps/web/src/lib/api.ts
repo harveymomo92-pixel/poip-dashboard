@@ -1,3 +1,5 @@
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api/v1";
+
 export interface ApiEnvelope<TData> {
   readonly ok: true;
   readonly data: TData;
@@ -12,24 +14,18 @@ export interface ApiErrorEnvelope {
   readonly error: {
     readonly code: string;
     readonly message: string;
-    readonly details?: unknown;
   };
   readonly meta: {
     readonly requestId: string;
   };
 }
 
-export interface HealthResponse {
-  readonly status: "ok";
-  readonly service: "api";
-}
+export type ApiResult<TData> = ApiEnvelope<TData> | ApiErrorEnvelope;
 
-export interface CurrentUserResponse {
-  readonly user: {
-    readonly id: string;
-    readonly email: string;
-    readonly name: string;
-    readonly roles: readonly string[];
-    readonly permissions: readonly string[];
-  };
+export interface CurrentUser {
+  readonly id: string;
+  readonly email: string;
+  readonly name: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
 }

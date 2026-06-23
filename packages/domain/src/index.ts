@@ -1,3 +1,4 @@
+export * from "./auth/password.js";
 export * from "./constants/timezone.js";
 export * from "./downtime/duration.js";
 export * from "./downtime/natural-key.js";
