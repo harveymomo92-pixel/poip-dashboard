@@ -33,3 +33,88 @@ export const permissions = [
 
 export type Role = (typeof roles)[number];
 export type Permission = (typeof permissions)[number];
+
+export const roleDescriptions = {
+  Admin: "Full system access.",
+  Manager: "Executive view, reports, approval, and export.",
+  PPIC: "Output, target, detail, selected import, and export workflows.",
+  ProductionLeader: "Downtime input and review, shift view, and output view.",
+  Maintenance: "Downtime, action item, and maintenance reports.",
+  QC: "Reject view, QC notes, and reject export.",
+  Viewer: "Read-only dashboard access."
+} as const satisfies Record<Role, string>;
+
+export const permissionDescriptions = {
+  "dashboard.view": "View executive and operational dashboards.",
+  "output.view": "View production output data.",
+  "output.export": "Export production output data.",
+  "target.view": "View production targets.",
+  "target.create": "Create and revise production targets.",
+  "target.approve": "Approve production targets.",
+  "downtime.view": "View downtime events and summaries.",
+  "downtime.create": "Create downtime events.",
+  "downtime.update": "Update downtime events.",
+  "downtime.close": "Close downtime events.",
+  "parser.preview": "Preview WhatsApp parser results.",
+  "parser.commit": "Commit reviewed parser results.",
+  "import.preview": "Preview import files.",
+  "import.commit": "Commit reviewed import runs.",
+  "sync.view": "View sync status and history.",
+  "sync.run": "Run sync jobs.",
+  "data_quality.view": "View data quality issues.",
+  "audit.view": "View audit logs.",
+  "settings.manage": "Manage system settings.",
+  "users.manage": "Manage users and roles."
+} as const satisfies Record<Permission, string>;
+
+export const rolePermissionMatrix = {
+  Admin: permissions,
+  Manager: [
+    "dashboard.view",
+    "output.view",
+    "output.export",
+    "target.view",
+    "target.approve",
+    "downtime.view",
+    "downtime.close",
+    "data_quality.view",
+    "audit.view"
+  ],
+  PPIC: [
+    "dashboard.view",
+    "output.view",
+    "output.export",
+    "target.view",
+    "target.create",
+    "downtime.view",
+    "downtime.create",
+    "downtime.update",
+    "parser.preview",
+    "parser.commit",
+    "import.preview",
+    "import.commit",
+    "sync.view",
+    "data_quality.view"
+  ],
+  ProductionLeader: [
+    "dashboard.view",
+    "output.view",
+    "target.view",
+    "downtime.view",
+    "downtime.create",
+    "downtime.update",
+    "downtime.close",
+    "parser.preview",
+    "parser.commit"
+  ],
+  Maintenance: [
+    "dashboard.view",
+    "output.view",
+    "downtime.view",
+    "downtime.create",
+    "downtime.update",
+    "downtime.close"
+  ],
+  QC: ["dashboard.view", "output.view", "output.export", "downtime.view", "data_quality.view"],
+  Viewer: ["dashboard.view", "output.view", "target.view", "downtime.view"]
+} as const satisfies Record<Role, readonly Permission[]>;

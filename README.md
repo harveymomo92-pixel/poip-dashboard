@@ -45,6 +45,19 @@ pnpm test
 pnpm build
 ```
 
+## Database
+
+Milestone 1 adds the PostgreSQL schema, role/permission seed, and local admin creation script.
+
+```bash
+docker compose up -d postgres redis
+pnpm db:migrate
+pnpm db:seed
+ADMIN_EMAIL=admin@example.local ADMIN_NAME="System Admin" ADMIN_PASSWORD="change-this" pnpm db:create-admin
+```
+
+`pnpm db:create-admin` reads `ADMIN_EMAIL`, `ADMIN_NAME`, and `ADMIN_PASSWORD` from the environment or `.env`. Use a strong password outside local development.
+
 ## Repository Layout
 
 ```text
