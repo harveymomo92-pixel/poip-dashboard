@@ -6,3 +6,5 @@ export interface ParsedDowntimeCandidate {
   readonly parsedPayload: Record<string, unknown>;
   readonly warnings: readonly ParserWarningCode[];
 }
+
+export * from "./wa-rules.js";

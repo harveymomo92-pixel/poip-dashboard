@@ -12,6 +12,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
         <nav>
           <Link href="/overview">Overview</Link>
           <Link href="/downtime">Downtime</Link>
+          <Link href="/tools/wa-parser">WA Parser</Link>
           <Link href="/settings/sync">Sync</Link>
           <Link href="/settings/targets">Targets</Link>
           <Link href="/settings/users">Users</Link>
