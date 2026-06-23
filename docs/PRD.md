@@ -2718,7 +2718,7 @@ Transform the frontend from a functional MVP/admin scaffold into a consistent, p
 
 ### Tasks
 
-- Establish a shared design system for the web app.
+- Establish a shared design system for the web app using `docs/design.md` as the mandatory visual reference.
 - Refactor the application shell, sidebar, page headers, toolbar patterns, KPI cards, tables, forms, badges, loading states, empty states, and error states.
 - Group navigation into Dashboard, Operations, Tools, and Settings.
 - Move logout/session actions into a dedicated user/session area.
@@ -2728,9 +2728,25 @@ Transform the frontend from a functional MVP/admin scaffold into a consistent, p
 - Clean up global CSS and reduce page-specific styling hacks.
 - Preserve all current API integrations and real data rendering.
 
+### Required Design Reference
+
+This milestone must use `docs/design.md` as the primary visual design reference. The design reference is based on the Notion Beige aesthetic from designdotmd:
+
+- Reference URL: https://designdotmd.directory/d/notion-beige
+- Local reference file: `docs/design.md`
+
+The implementation must read and follow `docs/design.md` before changing UI components. The reference should guide color palette, background tone, surface treatment, typography mood, spacing, border radius, subtle shadows, card style, navigation feel, and overall visual direction.
+
+Interpretation for this product:
+- Use the Notion Beige aesthetic as inspiration, not as a copy-paste clone.
+- Adapt it into a professional PPIC/manufacturing operations dashboard.
+- Keep the UI warm, calm, structured, readable, and production-grade.
+- Avoid playful, overly decorative, or consumer-app styling.
+- Preserve strong operational hierarchy for KPIs, filters, tables, alerts, and action buttons.
+
 ### Design Direction
 
-- Professional internal SaaS dashboard.
+- Notion Beige-inspired professional internal SaaS dashboard, based on `docs/design.md`.
 - Manufacturing and operations oriented.
 - Clean, compact, readable, structured, and calm.
 - Strong visual hierarchy for operational KPIs, alerts, and actions.
@@ -2784,6 +2800,12 @@ The following pages must be visually reviewed and polished if they exist:
 ```text
 Implement Milestone 9 Design System and UI/UX Production Polish.
 
+Before changing UI:
+- Read `docs/design.md`.
+- Use `docs/design.md` as the primary visual reference.
+- The local design reference is based on Notion Beige: https://designdotmd.directory/d/notion-beige
+- Treat the reference as inspiration for visual direction, not as a requirement to clone every detail exactly.
+
 Current state:
 - The application is functionally working but the UI still looks like a rough MVP/admin scaffold.
 - Do not change backend behavior, database schema, API contracts, permissions, sync behavior, parser behavior, import behavior, target behavior, downtime behavior, or business logic.
@@ -2791,7 +2813,7 @@ Current state:
 - This milestone is only for frontend visual quality, layout consistency, usability, and reusable components.
 
 Goal:
-Transform the app into a clean production-grade manufacturing operations dashboard.
+Transform the app into a clean production-grade manufacturing operations dashboard with a warm, calm, structured Notion Beige-inspired visual system adapted for PPIC/manufacturing operations.
 
 Create/refactor shared UI components for AppShell, Sidebar, PageHeader, PageToolbar, FilterBar, MetricCard, InsightCard, StatusBadge, DataTable, EmptyState, LoadingSkeleton, ErrorState, FormPanel, SectionHeader, and ConfirmDialog if feasible.
 
@@ -2812,7 +2834,7 @@ Return changed files, shared components created/refactored, pages improved, befo
 
 ### Acceptance Criteria
 
-- UI no longer looks like raw/default admin HTML.
+- UI follows `docs/design.md` visual direction and no longer looks like raw/default admin HTML.
 - Sidebar and navigation look intentional and grouped.
 - Dashboard has clear visual hierarchy and looks like a production operations dashboard.
 - KPI cards have consistent styling, spacing, and status treatment.
