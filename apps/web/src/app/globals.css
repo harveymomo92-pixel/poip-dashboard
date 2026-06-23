@@ -348,6 +348,10 @@ small {
   width: min(1320px, 100%);
 }
 
+.import-panel {
+  width: min(1240px, 100%);
+}
+
 .target-form {
   margin-top: 24px;
   border-top: 1px solid #e2e8f0;
@@ -393,8 +397,28 @@ small {
   margin-top: 24px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.import-upload {
+  grid-template-columns: minmax(180px, 240px) minmax(240px, 1fr);
+}
+
+.import-message {
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .parser-row {
   grid-template-columns: 40px minmax(140px, 0.9fr) minmax(280px, 2fr) minmax(180px, 1fr);
+}
+
+.import-row {
+  grid-template-columns: 40px minmax(110px, 0.7fr) minmax(190px, 1.2fr) minmax(130px, 0.8fr) minmax(180px, 1fr);
 }
 
 .run-row {
@@ -434,6 +458,7 @@ small {
   .target-row,
   .downtime-row,
   .parser-row,
+  .import-row,
   .run-row {
     grid-template-columns: 1fr;
   }

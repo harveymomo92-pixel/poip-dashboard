@@ -304,6 +304,31 @@ export const importRuns = pgTable("import_runs", {
   createdAt
 });
 
+export const importRows = pgTable(
+  "import_rows",
+  {
+    id,
+    importRunId: uuid("import_run_id")
+      .notNull()
+      .references(() => importRuns.id),
+    rowNumber: integer("row_number").notNull(),
+    rawPayload: jsonb("raw_payload").notNull(),
+    normalizedPayload: jsonb("normalized_payload").notNull().default(sql`'{}'::jsonb`),
+    naturalKey: text("natural_key"),
+    rowHash: text("row_hash").notNull(),
+    status: text("status").notNull().default("PENDING_REVIEW"),
+    issues: jsonb("issues").notNull().default(sql`'[]'::jsonb`),
+    committedEntityType: text("committed_entity_type"),
+    committedEntityId: uuid("committed_entity_id"),
+    createdAt
+  },
+  (table) => [
+    unique("import_rows_run_row_unique").on(table.importRunId, table.rowNumber),
+    index("idx_import_rows_run_status").on(table.importRunId, table.status),
+    index("idx_import_rows_natural_key").on(table.naturalKey)
+  ]
+);
+
 export const dataQualityIssues = pgTable(
   "data_quality_issues",
   {
