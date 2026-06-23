@@ -1,0 +1,31 @@
+{
+  "name": "ppic-output-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.4",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check:deps": "node scripts/check-no-latest.mjs"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.1",
+    "@eslint/js": "9.29.0",
+    "@next/eslint-plugin-next": "15.3.4",
+    "eslint": "9.29.0",
+    "eslint-config-next": "15.3.4",
+    "eslint-config-prettier": "10.1.5",
+    "prettier": "3.6.0",
+    "turbo": "2.5.4",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.35.0"
+  }
+}

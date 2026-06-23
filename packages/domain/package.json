@@ -1,0 +1,25 @@
+{
+  "name": "@poip/domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint . && node ../../scripts/check-no-latest.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test dist/**/*.test.js",
+    "check:deps": "node ../../scripts/check-no-latest.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.3",
+    "typescript": "5.8.3"
+  }
+}

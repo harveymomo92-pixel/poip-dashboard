@@ -1,0 +1,28 @@
+{
+  "name": "@poip/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint . && node ../../scripts/check-no-latest.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test dist/**/*.test.js",
+    "check:deps": "node ../../scripts/check-no-latest.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.1.3",
+    "@nestjs/core": "11.1.3",
+    "@nestjs/platform-express": "11.1.3",
+    "@poip/api-client": "workspace:0.1.0",
+    "@poip/domain": "workspace:0.1.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.3",
+    "tsx": "4.20.3",
+    "typescript": "5.8.3"
+  }
+}
