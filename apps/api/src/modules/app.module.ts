@@ -5,13 +5,26 @@ import { ApiExceptionFilter } from "../common/api-exception.filter.js";
 import { AuditModule } from "./audit/audit.module.js";
 import { AuthGuard } from "./auth/auth.guard.js";
 import { AuthModule } from "./auth/auth.module.js";
+import { DashboardModule } from "./dashboard/dashboard.module.js";
+import { DataQualityModule } from "./data-quality/data-quality.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
+import { OutputsModule } from "./outputs/outputs.module.js";
 import { SyncModule } from "./sync/sync.module.js";
 import { UsersModule } from "./users/users.module.js";
 
 @Module({
-  imports: [DatabaseModule, AuditModule, AuthModule, UsersModule, SyncModule, HealthModule],
+  imports: [
+    DatabaseModule,
+    AuditModule,
+    AuthModule,
+    UsersModule,
+    DashboardModule,
+    OutputsModule,
+    SyncModule,
+    DataQualityModule,
+    HealthModule
+  ],
   providers: [
     {
       provide: APP_GUARD,

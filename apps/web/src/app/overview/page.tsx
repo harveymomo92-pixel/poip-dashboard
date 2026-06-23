@@ -1,10 +1,10 @@
 import { AppShell } from "../../components/AppShell";
-import { SessionPanel } from "./SessionPanel";
+import { DashboardPageClient } from "./DashboardPageClient";
 
 export default function OverviewPage() {
   return (
     <AppShell>
-      <SessionPanel />
+      <DashboardPageClient />
     </AppShell>
   );
 }
