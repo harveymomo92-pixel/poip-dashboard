@@ -74,6 +74,22 @@ export interface DataQualitySummaryDto {
   }[];
 }
 
+export interface DowntimeSummaryDto {
+  readonly totalDurationMinutes: number;
+  readonly openEventCount: number;
+  readonly eventCount: number;
+  readonly topCategories: readonly {
+    readonly category: string;
+    readonly durationMinutes: number;
+    readonly eventCount: number;
+  }[];
+  readonly topEntities: readonly {
+    readonly label: string;
+    readonly durationMinutes: number;
+    readonly eventCount: number;
+  }[];
+}
+
 export interface DashboardSummaryDto {
   readonly filters: DashboardFilters;
   readonly kpis: {
@@ -97,4 +113,5 @@ export interface DashboardSummaryDto {
     readonly missingTargetEntityDays: number;
   };
   readonly dataQuality: DataQualitySummaryDto;
+  readonly downtime: DowntimeSummaryDto;
 }

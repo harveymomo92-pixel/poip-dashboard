@@ -8,6 +8,7 @@ import { AuthModule } from "./auth/auth.module.js";
 import { DashboardModule } from "./dashboard/dashboard.module.js";
 import { DataQualityModule } from "./data-quality/data-quality.module.js";
 import { DatabaseModule } from "./database/database.module.js";
+import { DowntimeModule } from "./downtime/downtime.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { OutputsModule } from "./outputs/outputs.module.js";
 import { SyncModule } from "./sync/sync.module.js";
@@ -24,6 +25,7 @@ import { UsersModule } from "./users/users.module.js";
     OutputsModule,
     SyncModule,
     TargetsModule,
+    DowntimeModule,
     DataQualityModule,
     HealthModule
   ],

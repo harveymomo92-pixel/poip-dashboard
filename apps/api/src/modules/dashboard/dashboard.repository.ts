@@ -6,6 +6,7 @@ import type {
   DashboardFilters,
   DashboardSummaryDto,
   DataQualitySummaryDto,
+  DowntimeSummaryDto,
   OutputListFilters,
   OutputListResult,
   OutputRowDto,
@@ -79,6 +80,26 @@ function buildWhere(filters: DashboardFilters): SqlParts {
   };
 }
 
+function buildDowntimeWhere(filters: DashboardFilters): SqlParts {
+  const clauses = ["de.deleted_at is null", "de.event_date >= $1", "de.event_date <= $2"];
+  const params: unknown[] = [filters.from, filters.to];
+
+  if (filters.entityId) {
+    params.push(filters.entityId);
+    clauses.push(`de.entity_id = $${params.length}`);
+  }
+  if (filters.machineCenterNo) {
+    params.push(filters.machineCenterNo);
+    clauses.push(`de.machine_code = $${params.length}`);
+  }
+  if (filters.shiftCode) {
+    params.push(filters.shiftCode);
+    clauses.push(`de.shift_code = $${params.length}`);
+  }
+
+  return { where: clauses.join(" and "), params };
+}
+
 function targetForDate(targets: readonly TargetRow[], entityId: string, postingDate: string): TargetRow | null {
   const candidates = targets
     .filter((target) => {
@@ -142,12 +163,13 @@ export class DashboardReadRepository {
 
   async getSummary(filters: DashboardFilters): Promise<DashboardSummaryDto> {
     const where = buildWhere(filters);
-    const [aggregate, activeEntityDays, targets, latestSync, dataQuality] = await Promise.all([
+    const [aggregate, activeEntityDays, targets, latestSync, dataQuality, downtime] = await Promise.all([
       this.queryAggregate(where),
       this.queryActiveEntityDays(where),
       this.queryTargets(filters),
       this.queryLatestSuccessfulSync(filters.sourceSystem),
-      this.getDataQualitySummary(filters)
+      this.getDataQualitySummary(filters),
+      this.queryDowntimeSummary(filters)
     ]);
     const coverage = computeTargetCoverage(activeEntityDays, targets);
     const kpis = buildDashboardKpiSummary({
@@ -176,7 +198,8 @@ export class DashboardReadRepository {
         activeEntityDays: coverage.activeEntityDays,
         missingTargetEntityDays: coverage.missingTargetEntityDays
       },
-      dataQuality
+      dataQuality,
+      downtime
     };
   }
 
@@ -437,6 +460,86 @@ export class DashboardReadRepository {
       byCode: byCode.rows.map((item) => ({
         issueCode: item.issue_code,
         count: numberValue(item.count)
+      }))
+    };
+  }
+
+  private async queryDowntimeSummary(filters: DashboardFilters): Promise<DowntimeSummaryDto> {
+    const where = buildDowntimeWhere(filters);
+    const durationExpression = `
+      case
+        when de.status = 'CLOSED' then coalesce(de.duration_minutes, 0)
+        else greatest(0, floor(extract(epoch from (now() - de.start_time)) / 60))::int
+      end
+    `;
+    const [summary, topCategories, topEntities] = await Promise.all([
+      this.database.pool.query<{
+        total_duration_minutes: string | number | null;
+        open_event_count: string | number | null;
+        event_count: string | number | null;
+      }>(
+        `
+          select
+            coalesce(sum(${durationExpression}), 0) as total_duration_minutes,
+            count(*) filter (where de.status = 'OPEN') as open_event_count,
+            count(*) as event_count
+          from downtime_events de
+          where ${where.where}
+        `,
+        where.params
+      ),
+      this.database.pool.query<{
+        category: string;
+        duration_minutes: string | number | null;
+        event_count: string | number | null;
+      }>(
+        `
+          select
+            de.category,
+            coalesce(sum(${durationExpression}), 0) as duration_minutes,
+            count(*) as event_count
+          from downtime_events de
+          where ${where.where}
+          group by de.category
+          order by duration_minutes desc, de.category asc
+          limit 5
+        `,
+        where.params
+      ),
+      this.database.pool.query<{
+        label: string;
+        duration_minutes: string | number | null;
+        event_count: string | number | null;
+      }>(
+        `
+          select
+            coalesce(me.display_name, de.machine_code, 'Unmapped') as label,
+            coalesce(sum(${durationExpression}), 0) as duration_minutes,
+            count(*) as event_count
+          from downtime_events de
+          left join master_entities me on me.id = de.entity_id
+          where ${where.where}
+          group by coalesce(me.display_name, de.machine_code, 'Unmapped')
+          order by duration_minutes desc, label asc
+          limit 5
+        `,
+        where.params
+      )
+    ]);
+    const row = summary.rows[0];
+    return {
+      totalDurationMinutes: numberValue(row?.total_duration_minutes),
+      openEventCount: numberValue(row?.open_event_count),
+      eventCount: numberValue(row?.event_count),
+      topCategories: topCategories.rows.map((item) => ({
+        category: item.category,
+        durationMinutes: numberValue(item.duration_minutes),
+        eventCount: numberValue(item.event_count)
+      })),
+      topEntities: topEntities.rows.map((item) => ({
+        label: item.label,
+        durationMinutes: numberValue(item.duration_minutes),
+        eventCount: numberValue(item.event_count)
       }))
     };
   }

@@ -31,6 +31,21 @@ interface DashboardSummary {
     readonly warningIssues: number;
     readonly byCode: readonly { issueCode: string; count: number }[];
   };
+  readonly downtime: {
+    readonly totalDurationMinutes: number;
+    readonly openEventCount: number;
+    readonly eventCount: number;
+    readonly topCategories: readonly {
+      readonly category: string;
+      readonly durationMinutes: number;
+      readonly eventCount: number;
+    }[];
+    readonly topEntities: readonly {
+      readonly label: string;
+      readonly durationMinutes: number;
+      readonly eventCount: number;
+    }[];
+  };
 }
 
 interface TrendRow {
@@ -248,6 +263,7 @@ export function DashboardPageClient() {
               <KpiCard label="Reject KG" value={formatNumber(summary.kpis.rejectKg, 2)} />
               <KpiCard label="Reject PCS Eq" value={formatNumber(summary.kpis.rejectPcsEquivalent, 1)} />
               <KpiCard label="Reject Rate" value={formatPct(summary.kpis.rejectRatePct)} />
+              <KpiCard label="Downtime Min" value={formatNumber(summary.downtime.totalDurationMinutes, 0)} detail={`${summary.downtime.openEventCount} open`} />
               <KpiCard label="Freshness" value={summary.dataFreshness.status} detail={summary.dataFreshness.freshnessMinutes === null ? "Never synced" : `${summary.dataFreshness.freshnessMinutes} min`} />
             </div>
 
@@ -256,6 +272,15 @@ export function DashboardPageClient() {
               <span>
                 {summary.dataQuality.openIssues} open · {summary.dataQuality.criticalIssues} critical ·{" "}
                 {summary.targetCoverage.missingTargetEntityDays} missing target entity-days
+              </span>
+            </section>
+
+            <section className="warning-panel">
+              <strong>Downtime</strong>
+              <span>
+                {summary.downtime.eventCount} events · top reason{" "}
+                {summary.downtime.topCategories[0]?.category ?? "-"} · top entity{" "}
+                {summary.downtime.topEntities[0]?.label ?? "-"}
               </span>
             </section>
           </>

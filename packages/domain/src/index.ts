@@ -2,6 +2,7 @@ export * from "./auth/password.js";
 export * from "./constants/timezone.js";
 export * from "./downtime/duration.js";
 export * from "./downtime/natural-key.js";
+export * from "./downtime/status.js";
 export * from "./kpi/output.js";
 export * from "./kpi/dashboard.js";
 export * from "./parser-contract/index.js";
