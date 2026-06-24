@@ -37,6 +37,23 @@ function checkpointFromJson(value: unknown): SyncCheckpointSnapshot {
   };
 }
 
+function syncRunMetadata(payload: ODataSyncJobPayload): Record<string, unknown> {
+  return {
+    ...(payload.range ? { range: payload.range } : {}),
+    ...(payload.backfill
+      ? {
+          backfill: {
+            from: payload.backfill.from,
+            ...(payload.backfill.to ? { to: payload.backfill.to } : {}),
+            dateField: payload.backfill.dateField,
+            ...(payload.backfill.pageSize ? { pageSize: payload.backfill.pageSize } : {}),
+            ...(payload.backfill.maxPages ? { maxPages: payload.backfill.maxPages } : {})
+          }
+        }
+      : {})
+  };
+}
+
 function sourceRef(row: StagedOutputRow): string {
   return row.normalized.entryNo?.toString() ?? row.normalized.fallbackNaturalKey;
 }
@@ -71,6 +88,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
   async prepareRun(payload: ODataSyncJobPayload, sourceUrl: string | null): Promise<PreparedSyncRun> {
     const checkpoint = await this.getCheckpoint(payload.sourceSystem);
     const checkpointJson = checkpointToJson(checkpoint);
+    const metadata = syncRunMetadata(payload);
 
     if (payload.syncRunId) {
       const [existingRun] = await this.database.db
@@ -121,7 +139,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
         status: "RUNNING",
         checkpointBefore: checkpointJson,
         triggeredBy: payload.requestedBy ?? null,
-        metadata: payload.range ? { range: payload.range } : {}
+        metadata
       })
       .returning();
     if (!run) throw new Error("Unable to create sync run");

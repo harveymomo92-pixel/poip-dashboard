@@ -11,8 +11,12 @@ Use this before first v2 production cutover.
 - [ ] `WEB_ORIGIN` is the public web origin.
 - [ ] `NEXT_PUBLIC_API_BASE_URL` is the public API base URL.
 - [ ] Business Central OData URL/endpoint/token are configured.
+- [ ] `BC_ODATA_AUTH_MODE` matches the credential type (`basic`, `bearer`, or `none`).
+- [ ] `pnpm odata:check` passes from the same host/network where the worker runs.
 - [ ] `ODATA_SYNC_MODE` is intentionally set (`mock` for dry run, live value for production).
 - [ ] `BC_ODATA_PAGE_SIZE` and `ODATA_SYNC_CONCURRENCY` are conservative and documented.
+- [ ] If historical Business Central data is needed, a pre-backfill DB backup exists and `BACKFILL_FROM`/`BACKFILL_TO` are approved.
+- [ ] `pnpm odata:backfill:check` passes before any live backfill.
 
 ## Build and database
 

@@ -20,13 +20,42 @@ Use `.env.example` for local development and `.env.production.example` as a prod
 | Variable | Required for live sync | Notes |
 | --- | ---: | --- |
 | `ODATA_SYNC_MODE` | Yes | Keep `mock` for local/dev. Use a non-`mock` value such as `live` only after endpoint/token verification. |
-| `BC_ODATA_BASE_URL` | Yes | Base Business Central URL. Do not include credentials in the URL. |
-| `BC_ODATA_OUTPUT_ENDPOINT` | Yes | Production output OData path relative to the base URL. |
-| `BC_ODATA_BEARER_TOKEN` | Yes for bearer-token auth | Store in deployment secrets, not Git. |
+| `BC_ODATA_URL` | Preferred | Full Business Central ODataV4 entity URL, including private Tailscale/LAN host when used. Do not include credentials in the URL. Takes precedence over base URL + endpoint. |
+| `BC_ODATA_AUTH_MODE` | Yes for protected endpoints | `basic`, `bearer`, or `none`. Use `basic` for the Tailscale/LAN Business Central pattern. |
+| `BC_ODATA_USERNAME` | Yes for `basic` | OData username. Store in `.env`/secret store only. |
+| `BC_ODATA_PASSWORD` | Yes for `basic` | OData password/web-service access key. Store in `.env`/secret store only. |
+| `BC_ODATA_BASE_URL` | Legacy/alternate | Base Business Central URL. Used only when `BC_ODATA_URL` is not set. |
+| `BC_ODATA_OUTPUT_ENDPOINT` | Legacy/alternate | Production output OData path relative to base URL. Used only when `BC_ODATA_URL` is not set. |
+| `BC_ODATA_BEARER_TOKEN` | Yes for `bearer` | Existing bearer/token auth remains supported. Store in deployment secrets, not Git. |
 | `BC_ODATA_PAGE_SIZE` | No | Defaults to `1000`; reduce if Business Central throttles. |
+| `BC_ODATA_TIMEOUT_MS` | No | Defaults to `30000`; applies to each OData HTTP request/page. |
 | `ODATA_SYNC_CONCURRENCY` | No | Defaults to `1`; keep `1` for v2 unless operations has tested higher concurrency. |
+| `BACKFILL_FROM` | Backfill only | Inclusive start date for one-time OData backfill, `YYYY-MM-DD`. Example: `2026-01-01`. |
+| `BACKFILL_TO` | Backfill only, optional | Exclusive end date for one-time OData backfill, `YYYY-MM-DD`. Leave unset to backfill through current endpoint data. |
+| `BACKFILL_DATE_FIELD` | Backfill only, optional | OData date field used in the backfill `$filter`. Defaults to `Posting_Date`. |
+| `BACKFILL_PAGE_SIZE` | Backfill only, optional | `$top` page size for backfill when the endpoint URL does not already define `$top`. |
+| `BACKFILL_MAX_PAGES` | Backfill only, optional | Safety cap for pages fetched; omit for the full backfill. |
 
-`BC_ODATA_TENANT`, `BC_ODATA_CLIENT_ID`, and `BC_ODATA_CLIENT_SECRET` are reserved placeholders in the environment template. The current v2 worker uses bearer token auth.
+`BC_ODATA_TENANT`, `BC_ODATA_CLIENT_ID`, and `BC_ODATA_CLIENT_SECRET` are reserved placeholders in the environment template. The current v2 worker uses `BC_ODATA_URL` + Basic Auth or the existing bearer-token mode.
+
+For live OData through Tailscale/LAN, the common pattern is:
+
+```bash
+ODATA_SYNC_MODE=live
+BC_ODATA_URL=http://tailscale-or-lan-host.example.local:7048/BC/ODataV4/Company('COMPANY')/ProductionOutput
+BC_ODATA_AUTH_MODE=basic
+BC_ODATA_USERNAME=replace-with-odata-username
+BC_ODATA_PASSWORD=replace-with-odata-password
+```
+
+Restart the worker after changing any `BC_ODATA_*` value. The worker reads these values at startup.
+
+Backfill variables can be supplied inline per run instead of being stored permanently in `.env`:
+
+```bash
+BACKFILL_FROM=2026-01-01 pnpm odata:backfill
+BACKFILL_FROM=2026-01-01 BACKFILL_TO=2026-02-01 pnpm odata:backfill
+```
 
 ## Bootstrap admin variables
 

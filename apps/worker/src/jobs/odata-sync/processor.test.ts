@@ -89,3 +89,49 @@ test("ODataSyncProcessor marks failed run and leaves commit untouched", async ()
   assert.equal(failed, true);
   assert.equal(committed, false);
 });
+
+test("ODataSyncProcessor forwards backfill options without using incremental checkpoint", async () => {
+  let receivedBackfillFrom: string | null = null;
+  let receivedLastEntryNo: bigint | null | undefined;
+  const repository: SyncRunRepository = {
+    prepareRun: async () => ({
+      id: "run_backfill",
+      sourceSystem: "business-central",
+      mode: "backfill",
+      checkpointBefore: { lastEntryNo: 9999n, lastPostingDate: "2026-06-20" }
+    }),
+    commitSuccessfulRun: async (input) => ({
+      runId: input.run.id,
+      status: "SUCCESS",
+      rowsFetched: input.rows.length,
+      rowsInserted: 0,
+      rowsUpdated: 0,
+      rowsSkipped: input.rows.length,
+      checkpointAfter: { lastEntryNo: null, lastPostingDate: null }
+    }),
+    markRunFailed: async () => {
+      throw new Error("should not fail");
+    }
+  };
+  const client: ODataClient = {
+    sourceUrl: () => "mock://test",
+    fetchProductionOutputs: async (request) => {
+      receivedBackfillFrom = request.backfill?.from ?? null;
+      receivedLastEntryNo = request.lastEntryNo;
+      return [];
+    }
+  };
+
+  const result = await new ODataSyncProcessor(repository, client).run({
+    mode: "backfill",
+    sourceSystem: "business-central",
+    backfill: {
+      from: "2026-01-01",
+      dateField: "Posting_Date"
+    }
+  });
+
+  assert.equal(result.status, "SUCCESS");
+  assert.equal(receivedBackfillFrom, "2026-01-01");
+  assert.equal(receivedLastEntryNo, null);
+});

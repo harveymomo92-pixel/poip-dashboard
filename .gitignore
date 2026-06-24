@@ -10,6 +10,7 @@ coverage/
 *.tsbuildinfo
 .dev-logs/
 uploads/
+backups/
 .env
 
 # Local work logs

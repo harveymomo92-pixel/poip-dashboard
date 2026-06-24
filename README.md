@@ -70,6 +70,21 @@ pnpm --filter @poip/worker dev
 
 Local development defaults to `ODATA_SYNC_MODE=mock`, so the worker will not call Business Central unless the OData URL/endpoint/token are configured and mock mode is disabled.
 
+For live Business Central OData through Tailscale/LAN, configure `BC_ODATA_URL`, `BC_ODATA_AUTH_MODE`, and matching auth variables in `.env`, then run:
+
+```bash
+pnpm odata:check
+```
+
+For a controlled historical backfill after a DB backup:
+
+```bash
+BACKFILL_FROM=2026-01-01 pnpm odata:backfill:check
+BACKFILL_FROM=2026-01-01 pnpm odata:backfill
+```
+
+See [Operations guide](docs/OPERATIONS.md) for the full live-sync and backfill checklist.
+
 ## Production and UAT docs
 
 - [Environment variables](docs/ENVIRONMENT.md)

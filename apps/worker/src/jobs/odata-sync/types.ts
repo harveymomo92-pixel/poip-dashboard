@@ -4,8 +4,17 @@ import type {
   ODataOutputRawRow
 } from "@poip/domain";
 
-export type ODataSyncMode = "incremental" | "resync-range";
+export type ODataSyncMode = "incremental" | "resync-range" | "backfill";
 export type SyncRunStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
+
+export interface ODataBackfillOptions {
+  readonly from: string;
+  readonly to?: string;
+  readonly dateField: string;
+  readonly pageSize?: string;
+  readonly maxPages?: number;
+  readonly forcePageSize?: boolean;
+}
 
 export interface ODataSyncJobPayload {
   readonly syncRunId?: string;
@@ -16,6 +25,7 @@ export interface ODataSyncJobPayload {
     readonly from: string;
     readonly to: string;
   };
+  readonly backfill?: ODataBackfillOptions;
 }
 
 export interface SyncCheckpointSnapshot {
@@ -44,6 +54,7 @@ export interface ODataFetchRequest {
     readonly from: string;
     readonly to: string;
   };
+  readonly backfill?: ODataBackfillOptions;
 }
 
 export interface ODataClient {

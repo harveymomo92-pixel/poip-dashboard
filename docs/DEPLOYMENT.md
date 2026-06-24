@@ -53,7 +53,7 @@ REDIS_URL=redis://redis:6379
 4. Set `WEB_ORIGIN` to the public web origin.
 5. Set `NEXT_PUBLIC_API_BASE_URL` to the public API base URL before building the web app.
 6. Keep `ODATA_SYNC_CONCURRENCY=1` until live sync behavior is verified.
-7. Use `ODATA_SYNC_MODE=mock` for dry-run environments; switch to live only with a verified Business Central endpoint/token.
+7. Use `ODATA_SYNC_MODE=mock` for dry-run environments; switch to live only after `pnpm odata:check` verifies the Business Central endpoint/auth over Tailscale/LAN.
 
 ## Database bootstrap
 
@@ -95,6 +95,14 @@ pnpm smoke:test
 ```
 
 The smoke test verifies API health, anonymous auth rejection, web login availability, protected overview redirect, optional admin login, deep readiness, and protected dashboard API access.
+
+For live Business Central OData verification before enabling sync:
+
+```bash
+pnpm odata:check
+```
+
+The command reads `BC_ODATA_URL`, `BC_ODATA_AUTH_MODE`, and the matching auth variables from the environment or `.env`. It requests one row with `$top=1` and does not print credentials.
 
 ## High-level rollback
 

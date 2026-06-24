@@ -15,7 +15,10 @@ function getRedisUrl(): string {
 }
 
 function cleanSourceUrl(): string | null {
-  const value = process.env.ODATA_SYNC_MODE === "mock" ? "mock://business-central/production-output" : process.env.BC_ODATA_BASE_URL;
+  const value =
+    process.env.ODATA_SYNC_MODE === "mock"
+      ? "mock://business-central/production-output"
+      : process.env.BC_ODATA_URL ?? process.env.BC_ODATA_BASE_URL;
   if (!value) return null;
   try {
     const url = new URL(value);

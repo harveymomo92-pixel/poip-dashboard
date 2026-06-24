@@ -38,4 +38,14 @@ test("nextSyncCheckpoint does not move on failed or range runs", () => {
     }),
     current
   );
+  assert.deepEqual(
+    nextSyncCheckpoint({
+      mode: "backfill",
+      status: "SUCCESS",
+      current,
+      maxCommittedEntryNo: 1010n,
+      maxCommittedPostingDate: "2026-06-22"
+    }),
+    current
+  );
 });

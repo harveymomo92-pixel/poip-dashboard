@@ -15,10 +15,14 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "smoke:test": "bash scripts/smoke-test.sh",
+    "odata:check": "bash scripts/check-odata.sh",
+    "odata:backfill": "bash scripts/backfill-odata.sh",
+    "odata:backfill:check": "bash scripts/backfill-odata.sh --check",
     "db:migrate": "pnpm --filter @poip/db migrate",
     "db:seed": "pnpm --filter @poip/db seed",
     "db:create-admin": "pnpm --filter @poip/db create-admin",
-    "check:deps": "node scripts/check-no-latest.mjs"
+    "check:deps": "node scripts/check-no-latest.mjs",
+    "dev:live": "bash scripts/dev-live.sh"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.1",

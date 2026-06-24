@@ -4,7 +4,7 @@ export interface SyncCheckpointState {
 }
 
 export interface CheckpointUpdateInput {
-  readonly mode: "incremental" | "resync-range";
+  readonly mode: "incremental" | "resync-range" | "backfill";
   readonly status: "SUCCESS" | "FAILED";
   readonly current: SyncCheckpointState;
   readonly maxCommittedEntryNo: bigint | null;
