@@ -4219,3 +4219,358 @@ Decision:
 
 Notes:
 ```
+
+<!-- P0_BC_LIVE_DATA_GATE_START -->
+
+## Priority Override: P0 Business Central Live Data Ingestion Production Gate
+
+### Why This Milestone Exists
+
+The platform exists to turn Business Central production output data into operational intelligence for PPIC. Without reliable live data ingestion from Business Central, the dashboard, KPI cards, audit trail, data quality cockpit, sync center, target comparison, and operational health indicators do not deliver their core value.
+
+This milestone is therefore a production gate. No further UI polish, secondary features, or enterprise enhancements should be considered complete until the Business Central ingestion pipeline is proven reliable end-to-end.
+
+### Problem Statement
+
+The project has progressed through dashboard, target, downtime, parser, import, audit, health, and production hardening milestones. However, the core dependency of the system is live Business Central OData data. If Business Central data is missing, stale, partial, duplicated, or silently replaced by mock data, then the platform becomes misleading.
+
+The product must guarantee that live Business Central Item Ledger PPIC data can be fetched, paginated, mapped, validated, persisted, re-run safely, and surfaced in dashboards with clear freshness and failure visibility.
+
+### Business Goal
+
+Ensure PPIC users can rely on the platform as a live operational reporting system backed by Business Central data, not as a mock or demo dashboard.
+
+### Product Goal
+
+Make Business Central live ingestion the first-class backbone of the system by implementing and validating:
+
+1. Live OData connectivity through Tailscale/LAN.
+2. Basic Auth or configured Business Central authentication.
+3. Full pagination beyond the first 1000 rows.
+4. Backfill from January 2026 until current date.
+5. Idempotent upsert into PostgreSQL.
+6. Incremental sync after backfill.
+7. Clear sync run status and failure messages.
+8. Dashboard data sourced from `production_outputs`.
+9. Health/readiness status based on live sync freshness.
+10. Operator documentation for checking, rerunning, and troubleshooting sync.
+
+### Non-Goals
+
+This milestone does not include:
+
+1. New dashboard visual design.
+2. New UI theme changes.
+3. Additional analytics not backed by Business Central data.
+4. New unrelated import/parser features.
+5. Large refactors outside the OData sync, persistence, health, and dashboard freshness path.
+6. Storing secrets in code, docs, commits, or logs.
+
+### Current Known Context
+
+The system already has:
+
+1. Live OData endpoint configuration through environment variables.
+2. `ODATA_SYNC_MODE=live` support.
+3. OData check command.
+4. PostgreSQL tables for `production_outputs`, `sync_runs`, and `sync_checkpoints`.
+5. A unique constraint for source-system and entry-number based output idempotency.
+6. Dashboard queries reading from `production_outputs`.
+
+However, these must be validated as a complete production-grade flow rather than assumed from isolated checks.
+
+### Required Environment Variables
+
+The live ingestion path must support the following environment variables:
+
+```env
+ODATA_SYNC_MODE=live
+BC_ODATA_URL="<full Business Central ODataV4 entity URL>"
+BC_ODATA_AUTH_MODE="basic"
+BC_ODATA_USERNAME="<business-central-user>"
+BC_ODATA_PASSWORD="<business-central-password-or-web-service-key>"
+BC_ODATA_PAGE_SIZE=1000
+ODATA_SYNC_CONCURRENCY=1
+```
+
+Backfill-specific variables:
+
+```env
+BACKFILL_FROM=2026-01-01
+BACKFILL_TO=
+BACKFILL_DATE_FIELD=Posting_Date
+BACKFILL_PAGE_SIZE=1000
+BACKFILL_MAX_PAGES=
+```
+
+Security requirements:
+
+1. `.env` must remain ignored.
+2. Real credentials must never be committed.
+3. Real credentials must never be printed in logs.
+4. Real endpoint credentials must not appear in `.env.example`, docs, tests, or commit history.
+5. Any failed error message must sanitize URLs, passwords, tokens, cookies, and authorization headers.
+
+### Functional Requirements
+
+#### FR-BC-001 — Live Connectivity Check
+
+The system must provide a safe command:
+
+```bash
+pnpm odata:check
+```
+
+The command must:
+
+1. Load local `.env` if present.
+2. Validate required OData environment variables.
+3. Call the configured Business Central OData endpoint using `$top=1`.
+4. Support Basic Auth and Bearer Auth if configured.
+5. Return HTTP status and JSON validity.
+6. Confirm at least whether `value` is an array.
+7. Never print credentials.
+
+Acceptance criteria:
+
+1. `pnpm odata:check` returns HTTP 200 for valid live configuration.
+2. Authentication failures return a clear sanitized 401/403 message.
+3. Network failures return a clear timeout/connectivity message.
+4. The command is safe to run during UAT.
+
+#### FR-BC-002 — Live Sync Mode Must Not Fall Back Silently to Mock
+
+When `ODATA_SYNC_MODE=live`, the worker must use the configured Business Central OData endpoint.
+
+Acceptance criteria:
+
+1. Live mode never uses `mock://business-central/production-output`.
+2. If live mode lacks required env vars, sync fails loudly.
+3. Production/UAT health must warn when the system is in mock mode.
+4. Dashboard must clearly show empty/stale state if no live data exists.
+
+#### FR-BC-003 — Full Pagination Beyond 1000 Rows
+
+The worker must support Business Central OData pagination.
+
+Acceptance criteria:
+
+1. The worker follows `@odata.nextLink` until no more pages remain.
+2. The worker does not stop after the first 1000 rows.
+3. Page count, rows fetched, and duration are recorded.
+4. Pagination can be bounded by `BACKFILL_MAX_PAGES` for safe testing.
+5. Pagination errors mark the sync run as failed with sanitized details.
+
+#### FR-BC-004 — January 2026 Backfill
+
+The platform must provide a safe backfill command:
+
+```bash
+BACKFILL_FROM=2026-01-01 pnpm odata:backfill
+```
+
+The command must:
+
+1. Use the configured OData endpoint.
+2. Apply a safe OData date filter using `BACKFILL_DATE_FIELD`.
+3. Preserve existing `$select`, `$orderby`, `$filter`, and query params.
+4. Support optional `BACKFILL_TO`.
+5. Support monthly backfill windows if needed.
+6. Use pagination.
+7. Write a sync run record.
+8. Return rows fetched, inserted, updated, skipped, failed, and duration.
+
+Acceptance criteria:
+
+1. January-to-current backfill completes successfully.
+2. The sync run status becomes `SUCCESS`.
+3. Rows fetched is greater than zero.
+4. Rows inserted/updated are visible.
+5. Re-running the same backfill does not duplicate data.
+6. Dashboard freshness changes after backfill.
+
+#### FR-BC-005 — Idempotent Persistence
+
+The worker must upsert Business Central output rows using a stable natural key.
+
+Minimum natural key:
+
+```text
+sourceSystem + entryNo
+```
+
+Acceptance criteria:
+
+1. Re-running the same OData page does not create duplicate `production_outputs`.
+2. Changed rows update existing records.
+3. Unchanged rows are counted as skipped or no-op.
+4. `rowHash` is used to detect unchanged records if available.
+5. Inserted, updated, and skipped counts are recorded separately if possible.
+
+#### FR-BC-006 — Mapping Validation
+
+The OData mapper must convert Business Central rows into the internal `production_outputs` schema.
+
+Acceptance criteria:
+
+1. Entry number maps to `entryNo`.
+2. Posting date maps to `postingDate`.
+3. Item number maps to `itemNo`.
+4. Quantity maps to `quantity`.
+5. Output type is normalized into `normalizedOutputType`.
+6. Machine/work center/entity mapping is handled consistently.
+7. Raw OData payload is retained in `rawPayload`.
+8. Invalid rows are not silently discarded; they are logged as data quality issues or staging failures.
+
+#### FR-BC-007 — Sync Run Observability
+
+Every live sync and backfill must create a sync run record.
+
+Acceptance criteria:
+
+1. `sync_runs` records status, source system, started time, finished time, rows fetched, rows inserted, and error message.
+2. Failed syncs are visible in API and UI.
+3. Latest successful sync is queryable by the dashboard and health modules.
+4. Error messages are sanitized.
+5. Sync run history is available for operators.
+
+#### FR-BC-008 — Dashboard Must Use Live Data
+
+The dashboard must use `production_outputs` generated from Business Central sync.
+
+Acceptance criteria:
+
+1. Dashboard KPI output values change after live backfill.
+2. Output list shows rows from live BC sync.
+3. Dashboard does not silently show mock data in live mode.
+4. Empty state explains if no live BC data has been synced.
+5. Freshness indicator shows latest successful sync timestamp.
+
+#### FR-BC-009 — Health and Readiness Must Reflect BC Sync
+
+System health must treat Business Central sync as a critical dependency in live mode.
+
+Acceptance criteria:
+
+1. Readiness is `HEALTHY` only when latest live sync succeeded within an acceptable freshness window.
+2. Readiness becomes `WARNING` or `UNHEALTHY` when BC sync fails or becomes stale.
+3. Health output includes sanitized last error.
+4. Mock mode in UAT/production is flagged.
+5. Redis queue failures do not produce misleading warnings if matching DB sync run is already successful.
+
+#### FR-BC-010 — Operator Backfill and Recovery Documentation
+
+The project must document operational steps for:
+
+1. Live OData check.
+2. Backfill from January.
+3. Monthly backfill.
+4. Worker restart after `.env` changes.
+5. Sync run verification.
+6. Dashboard freshness verification.
+7. Redis queue stale job handling.
+8. Troubleshooting 200/401/403/404/timeout.
+9. Restoring normal incremental sync after backfill.
+10. Keeping secrets out of commits and logs.
+
+### Recommended Commands
+
+Connectivity check:
+
+```bash
+pnpm odata:check
+```
+
+Backfill check:
+
+```bash
+BACKFILL_FROM=2026-01-01 BACKFILL_DATE_FIELD=Posting_Date pnpm odata:backfill:check
+```
+
+January-to-current backfill:
+
+```bash
+BACKFILL_FROM=2026-01-01 BACKFILL_DATE_FIELD=Posting_Date pnpm odata:backfill
+```
+
+Single-month backfill example:
+
+```bash
+BACKFILL_FROM=2026-01-01 BACKFILL_TO=2026-02-01 BACKFILL_DATE_FIELD=Posting_Date pnpm odata:backfill
+```
+
+Normal worker start:
+
+```bash
+ODATA_SYNC_MODE=live pnpm --filter @poip/worker dev
+```
+
+Final smoke test:
+
+```bash
+API_BASE_URL="http://localhost:4000/api/v1" WEB_BASE_URL="http://localhost:3000" ADMIN_EMAIL="admin@example.local" ADMIN_PASSWORD="change-this" pnpm smoke:test
+```
+
+### Data Validation Queries
+
+Operators should be able to validate live sync using PostgreSQL queries such as:
+
+```sql
+select status, rows_fetched, rows_inserted, started_at, finished_at, error_message
+from sync_runs
+order by created_at desc
+limit 10;
+```
+
+```sql
+select count(*) as total_outputs, min(posting_date) as first_posting_date, max(posting_date) as last_posting_date
+from production_outputs
+where source_system = 'BUSINESS_CENTRAL';
+```
+
+```sql
+select posting_date, count(*) as rows
+from production_outputs
+where source_system = 'BUSINESS_CENTRAL'
+group by posting_date
+order by posting_date desc
+limit 30;
+```
+
+### Definition of Done
+
+This milestone is complete only when:
+
+1. `pnpm odata:check` returns HTTP 200.
+2. `ODATA_SYNC_MODE=live` is set locally for UAT.
+3. Worker live sync does not use mock data.
+4. January 2026 backfill succeeds.
+5. Pagination fetches beyond the first 1000 rows when more data exists.
+6. Re-running backfill does not duplicate rows.
+7. Latest `sync_runs` record is `SUCCESS`.
+8. `production_outputs` contains live Business Central rows.
+9. Dashboard values reflect live Business Central data.
+10. Data quality issues are generated for invalid BC rows.
+11. Health/readiness reflects live sync freshness.
+12. All credentials remain outside git.
+13. Validation passes:
+    - `pnpm lint`
+    - `pnpm typecheck`
+    - `pnpm test`
+    - `pnpm build`
+    - `pnpm smoke:test`
+14. Documentation explains live sync, backfill, verification, and troubleshooting.
+
+### Priority Rule
+
+Until this milestone is complete, the following work must be paused or treated as lower priority:
+
+1. New dashboard visual polish.
+2. New non-critical UI pages.
+3. Additional analytics not backed by live BC data.
+4. Enterprise enhancements unrelated to ingestion reliability.
+5. Cosmetic refactors.
+
+Business Central live ingestion is the backbone of the product. The product is not production-ready until this gate passes.
+
+<!-- P0_BC_LIVE_DATA_GATE_END -->
