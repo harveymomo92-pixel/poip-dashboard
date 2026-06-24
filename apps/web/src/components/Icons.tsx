@@ -75,5 +75,44 @@ export const Icons = {
   ),
   upload: (props: IconProps) => (
     <Icon {...props}><path d="M12 21V9" /><path d="m7 14 5-5 5 5" /><path d="M4 5h16" /></Icon>
+  ),
+  bell: (props: IconProps) => (
+    <Icon {...props}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></Icon>
+  ),
+  output: (props: IconProps) => (
+    <Icon {...props}><path d="M4 19V9l8-5 8 5v10Z" /><path d="M8 19v-5h8v5M9 10h.01M12 10h.01M15 10h.01" /></Icon>
+  ),
+  achievement: (props: IconProps) => (
+    <Icon {...props}><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /><path d="m4 7 6-4 6 6 5-5" /></Icon>
+  ),
+  reject: (props: IconProps) => (
+    <Icon {...props}><path d="M4 4h16v16H4z" /><path d="m8 8 8 8M16 8l-8 8" /></Icon>
+  ),
+  scale: (props: IconProps) => (
+    <Icon {...props}><path d="M12 3v18M5 7h14M5 7l-3 6h6L5 7ZM19 7l-3 6h6l-3-6Z" /></Icon>
+  ),
+  percent: (props: IconProps) => (
+    <Icon {...props}><path d="m19 5-14 14" /><circle cx="7" cy="7" r="2" /><circle cx="17" cy="17" r="2" /></Icon>
+  ),
+  database: (props: IconProps) => (
+    <Icon {...props}><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></Icon>
+  ),
+  quality: (props: IconProps) => (
+    <Icon {...props}><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7Z" /><path d="m9 12 2 2 4-4" /></Icon>
+  ),
+  arrowRight: (props: IconProps) => (
+    <Icon {...props}><path d="M5 12h14M13 6l6 6-6 6" /></Icon>
+  ),
+  copy: (props: IconProps) => (
+    <Icon {...props}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></Icon>
+  ),
+  calendar: (props: IconProps) => (
+    <Icon {...props}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></Icon>
+  ),
+  filter: (props: IconProps) => (
+    <Icon {...props}><path d="M4 5h16M7 12h10M10 19h4" /></Icon>
+  ),
+  more: (props: IconProps) => (
+    <Icon {...props}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></Icon>
   )
 };

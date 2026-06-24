@@ -56,13 +56,14 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }
 
   const activeItem = navigation.flatMap((group) => group.items).find((item) => pathname.startsWith(item.href));
+  const activeGroup = navigation.find((group) => group.items.some((item) => pathname.startsWith(item.href)));
 
   return (
     <div className={`app-shell${collapsed ? " sidebar-collapsed" : ""}${drawerOpen ? " drawer-open" : ""}`}>
       <aside className="sidebar" aria-label="Navigasi utama">
         <div className="brand">
           <span className="brand-mark">P</span>
-          <div className="brand-copy"><strong>POIP</strong><small>Output Intelligence</small></div>
+          <div className="brand-copy"><strong>POIP</strong><small>Operations cockpit</small></div>
           <button aria-label="Tutup menu" className="icon-button mobile-only" onClick={() => setDrawerOpen(false)}><Icons.close /></button>
         </div>
         <nav>
@@ -77,17 +78,24 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
             </div>
           ))}
         </nav>
-        <button className="sidebar-toggle secondary-button" onClick={toggleCollapsed} title={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}>
+        <div className="sidebar-footer">
+          <div className="workspace-state"><span /><div><strong>Production</strong><small>Asia/Jakarta</small></div></div>
+        <button aria-pressed={collapsed} className="sidebar-toggle secondary-button" onClick={toggleCollapsed} title={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}>
           {collapsed ? <Icons.expand /> : <Icons.collapse />}<span>{collapsed ? "Perluas" : "Ciutkan menu"}</span>
         </button>
+        </div>
       </aside>
       <div className="sidebar-scrim" onClick={() => setDrawerOpen(false)} />
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-context">
             <button aria-label="Buka menu" className="icon-button mobile-only" onClick={() => setDrawerOpen(true)}><Icons.menu /></button>
-            <span>Operations</span><Icons.chevron /><strong>{activeItem?.label ?? "Workspace"}</strong>
+            <span>POIP</span><Icons.chevron /><span>{activeGroup?.group ?? "Workspace"}</span><Icons.chevron /><strong>{activeItem?.label ?? "Workspace"}</strong>
           </div>
+          <div className="topbar-actions">
+          <Tooltip label="Notifikasi belum dikonfigurasi">
+            <span className="notification-control" aria-label="Notifikasi belum dikonfigurasi"><Icons.bell /></span>
+          </Tooltip>
           <DropdownMenu className="user-menu" trigger={
             <>
               <span className="user-avatar">{currentUser?.name?.slice(0, 1).toUpperCase() ?? "U"}</span>
@@ -100,6 +108,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
               <button className="menu-action" onClick={logout}><Icons.logout /> Keluar</button>
             </div>
           </DropdownMenu>
+          </div>
         </header>
         <main className="content">{children}</main>
       </div>

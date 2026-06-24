@@ -3,16 +3,16 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icons } from "./Icons";
 
-export function PageHeader({ eyebrow, title, description, meta, actions }: Readonly<{ eyebrow: string; title: string; description: string; meta?: ReactNode; actions?: ReactNode }>) {
-  return <header className="page-header"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="page-description">{description}</p>{meta ? <div className="page-meta">{meta}</div> : null}</div>{actions ? <div className="page-actions">{actions}</div> : null}</header>;
+export function PageHeader({ eyebrow, title, description, meta, actions, className = "" }: Readonly<{ eyebrow: string; title: string; description: string; meta?: ReactNode; actions?: ReactNode; className?: string }>) {
+  return <header className={`page-header ${className}`}><div className="page-heading"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="page-description">{description}</p>{meta ? <div className="page-meta">{meta}</div> : null}</div>{actions ? <div className="page-actions">{actions}</div> : null}</header>;
 }
 
-export function PageToolbar({ children, actions }: Readonly<{ children: ReactNode; actions?: ReactNode }>) {
-  return <section className="page-toolbar"><div className="toolbar-fields">{children}</div>{actions ? <div className="toolbar-actions">{actions}</div> : null}</section>;
+export function PageToolbar({ children, actions, className = "" }: Readonly<{ children: ReactNode; actions?: ReactNode; className?: string }>) {
+  return <section className={`page-toolbar ${className}`}><div className="toolbar-fields">{children}</div>{actions ? <div className="toolbar-actions">{actions}</div> : null}</section>;
 }
 
-export function FilterBar({ children, actions }: Readonly<{ children: ReactNode; actions?: ReactNode }>) {
-  return <PageToolbar actions={actions}>{children}</PageToolbar>;
+export function FilterBar({ children, actions, compact = false }: Readonly<{ children: ReactNode; actions?: ReactNode; compact?: boolean }>) {
+  return <PageToolbar className={compact ? "page-toolbar-compact" : ""} actions={actions}>{children}</PageToolbar>;
 }
 
 export function Field({ label, helper, required, error, children }: Readonly<{ label: string; helper?: string; required?: boolean; error?: string; children: ReactNode }>) {
@@ -20,17 +20,21 @@ export function Field({ label, helper, required, error, children }: Readonly<{ l
 }
 
 export function MetricCard({ label, value, detail, tone = "neutral", icon }: Readonly<{ label: string; value: string; detail?: ReactNode; tone?: string; icon?: ReactNode }>) {
-  return <article className={`metric-card metric-${tone}`}><div className="metric-label"><span>{label}</span>{icon}</div><strong>{value}</strong>{detail ? <div className="metric-detail">{detail}</div> : null}</article>;
+  return <article className={`metric-card metric-${tone}`}><div className="metric-card-top">{icon ? <span className="metric-icon">{icon}</span> : null}<span className="metric-label">{label}</span></div><strong>{value}</strong>{detail ? <div className="metric-detail">{detail}</div> : null}</article>;
 }
 
-export function InsightCard({ title, value, description, tone = "neutral", children }: Readonly<{ title: string; value?: string; description: string; tone?: string; children?: ReactNode }>) {
-  return <article className={`insight-card insight-${tone}`}><div><p className="eyebrow">{title}</p>{value ? <strong className="insight-value">{value}</strong> : null}<p>{description}</p></div>{children}</article>;
+export function InsightCard({ title, value, description, tone = "neutral", icon, rows, action, children }: Readonly<{ title: string; value?: string; description: string; tone?: string; icon?: ReactNode; rows?: readonly { readonly label: string; readonly value: ReactNode; readonly tone?: string }[]; action?: ReactNode; children?: ReactNode }>) {
+  return <article className={`insight-card insight-${tone}`}><div className="insight-card-header"><span className="insight-icon">{icon ?? <Icons.alert />}</span><div><p className="eyebrow">{title}</p>{value ? <strong className="insight-value">{value}</strong> : null}</div>{children}</div><p className="insight-description">{description}</p>{rows ? <div className="insight-rows">{rows.map((row) => <div className="insight-row" key={row.label}><span><i className={`insight-dot insight-dot-${row.tone ?? "neutral"}`} />{row.label}</span><strong>{row.value}</strong></div>)}</div> : null}{action ? <div className="insight-action">{action}</div> : null}</article>;
+}
+
+export function ChartCard({ title, description, legend, action, children, className = "" }: Readonly<{ title: string; description?: string; legend?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }>) {
+  return <section className={`chart-card ${className}`}><div className="chart-card-header"><div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>{action}</div>{legend ? <div className="chart-legend">{legend}</div> : null}<div className="chart-card-body">{children}</div></section>;
 }
 
 const statusTone: Record<string, string> = {
-  HEALTHY: "success", FRESH: "success", SUCCESS: "success", VALID: "success", ACTIVE: "success", APPROVED: "success", CLOSED: "neutral", COMMITTED: "success",
-  WARNING: "warning", STALE: "warning", MEDIUM: "warning", SUBMITTED: "warning", DRAFT: "neutral", OPEN: "warning", PARTIAL: "warning",
-  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", INACTIVE: "neutral", SUPERSEDED: "neutral", LOW: "info"
+  HEALTHY: "success", FRESH: "success", SUCCESS: "success", VALID: "success", ACTIVE: "success", APPROVED: "success", ON_TARGET: "success", CLOSED: "neutral", COMMITTED: "success",
+  WARNING: "warning", STALE: "warning", MEDIUM: "warning", SUBMITTED: "warning", DRAFT: "neutral", OPEN: "warning", PARTIAL: "warning", BELOW_TARGET: "warning",
+  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", NEVER_SYNCED: "danger", INACTIVE: "neutral", SUPERSEDED: "neutral", LOW: "info", ABOVE_TARGET: "info"
 };
 
 export function StatusBadge({ status, label }: Readonly<{ status: string; label?: string }>) {
