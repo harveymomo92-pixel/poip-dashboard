@@ -89,7 +89,17 @@ For fragile live OData links, use a small page size with chunked commits:
 BACKFILL_FROM=2026-01-01 BACKFILL_PAGE_SIZE=1 BACKFILL_CHUNK_PAGES=10 BACKFILL_CHUNK_RETRIES=2 pnpm odata:backfill
 ```
 
-See [Operations guide](docs/OPERATIONS.md) for the full live-sync and backfill checklist.
+After live rows are in PostgreSQL, verify the calculation gate with read-only diagnostics:
+
+```bash
+pnpm bc:profile
+RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
+pnpm bc:target-coverage
+```
+
+Dashboard calculations use canonical `source_system = 'business-central'`. Missing approved targets produce `N/A` achievement rather than a misleading zero target, and unmapped machines/entities remain visible until master entities/aliases are loaded.
+
+See [Operations guide](docs/OPERATIONS.md) for the full live-sync, backfill, and reconciliation checklist.
 
 ## Production and UAT docs
 

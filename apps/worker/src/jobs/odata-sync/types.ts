@@ -26,6 +26,14 @@ export interface ODataFetchStats {
   readonly truncatedByMaxPages: boolean;
 }
 
+export interface ODataLatestEntryRequest {
+  readonly sourceSystem: string;
+  readonly range?: {
+    readonly from: string;
+    readonly to: string;
+  };
+}
+
 export interface ODataSyncJobPayload {
   readonly syncRunId?: string;
   readonly mode: ODataSyncMode;
@@ -69,6 +77,7 @@ export interface ODataFetchRequest {
 
 export interface ODataClient {
   fetchProductionOutputs(request: ODataFetchRequest): Promise<readonly ODataOutputRawRow[]>;
+  fetchLatestEntryNo?(request: ODataLatestEntryRequest): Promise<bigint | null>;
   sourceUrl(): string | null;
   lastFetchStats?(): ODataFetchStats;
 }
@@ -98,6 +107,7 @@ export interface SyncCommitResult {
 
 export interface SyncRunRepository {
   prepareRun(payload: ODataSyncJobPayload, sourceUrl: string | null): Promise<PreparedSyncRun>;
+  getLatestLocalEntryNo(sourceSystem: string): Promise<bigint | null>;
   commitSuccessfulRun(input: SyncCommitInput): Promise<SyncCommitResult>;
   markRunFailed(input: {
     readonly runId: string;

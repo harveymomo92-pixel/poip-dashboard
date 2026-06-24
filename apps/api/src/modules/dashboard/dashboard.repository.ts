@@ -136,7 +136,7 @@ function computeTargetCoverage(
     prorataTarget,
     missingTargetEntityDays,
     activeEntityDays: activeDays.length,
-    hasTarget: activeDays.length > 0 && missingTargetEntityDays < activeDays.length,
+    hasTarget: activeDays.length > 0 && missingTargetEntityDays === 0,
     minAchievementPct:
       minValues.length > 0 ? minValues.reduce((total, value) => total + value, 0) / minValues.length : undefined,
     maxAchievementPct:
@@ -150,8 +150,10 @@ function serializeKpis(kpis: DashboardKpiSummary) {
     prorataTarget: kpis.prorataTarget,
     achievementPct: kpis.achievementPct,
     targetStatus: kpis.targetStatus,
+    targetStatusReason: kpis.targetStatusReason,
     rejectKg: kpis.rejectKg,
     rejectPcsEquivalent: kpis.rejectPcsEquivalent,
+    rejectConversionStatus: kpis.rejectConversionStatus,
     rejectRatePct: kpis.rejectRatePct,
     activeDays: kpis.activeDays,
     incompleteRejectConversionCount: kpis.incompleteRejectConversionCount
@@ -552,7 +554,7 @@ export class DashboardReadRepository {
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
           count(*) filter (where po.reject_kg > 0 and po.reject_pcs_eq is null) as incomplete_reject_conversion_count,
-          count(distinct po.posting_date) as active_days,
+          count(distinct po.posting_date) filter (where po.normalized_output_type = 'OK' and po.quantity > 0) as active_days,
           count(*) as row_count
         from production_outputs po
         where ${where.where}
@@ -576,7 +578,10 @@ export class DashboardReadRepository {
       `
         select po.entity_id, po.posting_date::text
         from production_outputs po
-        where ${where.where} and po.entity_id is not null
+        where ${where.where}
+          and po.entity_id is not null
+          and po.normalized_output_type = 'OK'
+          and po.quantity > 0
         group by po.entity_id, po.posting_date
       `,
       where.params

@@ -4525,13 +4525,13 @@ limit 10;
 ```sql
 select count(*) as total_outputs, min(posting_date) as first_posting_date, max(posting_date) as last_posting_date
 from production_outputs
-where source_system = 'BUSINESS_CENTRAL';
+where source_system = 'business-central';
 ```
 
 ```sql
 select posting_date, count(*) as rows
 from production_outputs
-where source_system = 'BUSINESS_CENTRAL'
+where source_system = 'business-central'
 group by posting_date
 order by posting_date desc
 limit 30;

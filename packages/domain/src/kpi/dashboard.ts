@@ -21,6 +21,9 @@ export interface DashboardKpiInput {
   readonly maxAchievementPct?: number;
 }
 
+export type TargetStatusReason = "NO_OUTPUT" | "TARGET_MISSING" | "TARGET_ZERO" | null;
+export type RejectConversionStatus = "COMPLETE" | "INCOMPLETE";
+
 export interface DashboardKpiSummary {
   readonly outputOkQty: number;
   readonly rejectKg: number;
@@ -29,14 +32,25 @@ export interface DashboardKpiSummary {
   readonly prorataTarget: number;
   readonly achievementPct: number | null;
   readonly targetStatus: TargetStatus;
+  readonly targetStatusReason: TargetStatusReason;
+  readonly rejectConversionStatus: RejectConversionStatus;
   readonly dataFreshnessStatus: DataFreshnessStatus;
   readonly freshnessMinutes: number | null;
   readonly activeDays: number;
   readonly incompleteRejectConversionCount: number;
 }
 
+function targetStatusReason(input: DashboardKpiInput): TargetStatusReason {
+  if (input.outputOkQty <= 0) return "NO_OUTPUT";
+  if (!input.hasTarget) return "TARGET_MISSING";
+  if (input.prorataTarget <= 0) return "TARGET_ZERO";
+  return null;
+}
+
 export function buildDashboardKpiSummary(input: DashboardKpiInput): DashboardKpiSummary {
-  const achievementPct = calculateAchievementPct(input.outputOkQty, input.prorataTarget);
+  const achievementPct = input.hasTarget
+    ? calculateAchievementPct(input.outputOkQty, input.prorataTarget)
+    : null;
   const latestSync = input.latestSuccessfulSyncFinishedAt;
   return {
     outputOkQty: input.outputOkQty,
@@ -56,6 +70,8 @@ export function buildDashboardKpiSummary(input: DashboardKpiInput): DashboardKpi
         ? { maxAchievementPct: input.maxAchievementPct }
         : {})
     }),
+    targetStatusReason: targetStatusReason(input),
+    rejectConversionStatus: input.incompleteRejectConversionCount > 0 ? "INCOMPLETE" : "COMPLETE",
     dataFreshnessStatus: calculateDataFreshnessStatus({
       latestSuccessfulSyncFinishedAt: latestSync,
       now: input.now

@@ -18,11 +18,13 @@ test("buildDashboardKpiSummary calculates achievement and reject rate", () => {
   assert.equal(summary.achievementPct, 90);
   assert.equal(summary.rejectRatePct, 10);
   assert.equal(summary.targetStatus, "UNDER_TARGET");
+  assert.equal(summary.targetStatusReason, null);
+  assert.equal(summary.rejectConversionStatus, "INCOMPLETE");
   assert.equal(summary.dataFreshnessStatus, "FRESH");
   assert.equal(summary.freshnessMinutes, 60);
 });
 
-test("buildDashboardKpiSummary reports no target and never synced states", () => {
+test("buildDashboardKpiSummary reports no output and never synced states", () => {
   const summary = buildDashboardKpiSummary({
     outputOkQty: 0,
     rejectKg: 0,
@@ -38,5 +40,25 @@ test("buildDashboardKpiSummary reports no target and never synced states", () =>
   assert.equal(summary.achievementPct, null);
   assert.equal(summary.rejectRatePct, null);
   assert.equal(summary.targetStatus, "NO_TARGET");
+  assert.equal(summary.targetStatusReason, "NO_OUTPUT");
+  assert.equal(summary.rejectConversionStatus, "COMPLETE");
   assert.equal(summary.dataFreshnessStatus, "NEVER_SYNCED");
+});
+
+test("buildDashboardKpiSummary reports missing target as N/A even when a partial target value exists", () => {
+  const summary = buildDashboardKpiSummary({
+    outputOkQty: 100,
+    rejectKg: 0,
+    rejectPcsEquivalent: 0,
+    prorataTarget: 50,
+    hasTarget: false,
+    activeDays: 1,
+    incompleteRejectConversionCount: 0,
+    latestSuccessfulSyncFinishedAt: new Date("2026-06-22T07:00:00.000Z"),
+    now: new Date("2026-06-22T08:00:00.000Z")
+  });
+
+  assert.equal(summary.achievementPct, null);
+  assert.equal(summary.targetStatus, "NO_TARGET");
+  assert.equal(summary.targetStatusReason, "TARGET_MISSING");
 });

@@ -97,8 +97,10 @@ export interface DashboardSummaryDto {
     readonly prorataTarget: number;
     readonly achievementPct: number | null;
     readonly targetStatus: string;
+    readonly targetStatusReason: string | null;
     readonly rejectKg: number;
     readonly rejectPcsEquivalent: number;
+    readonly rejectConversionStatus: string;
     readonly rejectRatePct: number | null;
     readonly activeDays: number;
     readonly incompleteRejectConversionCount: number;

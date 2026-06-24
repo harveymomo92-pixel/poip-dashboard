@@ -18,6 +18,43 @@ interface EntityLookup {
   readonly targetKeys: ReadonlySet<string>;
 }
 
+function normalizedLookupKey(value: string | null | undefined): string | null {
+  const compact = value?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  if (!compact) return null;
+  return compact;
+}
+
+function legacyMachineFamilyKey(value: string | null | undefined): string | null {
+  const compact = normalizedLookupKey(value);
+  if (!compact) return null;
+  if (compact.startsWith("LONGSUNG")) return "LONGSUN";
+  if (compact.startsWith("BORCH")) return "BORCHE";
+  if (compact.startsWith("HENGFENG") || /^HF\d*/.test(compact)) return "HENGFENG";
+  if (compact.startsWith("TF") || compact.startsWith("ILLIG")) return "ILLIG";
+  if (compact.startsWith("VFINE") || compact.startsWith("VF")) return "VFINE";
+  if (compact.startsWith("CHUMPOWER") || /^CP\d*/.test(compact)) return "CHUMPOWER";
+  if (compact.startsWith("POLY")) return "POLYPRINT";
+  if (compact.startsWith("NEWDO")) return "NEWDO";
+  if (compact.startsWith("OMSO")) return "OMSO";
+  return compact;
+}
+
+function addEntityLookupKey(map: Map<string, string>, key: string | null | undefined, entityId: string): void {
+  const exact = key?.trim().toUpperCase();
+  if (exact && !map.has(exact)) map.set(exact, entityId);
+  const normalized = normalizedLookupKey(key);
+  if (normalized && !map.has(normalized)) map.set(normalized, entityId);
+}
+
+function addLegacyMachineFamilyLookupKey(
+  map: Map<string, string>,
+  key: string | null | undefined,
+  entityId: string
+): void {
+  const family = legacyMachineFamilyKey(key);
+  if (family && !map.has(family)) map.set(family, entityId);
+}
+
 function checkpointToJson(checkpoint: SyncCheckpointSnapshot) {
   return {
     lastEntryNo: checkpoint.lastEntryNo?.toString() ?? null,
@@ -90,6 +127,14 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
 
   async close() {
     await this.database.pool.end();
+  }
+
+  async getLatestLocalEntryNo(sourceSystem: string): Promise<bigint | null> {
+    const [row] = await this.database.db
+      .select({ latestEntryNo: sql<bigint | null>`max(${productionOutputs.entryNo})` })
+      .from(productionOutputs)
+      .where(eq(productionOutputs.sourceSystem, sourceSystem));
+    return row?.latestEntryNo ?? null;
   }
 
   async prepareRun(payload: ODataSyncJobPayload, sourceUrl: string | null): Promise<PreparedSyncRun> {
@@ -406,7 +451,13 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
 
   private async loadEntityLookup(tx: Parameters<Parameters<typeof this.database.db.transaction>[0]>[0]): Promise<EntityLookup> {
     const entities = await tx
-      .select({ id: masterEntities.id, code: masterEntities.entityCode })
+      .select({
+        id: masterEntities.id,
+        code: masterEntities.entityCode,
+        displayName: masterEntities.displayName,
+        lineCode: masterEntities.lineCode,
+        reportGroup: masterEntities.reportGroup
+      })
       .from(masterEntities)
       .where(eq(masterEntities.isActive, true));
     const aliases = await tx
@@ -422,9 +473,24 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       .from(productionTargets)
       .where(or(eq(productionTargets.status, "APPROVED"), eq(productionTargets.status, "ACTIVE")));
 
+    const entityByCode = new Map<string, string>();
+    const entityByAlias = new Map<string, string>();
+    for (const entity of entities) {
+      addEntityLookupKey(entityByCode, entity.code, entity.id);
+      addEntityLookupKey(entityByAlias, entity.displayName, entity.id);
+      addEntityLookupKey(entityByAlias, entity.lineCode, entity.id);
+      addEntityLookupKey(entityByAlias, entity.reportGroup, entity.id);
+      addLegacyMachineFamilyLookupKey(entityByAlias, entity.code, entity.id);
+      addLegacyMachineFamilyLookupKey(entityByAlias, entity.displayName, entity.id);
+    }
+    for (const alias of aliases) {
+      addEntityLookupKey(entityByAlias, alias.alias, alias.entityId);
+      addLegacyMachineFamilyLookupKey(entityByAlias, alias.alias, alias.entityId);
+    }
+
     return {
-      entityByCode: new Map(entities.map((entity) => [entity.code.toUpperCase(), entity.id])),
-      entityByAlias: new Map(aliases.map((alias) => [alias.alias.toUpperCase(), alias.entityId])),
+      entityByCode,
+      entityByAlias,
       targetKeys: new Set(
         targets.map((target) => `${target.entityId}|${target.effectiveFrom}|${target.effectiveTo ?? ""}`)
       )
@@ -434,7 +500,17 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
   private resolveEntityId(row: StagedOutputRow, context: EntityLookup): string | null {
     const machine = row.normalized.machineCenterNo;
     if (!machine) return null;
-    return context.entityByCode.get(machine) ?? context.entityByAlias.get(machine) ?? null;
+    const exact = machine.trim().toUpperCase();
+    const normalized = normalizedLookupKey(machine);
+    const family = legacyMachineFamilyKey(machine);
+    return (
+      context.entityByCode.get(exact) ??
+      (normalized ? context.entityByCode.get(normalized) : null) ??
+      context.entityByAlias.get(exact) ??
+      (normalized ? context.entityByAlias.get(normalized) : null) ??
+      (family ? context.entityByAlias.get(family) : null) ??
+      null
+    );
   }
 
   private hasTarget(entityId: string, postingDate: string, context: EntityLookup): boolean {

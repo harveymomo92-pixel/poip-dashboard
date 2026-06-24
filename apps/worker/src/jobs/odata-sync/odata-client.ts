@@ -53,6 +53,13 @@ function validateDateField(value: string): string {
   return value;
 }
 
+function validateODataFieldName(value: string, name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`${name} must be a simple OData field name`);
+  }
+  return value;
+}
+
 function validateEntryNo(value: bigint): bigint {
   if (value < 0n) throw new Error("BACKFILL_AFTER_ENTRY_NO must be a positive integer");
   return value;
@@ -160,7 +167,9 @@ export function buildODataRequestUrl(
   if (!url.searchParams.has("$orderby")) {
     url.searchParams.set("$orderby", "Entry_No asc");
   }
-  const effectivePageSize = request.backfill?.pageSize ?? pageSize;
+  const effectivePageSize =
+    request.backfill?.pageSize ??
+    (request.mode === "incremental" ? (process.env.BC_ODATA_INCREMENTAL_PAGE_SIZE ?? pageSize) : pageSize);
   if (!url.searchParams.has("$top") || request.backfill?.forcePageSize) {
     url.searchParams.set("$top", effectivePageSize);
   }
@@ -181,6 +190,43 @@ export function buildODataRequestUrl(
     const existingFilter = url.searchParams.get("$filter");
     url.searchParams.set("$filter", existingFilter === combinedFilter ? existingFilter : combinedFilter);
   }
+  return url;
+}
+
+function appendSelectField(url: URL, fieldName: string): void {
+  const currentSelect = url.searchParams.get("$select");
+  if (!currentSelect || currentSelect.includes("*")) {
+    url.searchParams.set("$select", fieldName);
+    return;
+  }
+  const fields = currentSelect.split(",").map((field) => field.trim()).filter(Boolean);
+  if (!fields.some((field) => field.toLowerCase() === fieldName.toLowerCase())) {
+    url.searchParams.set("$select", [...fields, fieldName].join(","));
+  }
+}
+
+export function buildLatestEntryNoRequestUrl(
+  endpointUrl: string,
+  request: {
+    readonly sourceSystem: string;
+    readonly range?: { readonly from: string; readonly to: string };
+  },
+  entryNoField = process.env.BC_ODATA_INCREMENTAL_FIELD ?? "Entry_No"
+): URL {
+  const fieldName = validateODataFieldName(entryNoField, "BC_ODATA_INCREMENTAL_FIELD");
+  const url = buildODataRequestUrl(
+    endpointUrl,
+    {
+      mode: "resync-range",
+      sourceSystem: request.sourceSystem,
+      lastEntryNo: null,
+      ...(request.range ? { range: request.range } : {})
+    },
+    "1"
+  );
+  url.searchParams.set("$orderby", `${fieldName} desc`);
+  url.searchParams.set("$top", "1");
+  appendSelectField(url, fieldName);
   return url;
 }
 
@@ -220,6 +266,16 @@ function readEntryNo(row: unknown): bigint | null {
   if (!row || typeof row !== "object") return null;
   const record = row as Record<string, unknown>;
   const rawValue = record.Entry_No ?? record.EntryNo ?? record.entryNo;
+  if (typeof rawValue === "bigint") return rawValue;
+  if (typeof rawValue === "number" && Number.isSafeInteger(rawValue)) return BigInt(rawValue);
+  if (typeof rawValue === "string" && /^-?\d+$/.test(rawValue.trim())) return BigInt(rawValue.trim());
+  return null;
+}
+
+function readBigintField(row: unknown, fieldName: string): bigint | null {
+  if (!row || typeof row !== "object") return null;
+  const record = row as Record<string, unknown>;
+  const rawValue = record[fieldName] ?? record.Entry_No ?? record.EntryNo ?? record.entryNo;
   if (typeof rawValue === "bigint") return rawValue;
   if (typeof rawValue === "number" && Number.isSafeInteger(rawValue)) return BigInt(rawValue);
   if (typeof rawValue === "string" && /^-?\d+$/.test(rawValue.trim())) return BigInt(rawValue.trim());
@@ -277,6 +333,10 @@ export class MockBusinessCentralODataClient implements ODataClient {
   sourceUrl() {
     return "mock://business-central/production-output";
   }
+
+  fetchLatestEntryNo() {
+    return Promise.resolve(1002n);
+  }
 }
 
 export class BusinessCentralODataClient implements ODataClient {
@@ -288,15 +348,68 @@ export class BusinessCentralODataClient implements ODataClient {
     private readonly fetchImplementation: FetchImplementation = fetch
   ) {}
 
+  private async fetchJson(url: URL) {
+    const authorization = createODataAuthorizationHeader(this.auth);
+    const timeoutMs = parsePositiveInteger(
+      process.env.BC_ODATA_REQUEST_TIMEOUT_MS ?? process.env.BC_ODATA_TIMEOUT_MS ?? "30000",
+      "BC_ODATA_REQUEST_TIMEOUT_MS"
+    );
+    const retryAttempts =
+      parsePositiveInteger(process.env.BC_ODATA_RETRY_ATTEMPTS ?? "2", "BC_ODATA_RETRY_ATTEMPTS") ?? 2;
+    const retryDelayMs =
+      parsePositiveInteger(process.env.BC_ODATA_RETRY_DELAY_MS ?? "250", "BC_ODATA_RETRY_DELAY_MS") ?? 250;
+
+    for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
+      try {
+        const response = await this.fetchImplementation(url, {
+          headers: {
+            Accept: "application/json",
+            ...(authorization ? { Authorization: authorization } : {})
+          },
+          signal: AbortSignal.timeout(timeoutMs ?? 30_000)
+        });
+        if (!response.ok) {
+          throw new Error(`OData request failed with status ${response.status}`);
+        }
+        try {
+          return (await response.json()) as {
+            value?: unknown;
+            "@odata.nextLink"?: unknown;
+            "odata.nextLink"?: unknown;
+          };
+        } catch {
+          throw new Error(
+            `OData response is not valid JSON (content-type: ${safeHeaderValue(response.headers.get("content-type"))})`
+          );
+        }
+      } catch (error) {
+        const safeError =
+          error instanceof Error && error.message.startsWith("OData ")
+            ? error
+            : new Error("OData request failed before receiving a response");
+        if (attempt >= retryAttempts) throw safeError;
+        await sleep(retryDelayMs * attempt);
+      }
+    }
+    return {};
+  }
+
+  async fetchLatestEntryNo(request: { readonly sourceSystem: string; readonly range?: { readonly from: string; readonly to: string } }) {
+    const fieldName = validateODataFieldName(
+      process.env.BC_ODATA_INCREMENTAL_FIELD ?? "Entry_No",
+      "BC_ODATA_INCREMENTAL_FIELD"
+    );
+    const url = buildLatestEntryNoRequestUrl(this.endpointUrl, request, fieldName);
+    const payload = await this.fetchJson(url);
+    if (!Array.isArray(payload.value) || !payload.value[0]) return null;
+    return readBigintField(payload.value[0], fieldName);
+  }
+
   async fetchProductionOutputs(request: ODataFetchRequest) {
     let url = buildODataRequestUrl(this.endpointUrl, request);
     this.fetchStats = { ...emptyFetchStats };
-    const authorization = createODataAuthorizationHeader(this.auth);
     const maxPages =
       request.backfill?.maxPages ?? parsePositiveInteger(process.env.BC_ODATA_MAX_PAGES, "BC_ODATA_MAX_PAGES");
-    const timeoutMs = parsePositiveInteger(process.env.BC_ODATA_TIMEOUT_MS ?? "30000", "BC_ODATA_TIMEOUT_MS");
-    const retryAttempts =
-      parsePositiveInteger(process.env.BC_ODATA_RETRY_ATTEMPTS ?? "2", "BC_ODATA_RETRY_ATTEMPTS") ?? 2;
     const rows: Record<string, unknown>[] = [];
     let pagesAttempted = 0;
     let pagesFetched = 0;
@@ -323,39 +436,7 @@ export class BusinessCentralODataClient implements ODataClient {
       pagesAttempted += 1;
       updateStats();
       let payload: { value?: unknown; "@odata.nextLink"?: unknown; "odata.nextLink"?: unknown };
-      for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
-        try {
-          const response = await this.fetchImplementation(url, {
-            headers: {
-              Accept: "application/json",
-              ...(authorization ? { Authorization: authorization } : {})
-            },
-            signal: AbortSignal.timeout(timeoutMs ?? 30_000)
-          });
-          if (!response.ok) {
-            throw new Error(`OData request failed with status ${response.status}`);
-          }
-          try {
-            payload = (await response.json()) as {
-              value?: unknown;
-              "@odata.nextLink"?: unknown;
-              "odata.nextLink"?: unknown;
-            };
-            break;
-          } catch {
-            throw new Error(
-              `OData response is not valid JSON (content-type: ${safeHeaderValue(response.headers.get("content-type"))})`
-            );
-          }
-        } catch (error) {
-          const safeError =
-            error instanceof Error && error.message.startsWith("OData ")
-              ? error
-              : new Error("OData request failed before receiving a response");
-          if (attempt >= retryAttempts) throw safeError;
-          await sleep(250 * attempt);
-        }
-      }
+      payload = await this.fetchJson(url);
       payload ??= {};
       if (!Array.isArray(payload.value)) {
         throw new Error("OData response missing value array");

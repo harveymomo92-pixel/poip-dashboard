@@ -78,6 +78,15 @@ Troubleshooting live OData:
 - `404`: URL, company name, published web service name, or route is wrong. Confirm exact ODataV4 entity URL.
 - Timeout/no response: Tailscale route, LAN firewall, host/port, or Business Central service availability problem.
 
+Normal live sync strategy:
+
+- Canonical live source-system value is `business-central`.
+- The worker probes the latest remote `Entry_No` first.
+- If remote latest `Entry_No` is newer than local `production_outputs.entry_no`, it fetches only `Entry_No gt <local latest>`.
+- If remote latest is not newer, it does not pull full history again. It either skips fetching when `BC_ODATA_BACKFILL_SCAN_DAYS=0`, or scans the recent `BC_ODATA_BACKFILL_SCAN_DAYS` posting-date window for late-arriving/corrected rows.
+- Re-running sync/backfill is idempotent through the natural key `source_system + entry_no` and row-hash no-op detection.
+- `sync_runs.metadata.syncStrategy` records remote/latest entry numbers, selected mode, and the scan window when used.
+
 ### One-time live OData backfill
 
 Use the backfill command for controlled historical imports. It reuses the same normalization, staging, data quality, and idempotent upsert logic as the live worker sync. It does not print the Business Central URL, password, bearer token, cookies, or session tokens.
@@ -141,6 +150,25 @@ Restore normal live sync by leaving `ODATA_SYNC_MODE=live`, removing temporary `
 ```bash
 pnpm --filter @poip/worker dev
 ```
+
+### Business Central calculation diagnostics
+
+Use these read-only commands after live data lands, before trusting dashboard numbers in UAT:
+
+```bash
+pnpm bc:profile
+pnpm bc:reconcile
+RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
+pnpm bc:target-coverage
+```
+
+`pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
+
+`pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when gross-weight conversion is missing, and whether OK output exists without mapped entities.
+
+`pnpm bc:target-coverage` groups positive OK output by month and entity/machine, then labels rows as `COVERED`, `TARGET_MISSING`, or `UNMAPPED_ENTITY`. Load/approve master entities and targets before expecting achievement to become numeric.
+
+The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: OK Output uses positive `normalized_output_type = 'OK'` rows from `source_system = 'business-central'`; targets must be approved/active and effective for the entity/date; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps.
 
 ## Data quality operations
 

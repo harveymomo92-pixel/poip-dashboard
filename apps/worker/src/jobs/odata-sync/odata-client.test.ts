@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildBackfillFilter,
+  buildLatestEntryNoRequestUrl,
   buildODataRequestUrl,
   BusinessCentralODataClient,
   createODataAuthorizationHeader,
@@ -211,6 +212,51 @@ test("buildODataRequestUrl combines an existing filter with a backfill filter", 
     url.searchParams.get("$filter"),
     "(Entry_Type eq 'Output') and (Posting_Date ge 2026-01-01 and Posting_Date lt 2026-02-01)"
   );
+});
+
+test("buildLatestEntryNoRequestUrl preserves query options and probes latest Entry_No", () => {
+  const url = buildLatestEntryNoRequestUrl(
+    "http://tailscale-host:7048/ODataV4/Company('A')/Output?$filter=Entry_Type%20eq%20'Output'&$select=Posting_Date,Item_No&custom=a%2Fb",
+    {
+      sourceSystem: "business-central",
+      range: { from: "2026-06-01", to: "2026-06-24" }
+    }
+  );
+
+  assert.equal(url.searchParams.get("custom"), "a/b");
+  assert.equal(url.searchParams.get("$orderby"), "Entry_No desc");
+  assert.equal(url.searchParams.get("$top"), "1");
+  assert.equal(url.searchParams.get("$select"), "Posting_Date,Item_No,Entry_No");
+  assert.equal(
+    url.searchParams.get("$filter"),
+    "(Entry_Type eq 'Output') and (Posting_Date ge 2026-06-01 and Posting_Date le 2026-06-24)"
+  );
+});
+
+test("BusinessCentralODataClient fetchLatestEntryNo uses the configured field and sanitized headers", async () => {
+  let requestUrl: URL | null = null;
+  let requestHeaders: Headers | null = null;
+  const client = new BusinessCentralODataClient(
+    "https://businesscentral.example.test/odata/output?$select=Posting_Date",
+    { mode: "basic", username: "unit-user", password: "unit-password" },
+    async (input, init) => {
+      requestUrl = new URL(input instanceof Request ? input.url : input.toString());
+      requestHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ value: [{ Entry_No: "98765" }] }), { status: 200 });
+    }
+  );
+
+  const latest = await client.fetchLatestEntryNo({ sourceSystem: "business-central" });
+
+  assert.equal(latest, 98765n);
+  assert.ok(requestUrl);
+  assert.ok(requestHeaders);
+  const capturedUrl = requestUrl as URL;
+  const capturedHeaders = requestHeaders as Headers;
+  assert.equal(capturedUrl.searchParams.get("$orderby"), "Entry_No desc");
+  assert.equal(capturedUrl.searchParams.get("$top"), "1");
+  assert.equal(capturedHeaders.get("accept"), "application/json");
+  assert.match(capturedHeaders.get("authorization") ?? "", /^Basic /);
 });
 
 test("BusinessCentralODataClient follows OData nextLink pagination", async () => {

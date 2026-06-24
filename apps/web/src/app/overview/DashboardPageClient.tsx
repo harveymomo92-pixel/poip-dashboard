@@ -29,8 +29,10 @@ interface DashboardSummary {
     readonly prorataTarget: number;
     readonly achievementPct: number | null;
     readonly targetStatus: string;
+    readonly targetStatusReason: string | null;
     readonly rejectKg: number;
     readonly rejectPcsEquivalent: number;
+    readonly rejectConversionStatus: string;
     readonly rejectRatePct: number | null;
     readonly incompleteRejectConversionCount: number;
   };
@@ -250,7 +252,7 @@ export function DashboardPageClient() {
   const targetTone =
     summary?.kpis.targetStatus === "NO_TARGET"
       ? "danger"
-      : summary?.kpis.targetStatus === "BELOW_TARGET"
+      : summary?.kpis.targetStatus === "UNDER_TARGET"
         ? "warning"
         : summary?.kpis.targetStatus === "ABOVE_TARGET"
           ? "info"
@@ -294,8 +296,8 @@ export function DashboardPageClient() {
         {summary ? (
           <section className="metric-grid" aria-label="KPI operasional">
             <MetricCard icon={<Icons.output />} label="OK Output" value={formatNumber(summary.kpis.outputOkQty, 1)} detail="Good output in selected period" tone="success" />
-            <MetricCard icon={<Icons.target />} label="Target" value={formatNumber(summary.kpis.prorataTarget, 1)} detail={summary.kpis.targetStatus === "NO_TARGET" ? <StatusBadge status="NO_TARGET" label="Target missing" /> : "Prorated production target"} tone={targetTone} />
-            <MetricCard icon={<Icons.achievement />} label="Achievement" value={formatPct(summary.kpis.achievementPct)} detail={<StatusBadge status={summary.kpis.targetStatus} />} tone={targetTone} />
+            <MetricCard icon={<Icons.target />} label="Target" value={formatNumber(summary.kpis.prorataTarget, 1)} detail={summary.kpis.targetStatusReason ? <StatusBadge status={summary.kpis.targetStatusReason} label={summary.kpis.targetStatusReason === "TARGET_ZERO" ? "Target is zero" : summary.kpis.targetStatusReason === "TARGET_MISSING" ? "Target missing" : "No output"} /> : "Prorated production target"} tone={targetTone} />
+            <MetricCard icon={<Icons.achievement />} label="Achievement" value={formatPct(summary.kpis.achievementPct)} detail={summary.kpis.targetStatusReason ? <StatusBadge status={summary.kpis.targetStatusReason} /> : <StatusBadge status={summary.kpis.targetStatus} />} tone={targetTone} />
             <MetricCard icon={<Icons.scale />} label="Reject KG" value={formatNumber(summary.kpis.rejectKg, 2)} detail="Recorded reject weight" tone={summary.kpis.rejectKg > 0 ? "warning" : "neutral"} />
             <MetricCard icon={<Icons.reject />} label="Reject PCS Eq" value={formatNumber(summary.kpis.rejectPcsEquivalent, 1)} detail={summary.kpis.incompleteRejectConversionCount ? `${summary.kpis.incompleteRejectConversionCount} conversion gaps` : "Conversion complete"} tone={summary.kpis.incompleteRejectConversionCount ? "warning" : "neutral"} />
             <MetricCard icon={<Icons.percent />} label="Reject Rate" value={formatPct(summary.kpis.rejectRatePct)} detail="Reject against total production" tone="info" />

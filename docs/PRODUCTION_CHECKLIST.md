@@ -12,6 +12,7 @@ Use this before first v2 production cutover.
 - [ ] `NEXT_PUBLIC_API_BASE_URL` is the public API base URL.
 - [ ] Business Central OData URL/endpoint/token are configured.
 - [ ] `BC_ODATA_AUTH_MODE` matches the credential type (`basic`, `bearer`, or `none`).
+- [ ] Normal sync strategy is set: `BC_ODATA_INCREMENTAL_FIELD=Entry_No`, conservative `BC_ODATA_INCREMENTAL_PAGE_SIZE`, and approved `BC_ODATA_BACKFILL_SCAN_DAYS`.
 - [ ] `pnpm odata:check` passes from the same host/network where the worker runs.
 - [ ] `ODATA_SYNC_MODE` is intentionally set (`mock` for dry run, live value for production).
 - [ ] `BC_ODATA_PAGE_SIZE` and `ODATA_SYNC_CONCURRENCY` are conservative and documented.
@@ -46,6 +47,11 @@ Use this before first v2 production cutover.
 - [ ] Admin login verified.
 - [ ] RBAC spot checks completed for Admin, Manager, PPIC, QC, and Viewer.
 - [ ] Dashboard loads.
+- [ ] `pnpm bc:profile` explains live BC row counts, date range, source-system mix, unmapped machines, and conversion gaps.
+- [ ] `pnpm bc:reconcile` matches dashboard OK output against raw SQL for the UAT window.
+- [ ] `pnpm bc:target-coverage` shows expected `COVERED`, `TARGET_MISSING`, and `UNMAPPED_ENTITY` groups.
+- [ ] Missing approved targets show `N/A` achievement, not a misleading zero target.
+- [ ] Latest dashboard freshness is based on latest successful `business-central` sync.
 - [ ] Manual/mock sync verified before live sync.
 - [ ] Target workflow verified.
 - [ ] Downtime workflow verified.

@@ -29,7 +29,12 @@ Use `.env.example` for local development and `.env.production.example` as a prod
 | `BC_ODATA_BEARER_TOKEN` | Yes for `bearer` | Existing bearer/token auth remains supported. Store in deployment secrets, not Git. |
 | `BC_ODATA_PAGE_SIZE` | No | Defaults to `1000`; reduce if Business Central throttles. |
 | `BC_ODATA_TIMEOUT_MS` | No | Defaults to `30000`; applies to each OData HTTP request/page. |
+| `BC_ODATA_INCREMENTAL_FIELD` | No | Defaults to `Entry_No`; field used to probe the latest remote BC entry and build incremental filters. |
+| `BC_ODATA_INCREMENTAL_PAGE_SIZE` | No | Defaults to `1000`; `$top` used for normal incremental sync pages. |
+| `BC_ODATA_BACKFILL_SCAN_DAYS` | No | Defaults to `14`; when remote latest `Entry_No` is unchanged, normal sync scans this recent posting-date window for late-arriving rows instead of pulling full history. Set `0` to skip the scan. |
+| `BC_ODATA_REQUEST_TIMEOUT_MS` | No | Defaults to `30000` when unset; preferred per-request timeout for live OData. Production template uses `120000`. |
 | `BC_ODATA_RETRY_ATTEMPTS` | No | Defaults to `2`; retries transient page fetch or invalid JSON responses without printing response bodies. |
+| `BC_ODATA_RETRY_DELAY_MS` | No | Defaults to `250`; base retry delay for live OData requests. Production template uses `1000`. |
 | `ODATA_SYNC_CONCURRENCY` | No | Defaults to `1`; keep `1` for v2 unless operations has tested higher concurrency. |
 | `BACKFILL_FROM` | Backfill only | Inclusive start date for one-time OData backfill, `YYYY-MM-DD`. Example: `2026-01-01`. |
 | `BACKFILL_TO` | Backfill only, optional | Exclusive end date for one-time OData backfill, `YYYY-MM-DD`. Leave unset to backfill through current endpoint data. |
@@ -42,6 +47,10 @@ Use `.env.example` for local development and `.env.production.example` as a prod
 | `BACKFILL_CHUNK_PAGES` | Backfill only, optional | Commits the backfill in idempotent chunks of this many pages, advancing by `Entry_No`. Useful for fragile live OData links. |
 | `BACKFILL_MAX_CHUNKS` | Backfill only, optional | Safety cap for chunked backfill runs. Omit to continue until the range is complete or an upstream error occurs. |
 | `BACKFILL_CHUNK_RETRIES` | Backfill only, optional | Retries a failed chunk before aborting. Defaults to `2`; each failed attempt is recorded as a failed sync run with sanitized error text. |
+| `RECONCILE_FROM` | Diagnostics only, optional | Inclusive dashboard reconciliation start date. Defaults to the last 7-day Jakarta business window. |
+| `RECONCILE_TO` | Diagnostics only, optional | Inclusive dashboard reconciliation end date. Defaults to today in Jakarta. |
+| `RECONCILE_ENTITY_ID` | Diagnostics only, optional | Limits `pnpm bc:reconcile` to a master entity UUID. |
+| `RECONCILE_ITEM_NO` | Diagnostics only, optional | Limits `pnpm bc:reconcile` to one item number. |
 
 `BC_ODATA_TENANT`, `BC_ODATA_CLIENT_ID`, and `BC_ODATA_CLIENT_SECRET` are reserved placeholders in the environment template. The current v2 worker uses `BC_ODATA_URL` + Basic Auth or the existing bearer-token mode.
 
@@ -57,6 +66,8 @@ BC_ODATA_PASSWORD=replace-with-odata-password
 
 Restart the worker after changing any `BC_ODATA_*` value. The worker reads these values at startup.
 
+Normal live sync uses the v1-style `Entry_No` strategy: first probe the latest remote `Entry_No`, compare it with the latest local `production_outputs.entry_no` for `source_system = 'business-central'`, fetch only `Entry_No gt <local latest>` when new rows exist, and otherwise run the configured recent backfill scan window for late-arriving rows. It must not silently fall back to mock mode when `ODATA_SYNC_MODE=live`.
+
 Backfill variables can be supplied inline per run instead of being stored permanently in `.env`:
 
 ```bash
@@ -64,6 +75,15 @@ BACKFILL_FROM=2026-01-01 pnpm odata:backfill
 BACKFILL_FROM=2026-01-01 BACKFILL_TO=2026-02-01 pnpm odata:backfill
 BACKFILL_FROM=2026-01-01 BACKFILL_CHECK_TOP=25 BACKFILL_CHECK_MAX_PAGES=2 pnpm odata:backfill:check
 BACKFILL_FROM=2026-01-01 BACKFILL_PAGE_SIZE=1 BACKFILL_CHUNK_PAGES=10 BACKFILL_CHUNK_RETRIES=2 pnpm odata:backfill
+```
+
+Read-only Business Central diagnostics:
+
+```bash
+pnpm bc:profile
+pnpm bc:reconcile
+RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
+pnpm bc:target-coverage
 ```
 
 ## Bootstrap admin variables
