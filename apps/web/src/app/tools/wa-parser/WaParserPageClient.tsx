@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ForbiddenState, PermissionGate } from "../../../components/PermissionGate";
+import { ConfirmDialog, DataTable, EmptyState, ErrorState, Field, LoadingSkeleton, MetricCard, PageHeader, SectionHeader, SourceBadge, StatusBadge, WorkflowSteps } from "../../../components/ui";
+import { useToast } from "../../../components/Toast";
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../../lib/api";
 
 interface ParserRow {
@@ -44,6 +46,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function WaParserPageClient() {
+  const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [sourceText, setSourceText] = useState(sampleText);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -53,6 +56,7 @@ export function WaParserPageClient() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmCommit, setConfirmCommit] = useState(false);
   const canCommit = currentUser?.permissions.includes("parser.commit") ?? false;
   const rows = useMemo(() => preview?.run.rows ?? [], [preview]);
 
@@ -104,6 +108,7 @@ export function WaParserPageClient() {
       setPreview(payload.data);
       setSelectedRowIds(new Set(payload.data.run.rows?.filter((row) => row.status === "VALID").map((row) => row.id)));
       setMessage(`Preview created: ${payload.data.summary.validRows} valid rows`);
+      toast(`Parser selesai: ${payload.data.summary.validRows} baris valid dan ${payload.data.summary.warningRows} baris dengan peringatan.`);
       await loadRuns();
     } finally {
       setLoading(false);
@@ -160,6 +165,8 @@ export function WaParserPageClient() {
       setMessage(
         `Committed ${payload.data.committedRows} rows (${payload.data.productionRowsCommitted} output, ${payload.data.downtimeRowsCommitted} downtime)`
       );
+      setConfirmCommit(false);
+      toast(`Commit selesai: ${payload.data.productionRowsCommitted} output dan ${payload.data.downtimeRowsCommitted} downtime dibuat.`);
       await loadRun(preview.run.id);
       await loadRuns();
     } finally {
@@ -176,104 +183,72 @@ export function WaParserPageClient() {
     });
   }
 
-  if (!loaded) return <section className="panel">Loading parser...</section>;
+  if (!loaded) return <div className="page"><LoadingSkeleton rows={6} /></div>;
 
   return (
     <PermissionGate user={currentUser} permission="parser.preview" fallback={<ForbiddenState />}>
-      <section className="panel parser-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Tools</p>
-            <h1>WA Parser</h1>
-          </div>
-          <button type="button" onClick={runPreview} disabled={loading || !sourceText.trim()}>
-            {loading ? "Working..." : "Preview"}
-          </button>
-        </div>
-
-        <textarea
-          className="parser-textarea"
-          value={sourceText}
-          onChange={(event) => setSourceText(event.target.value)}
-        />
-
-        {error ? <p className="form-error">{error}</p> : null}
+      <div className="page">
+        <PageHeader eyebrow="Tools" title="WhatsApp Parser" description="Ubah teks laporan shift menjadi preview terstruktur, tinjau peringatan, lalu commit hanya baris yang dipercaya." meta={<><SourceBadge>Rules parser</SourceBadge>{preview ? <><StatusBadge status={preview.run.status} /><span className="page-description">Versi {preview.run.parserVersion}</span></> : null}</>} />
+        <WorkflowSteps steps={["Paste text", "Parse preview", "Review issues", "Commit", "Result"]} current={!preview ? 0 : preview.run.committedAt ? 4 : 2} />
+        <section className="form-panel">
+          <SectionHeader title="Teks laporan WhatsApp" description="Satu laporan per baris. Preview tidak mengubah data produksi atau downtime." actions={<button type="button" onClick={runPreview} disabled={loading || !sourceText.trim()}>{loading ? "Memproses…" : "Parse preview"}</button>} />
+          <Field label="Teks sumber" helper="Pertahankan tanggal, shift, mesin, waktu, output/reject, dan keterangan downtime sedekat mungkin dengan pesan asli.">
+            <textarea className="parser-textarea" value={sourceText} onChange={(event) => setSourceText(event.target.value)} />
+          </Field>
+        </section>
+        {error ? <ErrorState message={`${error} Periksa format teks dan coba preview kembali.`} /> : null}
         {message ? <p className="form-success">{message}</p> : null}
 
         {preview ? (
           <>
-            <div className="facts sync-facts">
-              <div>
-                <dt>Total</dt>
-                <dd>{preview.summary.totalRows}</dd>
-              </div>
-              <div>
-                <dt>Valid</dt>
-                <dd>{preview.summary.validRows}</dd>
-              </div>
-              <div>
-                <dt>Invalid</dt>
-                <dd>{preview.summary.invalidRows}</dd>
-              </div>
-              <div>
-                <dt>Warnings</dt>
-                <dd>{preview.summary.warningRows}</dd>
-              </div>
+            <div className="metric-grid">
+              <MetricCard label="Total rows" value={String(preview.summary.totalRows)} />
+              <MetricCard label="Valid" value={String(preview.summary.validRows)} tone="success" />
+              <MetricCard label="Invalid" value={String(preview.summary.invalidRows)} tone={preview.summary.invalidRows ? "danger" : "neutral"} />
+              <MetricCard label="Warnings" value={String(preview.summary.warningRows)} tone={preview.summary.warningRows ? "warning" : "neutral"} />
             </div>
-
-            <div className="panel-header parser-actions">
-              <h2>Preview Rows</h2>
-              <PermissionGate user={currentUser} permission="parser.commit" fallback={null}>
-                <button type="button" onClick={commitRows} disabled={!canCommit || loading || selectedCount === 0}>
-                  Commit {selectedCount}
-                </button>
-              </PermissionGate>
-            </div>
+            <section><SectionHeader title="Review hasil parse" description={`${selectedCount} baris valid dipilih. Confidence dan warning membantu peninjauan, tetapi tidak menggantikan verifikasi operator.`} actions={<PermissionGate user={currentUser} permission="parser.commit" fallback={null}><button type="button" onClick={() => setConfirmCommit(true)} disabled={!canCommit || loading || selectedCount === 0}>Commit {selectedCount} baris</button></PermissionGate>} />
 
             {rows.length === 0 ? (
-              <p>No parsed rows.</p>
+              <EmptyState title="Tidak ada baris terdeteksi" description="Periksa apakah setiap laporan berada pada baris terpisah dan memiliki informasi operasional yang cukup." />
             ) : (
-              <div className="table">
+              <DataTable headers={["Pilih", "Validasi", "Teks sumber", "Warnings"]}>
                 {rows.map((row) => (
-                  <div className="table-row parser-row" key={row.id}>
-                    <span>
+                  <tr key={row.id}>
+                    <td>
                       <input
+                        aria-label={`Pilih baris ${row.rowNumber}`}
+                        className="checkbox"
                         type="checkbox"
                         checked={selectedRowIds.has(row.id)}
                         disabled={row.status !== "VALID"}
                         onChange={() => toggleRow(row.id)}
-                      />
-                    </span>
-                    <span>
-                      <strong>{row.status}</strong>
-                      <small>{row.parsedPayload.type ?? "UNKNOWN"} · {row.confidence}%</small>
-                    </span>
-                    <span>{row.sourceLine}</span>
-                    <span>{row.warnings.map((warning) => warning.code ?? warning.message).join(", ") || "-"}</span>
-                  </div>
+                      /></td>
+                    <td><StatusBadge status={row.status} /><small>{row.parsedPayload.type ?? "UNKNOWN"} · confidence {row.confidence}%</small></td>
+                    <td>{row.sourceLine}</td>
+                    <td>{row.warnings.length ? row.warnings.map((warning, index) => <StatusBadge key={`${warning.code ?? index}`} status={warning.severity ?? "WARNING"} label={warning.code ?? warning.message ?? "Warning"} />) : "—"}</td>
+                  </tr>
                 ))}
-              </div>
+              </DataTable>
             )}
+            </section>
           </>
         ) : (
-          <p>Paste WhatsApp text and run preview.</p>
+          <EmptyState title="Siap mem-parsing laporan" description="Tempel teks WhatsApp di atas. Sistem akan membuat preview yang bisa diperiksa sebelum commit." />
         )}
 
-        <h2>Recent Runs</h2>
+        <section><SectionHeader title="Riwayat parser" description="Buka run sebelumnya untuk meninjau kembali hasil parse dan status commit." />
         {runs.length === 0 ? (
-          <p>No parser runs yet.</p>
+          <EmptyState title="Belum ada parser run" description="Riwayat preview parser akan muncul di sini." />
         ) : (
-          <div className="table">
+          <DataTable headers={["Status", "Dibuat", "Jumlah baris"]}>
             {runs.map((run) => (
-              <button type="button" className="run-row" key={run.id} onClick={() => void loadRun(run.id)}>
-                <span>{run.status}</span>
-                <span>{formatDateTime(run.createdAt)}</span>
-                <span>{String(run.metadata.totalRows ?? "-")} rows</span>
-              </button>
+              <tr key={run.id} onClick={() => void loadRun(run.id)} style={{ cursor: "pointer" }}><td><StatusBadge status={run.status} /></td><td>{formatDateTime(run.createdAt)}</td><td>{String(run.metadata.totalRows ?? "—")}</td></tr>
             ))}
-          </div>
-        )}
-      </section>
+          </DataTable>
+        )}</section>
+        <ConfirmDialog open={confirmCommit} title={`Commit ${selectedCount} baris hasil parser?`} description="Baris terpilih akan dibuat menjadi output produksi dan/atau downtime sesuai hasil parse. Pastikan teks sumber, tipe, confidence, dan warning sudah ditinjau." confirmLabel="Ya, commit hasil parse" busy={loading} onCancel={() => setConfirmCommit(false)} onConfirm={() => void commitRows()} />
+      </div>
     </PermissionGate>
   );
 }

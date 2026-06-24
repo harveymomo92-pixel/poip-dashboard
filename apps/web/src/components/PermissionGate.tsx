@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { CurrentUser } from "../lib/api";
+import { ErrorState } from "./ui";
 
 export function PermissionGate({
   user,
@@ -23,10 +24,8 @@ export function PermissionGate({
 
 export function ForbiddenState() {
   return (
-    <section className="panel">
-      <p className="eyebrow">Forbidden</p>
-      <h1>Akses ditolak</h1>
-      <p>Akun ini belum memiliki permission untuk membuka halaman tersebut.</p>
-    </section>
+    <div className="page">
+      <ErrorState message="Akun ini belum memiliki permission untuk membuka halaman tersebut. Hubungi administrator bila akses ini diperlukan untuk pekerjaan Anda." />
+    </div>
   );
 }

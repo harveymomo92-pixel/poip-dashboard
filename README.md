@@ -36,6 +36,8 @@ Web: http://localhost:3000
 API: http://localhost:4000/api/v1/health
 ```
 
+Implemented API endpoints are documented in `docs/API.md`.
+
 After `pnpm db:create-admin`, open `http://localhost:3000/login` and sign in with the
 admin credentials from `.env` or the command environment.
 

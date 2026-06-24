@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ForbiddenState, PermissionGate } from "../../../components/PermissionGate";
+import { DataTable, EmptyState, LoadingSkeleton, PageHeader, SectionHeader, StatusBadge } from "../../../components/ui";
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../../lib/api";
 
 interface UserRow {
@@ -39,24 +40,19 @@ export function UsersPageClient() {
     };
   }, []);
 
-  if (!loaded) return <section className="panel">Loading users...</section>;
+  if (!loaded) return <div className="page"><LoadingSkeleton rows={6} /></div>;
 
   return (
     <PermissionGate user={currentUser} permission="users.manage" fallback={<ForbiddenState />}>
-      <section className="panel">
-        <p className="eyebrow">Settings</p>
-        <h1>Users</h1>
-        <div className="table">
+      <div className="page">
+        <PageHeader eyebrow="Settings" title="Users & Access" description="Lihat akun, role, dan status akses. Permission tetap diterapkan oleh backend dan RBAC yang ada." meta={<StatusBadge status="ACTIVE" label={`${users.length} akun`} />} />
+        <section><SectionHeader title="Daftar user" description="Role menjelaskan cakupan kerja; status disabled mencegah sesi baru." />
+        {users.length === 0 ? <EmptyState title="Belum ada user" description="Tidak ada akun yang dapat ditampilkan untuk sesi ini." /> : <DataTable headers={["User", "Nama", "Role", "Status"]}>
           {users.map((user) => (
-            <div className="table-row" key={user.id}>
-              <span>{user.email}</span>
-              <span>{user.name}</span>
-              <span>{user.roles.join(", ")}</span>
-              <span>{user.isActive ? "Active" : "Disabled"}</span>
-            </div>
+            <tr key={user.id}><td><strong>{user.email}</strong></td><td>{user.name}</td><td>{user.roles.join(", ") || "—"}</td><td><StatusBadge status={user.isActive ? "ACTIVE" : "INACTIVE"} label={user.isActive ? "Active" : "Disabled"} /></td></tr>
           ))}
-        </div>
-      </section>
+        </DataTable>}</section>
+      </div>
     </PermissionGate>
   );
 }

@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../lib/api";
+import { useToast } from "../../components/Toast";
 
 export function LoginForm() {
   const router = useRouter();
+  const { toast } = useToast();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -32,6 +34,7 @@ export function LoginForm() {
         setError(payload.error.message);
         return;
       }
+      toast(`Selamat datang, ${payload.data.user.name}.`);
       router.push("/overview");
       router.refresh();
     } finally {
@@ -43,15 +46,15 @@ export function LoginForm() {
     <form className="auth-form" onSubmit={onSubmit}>
       <label>
         Email
-        <input name="email" type="email" autoComplete="email" required />
+        <input name="email" type="email" autoComplete="email" placeholder="nama@perusahaan.com" required />
       </label>
       <label>
-        Password
+        Kata sandi
         <input name="password" type="password" autoComplete="current-password" required />
       </label>
       {error ? <p className="form-error">{error}</p> : null}
       <button type="submit" disabled={loading}>
-        {loading ? "Signing in..." : "Sign in"}
+        {loading ? "Memverifikasi…" : "Masuk"}
       </button>
     </form>
   );

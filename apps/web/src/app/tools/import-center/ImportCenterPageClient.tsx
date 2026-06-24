@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ForbiddenState, PermissionGate } from "../../../components/PermissionGate";
+import { ConfirmDialog, DataTable, EmptyState, ErrorState, Field, LoadingSkeleton, MetricCard, PageHeader, SectionHeader, SourceBadge, StatusBadge, WorkflowSteps } from "../../../components/ui";
+import { useToast } from "../../../components/Toast";
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../../lib/api";
 
 interface ImportIssue {
@@ -57,6 +59,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function ImportCenterPageClient() {
+  const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -66,6 +69,7 @@ export function ImportCenterPageClient() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmCommit, setConfirmCommit] = useState(false);
   const canCommit = currentUser?.permissions.includes("import.commit") ?? false;
   const rows = useMemo(() => preview?.run.rows ?? [], [preview]);
 
@@ -120,6 +124,7 @@ export function ImportCenterPageClient() {
       setPreview(payload.data);
       setSelectedRowIds(new Set(payload.data.run.rows?.filter((row) => row.status === "VALID").map((row) => row.id)));
       setMessage(`Preview created: ${payload.data.summary.validRows} valid rows`);
+      toast(`Preview selesai: ${payload.data.summary.validRows} baris valid, ${payload.data.summary.invalidRows} baris perlu ditinjau.`);
       await loadRuns();
     } finally {
       setLoading(false);
@@ -172,6 +177,8 @@ export function ImportCenterPageClient() {
         return;
       }
       setMessage(`Committed ${payload.data.committedRows} rows, skipped ${payload.data.skippedRows}`);
+      setConfirmCommit(false);
+      toast(`Import selesai: ${payload.data.committedRows} baris dibuat, ${payload.data.skippedRows} dilewati.`);
       await loadRun(preview.run.id);
       await loadRuns();
     } finally {
@@ -199,131 +206,90 @@ export function ImportCenterPageClient() {
     });
   }
 
-  if (!loaded) return <section className="panel">Loading Import Center...</section>;
+  if (!loaded) return <div className="page"><LoadingSkeleton rows={6} /></div>;
 
   return (
     <PermissionGate user={currentUser} permission="import.preview" fallback={<ForbiddenState />}>
-      <section className="panel import-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Tools</p>
-            <h1>Import Center</h1>
-          </div>
-          <button type="button" onClick={runPreview} disabled={loading || !file}>
-            {loading ? "Working..." : "Preview"}
-          </button>
-        </div>
-
-        <div className="filters import-upload">
-          <label>
-            Import type
+      <div className="page">
+        <PageHeader eyebrow="Tools" title="Import Center" description="Validasi downtime CSV/XLSX sebelum data masuk ke operasi. Preview tidak mengubah data produksi." meta={<><SourceBadge>CSV / XLSX</SourceBadge>{preview ? <StatusBadge status={preview.run.status} /> : null}</>} />
+        <WorkflowSteps steps={["Upload", "Preview", "Review issues", "Commit", "Result"]} current={!preview ? 0 : preview.run.committedAt ? 4 : 2} />
+        <section className="form-panel">
+          <SectionHeader title="Upload file downtime" description="File diproses sebagai preview terlebih dahulu. Hanya baris valid yang dapat dipilih untuk commit." actions={<button type="button" onClick={runPreview} disabled={loading || !file}>{loading ? "Membuat preview…" : "Buat preview"}</button>} />
+          <div className="form-grid">
+          <Field label="Tipe import" helper="Milestone ini mendukung downtime CSV/XLSX.">
             <select value="downtime" disabled>
               <option value="downtime">Downtime CSV/XLSX</option>
             </select>
-          </label>
-          <label>
-            File
-            <input type="file" accept=".csv,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-          </label>
-        </div>
+          </Field>
+          <Field label="File" helper="Gunakan .csv atau .xlsx dengan header yang didukung."><input type="file" accept=".csv,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></Field>
+          </div>
+        </section>
 
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <ErrorState message={`${error} Perbaiki file atau ulangi preview.`} /> : null}
         {message ? <pre className="form-success import-message">{message}</pre> : null}
 
         {preview ? (
           <>
-            <div className="facts sync-facts">
-              <div>
-                <dt>Total</dt>
-                <dd>{preview.summary.totalRows}</dd>
-              </div>
-              <div>
-                <dt>Valid</dt>
-                <dd>{preview.summary.validRows}</dd>
-              </div>
-              <div>
-                <dt>Invalid</dt>
-                <dd>{preview.summary.invalidRows}</dd>
-              </div>
-              <div>
-                <dt>Duplicates</dt>
-                <dd>{preview.summary.duplicateRows}</dd>
-              </div>
-              <div>
-                <dt>Conflicts</dt>
-                <dd>{preview.summary.conflictRows}</dd>
-              </div>
+            <div className="metric-grid">
+              <MetricCard label="Total rows" value={String(preview.summary.totalRows)} />
+              <MetricCard label="Valid" value={String(preview.summary.validRows)} tone="success" />
+              <MetricCard label="Invalid" value={String(preview.summary.invalidRows)} tone={preview.summary.invalidRows ? "danger" : "neutral"} />
+              <MetricCard label="Duplicate / conflict" value={`${preview.summary.duplicateRows} / ${preview.summary.conflictRows}`} tone={preview.summary.duplicateRows + preview.summary.conflictRows ? "warning" : "neutral"} />
             </div>
-
-            <div className="panel-header parser-actions">
-              <h2>Preview Rows</h2>
-              <div className="button-row">
+            <section>
+            <SectionHeader title="Review preview" description={`${selectedCount} baris valid dipilih. Baris invalid, duplicate, atau conflict tidak akan di-commit.`} actions={<div className="button-row">
                 <button type="button" className="secondary-button" onClick={loadErrors} disabled={loading}>
-                  Errors
+                  Lihat laporan error
                 </button>
                 <PermissionGate user={currentUser} permission="import.commit" fallback={null}>
-                  <button type="button" onClick={commitRows} disabled={!canCommit || loading || selectedCount === 0}>
-                    Commit {selectedCount}
-                  </button>
+                  <button type="button" onClick={() => setConfirmCommit(true)} disabled={!canCommit || loading || selectedCount === 0}>Commit {selectedCount} baris</button>
                 </PermissionGate>
-              </div>
-            </div>
+              </div>} />
 
             {rows.length === 0 ? (
-              <p>No import rows.</p>
+              <EmptyState title="Preview tidak berisi baris" description="Periksa file dan header kolom, lalu jalankan preview kembali." />
             ) : (
-              <div className="table">
+              <DataTable headers={["Pilih", "Validasi", "Tanggal / mesin", "Status / durasi", "Issues"]}>
                 {rows.map((row) => (
-                  <div className="table-row import-row" key={row.id}>
-                    <span>
+                  <tr key={row.id}>
+                    <td>
                       <input
+                        aria-label={`Pilih baris ${row.rowNumber}`}
+                        className="checkbox"
                         type="checkbox"
                         checked={selectedRowIds.has(row.id)}
                         disabled={row.status !== "VALID"}
                         onChange={() => toggleRow(row.id)}
-                      />
-                    </span>
-                    <span>
-                      <strong>{row.status}</strong>
-                      <small>Row {row.rowNumber}</small>
-                    </span>
-                    <span>
-                      {row.normalizedPayload.eventDate ?? "-"}
-                      <small>{row.normalizedPayload.machineCode ?? "-"} / {row.normalizedPayload.category ?? "-"}</small>
-                    </span>
-                    <span>
-                      {row.normalizedPayload.status}
-                      <small>{row.normalizedPayload.durationMinutes ?? "-"} minutes</small>
-                    </span>
-                    <span>{row.issues.map((issue) => issue.code).join(", ") || "-"}</span>
-                  </div>
+                      /></td>
+                    <td><StatusBadge status={row.status} /><small>Baris {row.rowNumber}</small></td>
+                    <td><strong>{row.normalizedPayload.eventDate ?? "—"}</strong><small>{row.normalizedPayload.machineCode ?? "Tanpa mesin"} / {row.normalizedPayload.category ?? "Tanpa kategori"}</small></td>
+                    <td><StatusBadge status={row.normalizedPayload.status} /><small>{row.normalizedPayload.durationMinutes ?? "—"} menit</small></td>
+                    <td>{row.issues.length ? row.issues.map((issue) => <StatusBadge key={issue.code} status={issue.severity} label={issue.code} />) : "—"}</td>
+                  </tr>
                 ))}
-              </div>
+              </DataTable>
             )}
+            </section>
           </>
         ) : (
-          <p>Upload a downtime CSV or XLSX file and run preview.</p>
+          <EmptyState title="Siap untuk preview" description="Pilih file downtime CSV/XLSX. Sistem akan memvalidasi isi tanpa langsung memasukkannya ke data operasional." />
         )}
 
-        <h2>Import History</h2>
+        <section><SectionHeader title="Riwayat import" description="Buka run sebelumnya untuk meninjau hasil dan status commit." />
         {runs.length === 0 ? (
-          <p>No import runs yet.</p>
+          <EmptyState title="Belum ada import" description="Riwayat preview dan commit akan muncul di sini." />
         ) : (
-          <div className="table">
+          <DataTable headers={["File", "Status", "Validasi", "Waktu"]}>
             {runs.map((run) => (
-              <button type="button" className="table-row run-row" key={run.id} onClick={() => void loadRun(run.id)}>
-                <span>
-                  <strong>{run.originalFilename}</strong>
-                  <small>{run.importType}</small>
-                </span>
-                <span>{run.status}</span>
-                <span>{run.rowsValid}/{run.rowsTotal} valid</span>
-                <span>{formatDateTime(run.committedAt ?? run.createdAt)}</span>
-              </button>
+              <tr key={run.id} onClick={() => void loadRun(run.id)} style={{ cursor: "pointer" }}>
+                <td><strong>{run.originalFilename}</strong><small>{run.importType}</small></td>
+                <td><StatusBadge status={run.status} /></td><td>{run.rowsValid}/{run.rowsTotal} valid</td><td>{formatDateTime(run.committedAt ?? run.createdAt)}</td>
+              </tr>
             ))}
-          </div>
-        )}
-      </section>
+          </DataTable>
+        )}</section>
+        <ConfirmDialog open={confirmCommit} title={`Commit ${selectedCount} baris downtime?`} description="Baris terpilih akan dibuat sebagai data downtime operasional. Baris invalid, duplicate, conflict, dan tidak dipilih tetap tidak masuk." confirmLabel="Ya, commit baris" busy={loading} onCancel={() => setConfirmCommit(false)} onConfirm={() => void commitRows()} />
+      </div>
     </PermissionGate>
   );
 }
