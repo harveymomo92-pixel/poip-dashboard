@@ -14,6 +14,7 @@
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "smoke:test": "bash scripts/smoke-test.sh",
     "db:migrate": "pnpm --filter @poip/db migrate",
     "db:seed": "pnpm --filter @poip/db seed",
     "db:create-admin": "pnpm --filter @poip/db create-admin",
