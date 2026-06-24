@@ -32,9 +32,11 @@ export function ChartCard({ title, description, legend, action, children, classN
 }
 
 const statusTone: Record<string, string> = {
-  HEALTHY: "success", FRESH: "success", SUCCESS: "success", VALID: "success", ACTIVE: "success", APPROVED: "success", ON_TARGET: "success", CLOSED: "neutral", COMMITTED: "success",
-  WARNING: "warning", STALE: "warning", MEDIUM: "warning", SUBMITTED: "warning", DRAFT: "neutral", OPEN: "warning", PARTIAL: "warning", BELOW_TARGET: "warning",
-  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", NEVER_SYNCED: "danger", INACTIVE: "neutral", SUPERSEDED: "neutral", LOW: "info", ABOVE_TARGET: "info"
+  HEALTHY: "success", FRESH: "success", SUCCESS: "success", VALID: "success", ACTIVE: "success", APPROVED: "success", ON_TARGET: "success", RESOLVED: "success", COMMITTED: "success",
+  WARNING: "warning", STALE: "warning", MEDIUM: "warning", SUBMITTED: "warning", OPEN: "warning", PARTIAL: "warning", BELOW_TARGET: "warning", QUEUED: "warning",
+  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", NEVER_SYNCED: "danger",
+  ACKNOWLEDGED: "info", RUNNING: "info", PREVIEW: "info", LOW: "info", ABOVE_TARGET: "info",
+  CLOSED: "neutral", DRAFT: "neutral", IGNORED: "neutral", INACTIVE: "neutral", SUPERSEDED: "neutral"
 };
 
 export function StatusBadge({ status, label }: Readonly<{ status: string; label?: string }>) {

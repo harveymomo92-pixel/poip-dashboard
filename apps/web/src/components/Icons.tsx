@@ -114,5 +114,11 @@ export const Icons = {
   ),
   more: (props: IconProps) => (
     <Icon {...props}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></Icon>
+  ),
+  audit: (props: IconProps) => (
+    <Icon {...props}><path d="M9 5h10M9 12h10M9 19h10" /><path d="m3 5 1 1 2-2M3 12l1 1 2-2M3 19l1 1 2-2" /></Icon>
+  ),
+  health: (props: IconProps) => (
+    <Icon {...props}><path d="M3 12h4l2-7 4 14 2-7h6" /></Icon>
   )
 };

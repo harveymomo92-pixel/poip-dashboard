@@ -15,7 +15,10 @@ interface NavigationItem {
 
 const navigation: readonly { readonly group: string; readonly items: readonly NavigationItem[] }[] = [
   { group: "Dashboard", items: [{ href: "/overview", label: "Overview", icon: Icons.overview }] },
-  { group: "Operations", items: [{ href: "/downtime", label: "Downtime", icon: Icons.downtime }] },
+  { group: "Operations", items: [
+    { href: "/downtime", label: "Downtime", icon: Icons.downtime },
+    { href: "/data-quality", label: "Data Quality", icon: Icons.quality }
+  ] },
   { group: "Tools", items: [
     { href: "/tools/import-center", label: "Import Center", icon: Icons.import },
     { href: "/tools/wa-parser", label: "WA Parser", icon: Icons.parser }
@@ -23,7 +26,9 @@ const navigation: readonly { readonly group: string; readonly items: readonly Na
   { group: "Settings", items: [
     { href: "/settings/sync", label: "Sync Center", icon: Icons.sync },
     { href: "/settings/targets", label: "Targets", icon: Icons.target },
-    { href: "/settings/users", label: "Users", icon: Icons.users }
+    { href: "/settings/users", label: "Users", icon: Icons.users },
+    { href: "/settings/audit", label: "Audit Viewer", icon: Icons.audit },
+    { href: "/settings/health", label: "System Health", icon: Icons.health }
   ] }
 ];
 

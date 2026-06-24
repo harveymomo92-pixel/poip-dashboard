@@ -41,6 +41,8 @@ Error responses use:
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
 | `GET` | `/health` | Public | API health check. |
+| `GET` | `/health/readiness` | `settings.manage` | Deep readiness for PostgreSQL, migrations, Redis, queue workers, sync freshness, and latest operational runs. |
+| `GET` | `/health/deep` | `settings.manage` | Alias for the deep readiness response. |
 
 ## Auth
 
@@ -174,6 +176,21 @@ Commit body can be `{}` to commit all valid rows, or:
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
 | `GET` | `/data-quality/summary` | `data_quality.view` | Data quality issue counts and summary. |
+| `GET` | `/data-quality/issues` | `data_quality.view` | Paginated issues filtered by status, severity, source, issue code, and date. |
+| `GET` | `/data-quality/issues/:id` | `data_quality.view` | Redacted issue detail and source context. |
+| `POST` | `/data-quality/issues/:id/acknowledge` | `settings.manage` | Mark an open issue as acknowledged. |
+| `POST` | `/data-quality/issues/:id/resolve` | `settings.manage` | Resolve an active issue with a required note. |
+| `POST` | `/data-quality/issues/:id/ignore` | `settings.manage` | Ignore an active issue with a required note. |
+| `POST` | `/data-quality/issues/:id/reopen` | `settings.manage` | Reopen a resolved or ignored issue. |
+
+## Audit
+
+Audit endpoints require `audit.view`. Returned before/after values redact credentials, tokens, raw payloads, source text, and stored file paths.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/audit` or `/audit-logs` | Paginated audit activity with entity, action, actor, entity ID, and date filters. |
+| `GET` | `/audit/:id` or `/audit-logs/:id` | Human-readable audit detail with safe before/after values. |
 
 ## Frontend Routes
 
@@ -189,3 +206,6 @@ Primary frontend routes backed by these APIs:
 | `/settings/sync` | Sync Center. |
 | `/settings/targets` | Target Management. |
 | `/settings/users` | User Management. |
+| `/data-quality` | Data Quality Cockpit. |
+| `/settings/audit` | Read-only Audit Viewer. |
+| `/settings/health` | System Health and readiness dashboard. |
