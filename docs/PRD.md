@@ -4574,3 +4574,262 @@ Until this milestone is complete, the following work must be paused or treated a
 Business Central live ingestion is the backbone of the product. The product is not production-ready until this gate passes.
 
 <!-- P0_BC_LIVE_DATA_GATE_END -->
+
+<!-- P0_1_BC_CALCULATION_SYNC_START -->
+
+## Priority Gate P0.1 — Business Central Calculation Accuracy and v1 Sync Strategy Adaptation
+
+### Why This Gate Exists
+
+The Business Central live ingestion gate has proven that data can enter PostgreSQL. The next risk is calculation correctness. A dashboard that displays live data but calculates target, achievement, output, reject, freshness, or machine ranking incorrectly is still operationally unsafe.
+
+This gate makes calculation accuracy and sync strategy explicit product requirements. The system must not merely ingest Business Central rows. It must convert those rows into trustworthy PPIC metrics that can be reconciled against raw SQL and Business Central source data.
+
+### Problem Statement
+
+After live Business Central data is ingested, the dashboard may still show symptoms such as target equal to zero, achievement as `N/A`, large unmapped machine/entity output, high open data quality issues, misleading reject conversion values, or stale/incorrect freshness. These symptoms indicate that the product has passed the data transport gate but has not yet passed the business calculation gate.
+
+The older v1 project contained a practical sync strategy that should be adapted into this v2 platform: check the latest remote `Entry_No`, compare it with the latest local `entry_no`, fetch only new rows when possible, scan a short recent window for late-arriving changes, and avoid repeatedly pulling large historical ranges.
+
+### Business Goal
+
+PPIC users must be able to trust dashboard numbers as operational truth. Every KPI should be explainable from Business Central data and raw PostgreSQL aggregates.
+
+### Product Goal
+
+Implement a reliable Business Central metric contract and v1-inspired sync strategy so that:
+
+1. OK Output is calculated from the correct Business Central rows only.
+2. Target is matched to the correct entity and effective date range.
+3. Achievement is numeric only when a valid target exists.
+4. Missing target produces an explicit `N/A`, not a misleading zero.
+5. Reject KG, reject PCS equivalent, and reject rate follow a documented formula.
+6. Unmapped machine/entity rows are visible and actionable.
+7. Freshness uses the latest successful `business-central` sync run.
+8. Normal sync does not re-fetch all historical rows after backfill.
+9. Incremental sync follows the v1 pattern using `Entry_No` keyset logic.
+10. Operators can profile and reconcile dashboard numbers using safe commands.
+
+### Required Source-System Contract
+
+The canonical source system value for live Business Central rows is:
+
+```text
+business-central
+```
+
+All dashboard, health, sync, reconciliation, and verification queries must use this canonical value unless the system introduces a clearly documented mapping layer.
+
+### Metric Contract Requirements
+
+The project must maintain a documented Business Central metric contract in:
+
+```text
+docs/BC_METRIC_CONTRACT.md
+```
+
+The contract must define:
+
+1. Business Central source fields and internal target fields.
+2. Rows included in OK Output.
+3. Rows included in reject calculations.
+4. Rows excluded from production KPI calculations.
+5. Handling of negative quantity.
+6. Handling of unmapped machine/entity values.
+7. Target matching rules.
+8. Achievement calculation rules.
+9. Reject PCS equivalent conversion rules.
+10. Freshness calculation rules.
+11. Data quality issue classifications.
+12. Raw SQL reconciliation examples.
+
+### Calculation Requirements
+
+#### CALC-001 — OK Output
+
+OK Output must be calculated only from valid live Business Central output rows:
+
+1. `source_system = 'business-central'`.
+2. Date range must match the dashboard filter.
+3. `normalized_output_type` must represent OK output.
+4. Quantity must be included according to the metric contract.
+5. Invalid, unmapped, or excluded rows must not silently inflate KPI values.
+
+#### CALC-002 — Target
+
+Target must be derived from approved/active target records matched by entity and date range.
+
+Acceptance criteria:
+
+1. Missing target is represented as missing, not numeric zero.
+2. Achievement is `N/A` when target is missing.
+3. The UI/API exposes a reason such as `TARGET_MISSING`.
+4. Target coverage can be audited by entity and period.
+
+#### CALC-003 — Achievement
+
+Achievement must be calculated only when target exists and target is greater than zero.
+
+```text
+achievement = OK Output / Target * 100
+```
+
+If target is missing or zero, the API must return a clear reason instead of a misleading percentage.
+
+#### CALC-004 — Reject Metrics
+
+Reject KG, reject PCS equivalent, and reject rate must follow a documented formula.
+
+Acceptance criteria:
+
+1. Reject KG is sourced from the correct Business Central/internal fields.
+2. Reject PCS equivalent is not silently shown as zero when conversion data is missing.
+3. Conversion gaps are counted and visible as data quality issues.
+4. Reject rate uses the agreed denominator only.
+
+#### CALC-005 — Machine and Entity Mapping
+
+The dashboard must distinguish mapped and unmapped output.
+
+Acceptance criteria:
+
+1. Unmapped output remains visible.
+2. Unmapped output appears in data quality reports.
+3. Machine output ranking must not hide unmapped values.
+4. Target and achievement must not be calculated against an unknown entity without an explicit rule.
+
+#### CALC-006 — Freshness and Health
+
+Freshness must use the latest successful sync run for `source_system = 'business-central'`.
+
+Acceptance criteria:
+
+1. Older failed sync runs must not override a newer successful sync.
+2. Health/readiness warns when the latest successful sync is stale.
+3. Health/readiness warns when live mode is not enabled in an environment expected to use live data.
+4. The dashboard freshness chip must match sync history.
+
+### v1 Sync Strategy Adaptation Requirements
+
+Normal live sync after backfill must not pull all historical rows repeatedly.
+
+The worker must support the following strategy:
+
+1. Probe latest remote `Entry_No` using Business Central OData.
+2. Read latest local `entry_no` from `production_outputs` where `source_system = 'business-central'`.
+3. If remote latest `Entry_No` is not newer than local latest `entry_no`, skip the large import path and optionally run a short backfill-scan window.
+4. If remote latest `Entry_No` is newer, fetch only rows where `Entry_No gt latestLocalEntryNo`.
+5. Use ascending `Entry_No` order for incremental import.
+6. Follow `@odata.nextLink` when provided.
+7. Fall back to keyset pagination when `@odata.nextLink` is absent.
+8. Commit/upsert page by page.
+9. Keep the operation idempotent.
+10. Persist checkpoints after successful pages/windows.
+
+Recommended environment variables:
+
+```env
+BC_ODATA_INCREMENTAL_FIELD=Entry_No
+BC_ODATA_BACKFILL_SCAN_DAYS=14
+BC_ODATA_INCREMENTAL_PAGE_SIZE=1000
+BC_ODATA_REQUEST_TIMEOUT_MS=120000
+BC_ODATA_RETRY_ATTEMPTS=3
+BC_ODATA_RETRY_DELAY_MS=1000
+```
+
+### Required Operator Commands
+
+The system should provide safe commands:
+
+```bash
+pnpm bc:profile
+pnpm bc:reconcile
+pnpm bc:target-coverage
+```
+
+These commands must:
+
+1. Load `.env` if present.
+2. Not print secrets.
+3. Not mutate data.
+4. Use `source_system = 'business-central'`.
+5. Help explain dashboard numbers from raw data.
+
+### Data Profile Requirements
+
+`pnpm bc:profile` must report:
+
+1. Total Business Central rows.
+2. Min/max posting date.
+3. Rows by month.
+4. Rows by entry type.
+5. Rows by normalized output type.
+6. Rows by source system.
+7. Top unmapped machines/entities.
+8. Top items by quantity.
+9. Target coverage summary.
+10. Conversion gap count.
+
+### Reconciliation Requirements
+
+`pnpm bc:reconcile` must compare dashboard KPI output to raw SQL aggregates for the same filter window.
+
+Required environment filters:
+
+```env
+RECONCILE_FROM=
+RECONCILE_TO=
+RECONCILE_ENTITY_ID=
+RECONCILE_ITEM_NO=
+```
+
+The command must report:
+
+1. Dashboard OK Output.
+2. Raw SQL OK Output.
+3. Target.
+4. Achievement.
+5. Reject KG.
+6. Reject PCS equivalent.
+7. Reject rate.
+8. Freshness.
+9. Mismatch warnings.
+
+### Target Coverage Requirements
+
+`pnpm bc:target-coverage` must report:
+
+1. Output rows with matching target.
+2. Output rows without target.
+3. Coverage grouped by entity/machine/month.
+4. Reasons target could not be matched.
+5. Highest-impact missing target groups.
+
+### Definition of Done
+
+This P0.1 gate is complete only when:
+
+1. `pnpm bc:profile` works and explains current live BC data.
+2. `pnpm bc:reconcile` can reconcile the current dashboard window.
+3. `pnpm bc:target-coverage` identifies missing targets and coverage gaps.
+4. Dashboard OK Output matches raw SQL for the same filter.
+5. Target missing produces `N/A`, not misleading zero.
+6. Achievement is only numeric when target exists.
+7. Unmapped output is visible and counted.
+8. Freshness matches latest successful `business-central` sync.
+9. Normal live sync uses v1-style `Entry_No` incremental behavior.
+10. Re-running sync/backfill remains idempotent.
+11. Validation passes:
+    - `pnpm lint`
+    - `pnpm typecheck`
+    - `pnpm test`
+    - `pnpm build`
+    - `pnpm odata:check`
+    - `pnpm smoke:test`
+12. No secrets or backup files are committed.
+
+### Priority Rule
+
+Until this gate passes, do not prioritize cosmetic dashboard work. Calculation correctness and sync efficiency are higher priority than visual polish.
+
+<!-- P0_1_BC_CALCULATION_SYNC_END -->
