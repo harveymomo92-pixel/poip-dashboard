@@ -1,5 +1,5 @@
 import { normalizeODataOutputRow } from "@poip/domain";
-import type { ODataClient, ODataSyncJobPayload, SyncRunRepository } from "./types.js";
+import type { ODataClient, ODataFetchStats, ODataSyncJobPayload, SyncRunRepository } from "./types.js";
 
 const knownSecretValues = [
   process.env.BC_ODATA_PASSWORD,
@@ -24,6 +24,30 @@ function safeErrorMessage(error: unknown): string {
   return "Unknown sync error";
 }
 
+function publicBackfillMetadata(payload: ODataSyncJobPayload): Record<string, unknown> | undefined {
+  if (!payload.backfill) return undefined;
+  return {
+    from: payload.backfill.from,
+    ...(payload.backfill.to ? { to: payload.backfill.to } : {}),
+    dateField: payload.backfill.dateField,
+    ...(payload.backfill.afterEntryNo !== undefined ? { afterEntryNo: payload.backfill.afterEntryNo.toString() } : {}),
+    ...(payload.backfill.pageSize ? { pageSize: payload.backfill.pageSize } : {}),
+    ...(payload.backfill.maxPages ? { maxPages: payload.backfill.maxPages } : {})
+  };
+}
+
+function runMetadata(
+  payload: ODataSyncJobPayload,
+  durationMs: number,
+  pagination?: ODataFetchStats
+): Record<string, unknown> {
+  return {
+    durationMs,
+    ...(pagination ? { pagination } : {}),
+    ...(payload.backfill ? { backfill: publicBackfillMetadata(payload) } : {})
+  };
+}
+
 export class ODataSyncProcessor {
   constructor(
     private readonly repository: SyncRunRepository,
@@ -31,6 +55,7 @@ export class ODataSyncProcessor {
   ) {}
 
   async run(payload: ODataSyncJobPayload) {
+    const startedAt = Date.now();
     const sourceUrl = this.client.sourceUrl();
     const run = await this.repository.prepareRun(payload, sourceUrl);
     if (run.completedResult) return run.completedResult;
@@ -51,13 +76,15 @@ export class ODataSyncProcessor {
       return await this.repository.commitSuccessfulRun({
         run,
         sourceUrl,
-        rows
+        rows,
+        metadata: runMetadata(payload, Date.now() - startedAt, this.client.lastFetchStats?.())
       });
     } catch (error) {
       await this.repository.markRunFailed({
         runId: run.id,
         errorCode: "ODATA_SYNC_FAILED",
-        errorMessage: safeErrorMessage(error)
+        errorMessage: safeErrorMessage(error),
+        metadata: runMetadata(payload, Date.now() - startedAt, this.client.lastFetchStats?.())
       });
       throw error;
     }

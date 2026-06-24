@@ -11,9 +11,19 @@ export interface ODataBackfillOptions {
   readonly from: string;
   readonly to?: string;
   readonly dateField: string;
+  readonly afterEntryNo?: bigint;
   readonly pageSize?: string;
   readonly maxPages?: number;
   readonly forcePageSize?: boolean;
+}
+
+export interface ODataFetchStats {
+  readonly pagesAttempted: number;
+  readonly pagesFetched: number;
+  readonly rowsFetched: number;
+  readonly nextLinkUsed: boolean;
+  readonly keysetPaginationUsed: boolean;
+  readonly truncatedByMaxPages: boolean;
 }
 
 export interface ODataSyncJobPayload {
@@ -60,6 +70,7 @@ export interface ODataFetchRequest {
 export interface ODataClient {
   fetchProductionOutputs(request: ODataFetchRequest): Promise<readonly ODataOutputRawRow[]>;
   sourceUrl(): string | null;
+  lastFetchStats?(): ODataFetchStats;
 }
 
 export interface StagedOutputRow extends NormalizationResult {
@@ -71,6 +82,7 @@ export interface SyncCommitInput {
   readonly run: PreparedSyncRun;
   readonly sourceUrl: string | null;
   readonly rows: readonly StagedOutputRow[];
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface SyncCommitResult {
@@ -80,6 +92,7 @@ export interface SyncCommitResult {
   readonly rowsInserted: number;
   readonly rowsUpdated: number;
   readonly rowsSkipped: number;
+  readonly maxEntryNo: string | null;
   readonly checkpointAfter: SerializableSyncCheckpointSnapshot;
 }
 
@@ -90,5 +103,6 @@ export interface SyncRunRepository {
     readonly runId: string;
     readonly errorCode: string;
     readonly errorMessage: string;
+    readonly metadata?: Record<string, unknown>;
   }): Promise<void>;
 }

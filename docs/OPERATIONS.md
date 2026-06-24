@@ -106,8 +106,16 @@ BACKFILL_FROM=2026-01-01 BACKFILL_TO=2026-02-01 pnpm odata:backfill
 Optional controls:
 
 - `BACKFILL_DATE_FIELD=Posting_Date` by default. Use another simple OData date field only if the Business Central web service exposes it and PPIC has approved it.
+- `BACKFILL_AFTER_ENTRY_NO=12345` resumes after a known Business Central entry number by adding `Entry_No gt 12345` to the filter.
 - `BACKFILL_PAGE_SIZE=500` adjusts `$top` when the endpoint URL does not already contain `$top`.
 - `BACKFILL_MAX_PAGES=5` caps pages for a cautious trial run. Omit it for the full backfill.
+- `BACKFILL_CHECK_TOP=25` increases only the dry-run check size. It never writes rows and is useful when verifying Business Central can return more than one row before a full backfill.
+- `BACKFILL_CHECK_MAX_PAGES=2` lets the dry-run check prove read-only pagination before any write-mode backfill.
+- `BACKFILL_CHUNK_PAGES=20` commits a live backfill in smaller idempotent chunks. Use this for fragile Business Central/Tailscale links where one long request sequence can fail before the final commit.
+- `BACKFILL_MAX_CHUNKS=10` caps chunked writes for a controlled trial. Omit it for the full chunked run.
+- `BACKFILL_CHUNK_RETRIES=2` retries a failed chunk before aborting. Failed attempts remain visible in `sync_runs` with sanitized errors.
+- `BC_ODATA_TIMEOUT_MS=30000` caps each page request.
+- `BC_ODATA_RETRY_ATTEMPTS=2` retries transient page/network/non-JSON failures without printing response bodies.
 
 Filter behavior:
 
@@ -117,6 +125,8 @@ Filter behavior:
 - Existing `$select`, `$orderby`, `$top`, and other query parameters are preserved.
 - Pagination follows Business Central `@odata.nextLink` when present.
 - If Business Central omits `@odata.nextLink` but returns a full `Entry_No asc` page, the backfill uses `Entry_No gt <last entry>` keyset pagination for the next page.
+- `sync_runs.metadata` records backfill settings, page count, pagination mode, and duration for successful or failed runs.
+- Chunked backfill writes one successful `sync_runs` record per chunk. Re-running the same command is safe: existing rows are skipped when their row hash is unchanged.
 
 After backfill:
 

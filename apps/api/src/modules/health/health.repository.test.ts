@@ -9,6 +9,7 @@ test("readinessStatus reports critical infrastructure failures", () => {
       redis: "HEALTHY",
       migrations: "HEALTHY",
       queue: "HEALTHY",
+      syncMode: "HEALTHY",
       freshness: "HEALTHY",
       latestSyncStatus: "SUCCESS"
     }),
@@ -23,6 +24,7 @@ test("readinessStatus reports operational warnings without marking the API down"
       redis: "HEALTHY",
       migrations: "HEALTHY",
       queue: "WARNING",
+      syncMode: "HEALTHY",
       freshness: "CRITICAL",
       latestSyncStatus: "FAILED"
     }),
@@ -37,9 +39,25 @@ test("readinessStatus reports healthy only when infrastructure and operations ar
       redis: "HEALTHY",
       migrations: "HEALTHY",
       queue: "HEALTHY",
+      syncMode: "HEALTHY",
       freshness: "HEALTHY",
       latestSyncStatus: "SUCCESS"
     }),
     "HEALTHY"
+  );
+});
+
+test("readinessStatus warns when live OData mode is not enabled", () => {
+  assert.equal(
+    readinessStatus({
+      database: "HEALTHY",
+      redis: "HEALTHY",
+      migrations: "HEALTHY",
+      queue: "HEALTHY",
+      syncMode: "WARNING",
+      freshness: "HEALTHY",
+      latestSyncStatus: "SUCCESS"
+    }),
+    "WARNING"
   );
 });

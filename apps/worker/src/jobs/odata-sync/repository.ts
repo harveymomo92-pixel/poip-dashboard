@@ -46,6 +46,9 @@ function syncRunMetadata(payload: ODataSyncJobPayload): Record<string, unknown> 
             from: payload.backfill.from,
             ...(payload.backfill.to ? { to: payload.backfill.to } : {}),
             dateField: payload.backfill.dateField,
+            ...(payload.backfill.afterEntryNo !== undefined
+              ? { afterEntryNo: payload.backfill.afterEntryNo.toString() }
+              : {}),
             ...(payload.backfill.pageSize ? { pageSize: payload.backfill.pageSize } : {}),
             ...(payload.backfill.maxPages ? { maxPages: payload.backfill.maxPages } : {})
           }
@@ -76,6 +79,10 @@ function serializeIssue(issue: DataQualitySignal) {
     severity: issue.severity,
     description: issue.description
   };
+}
+
+function metadataSql(metadata: Record<string, unknown> | undefined) {
+  return sql`${syncRuns.metadata} || ${JSON.stringify(metadata ?? {})}::jsonb`;
 }
 
 export class DrizzleSyncRunRepository implements SyncRunRepository {
@@ -109,6 +116,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
             rowsInserted: existingRun.rowsInserted,
             rowsUpdated: existingRun.rowsUpdated,
             rowsSkipped: existingRun.rowsSkipped,
+            maxEntryNo: checkpointFromJson(existingRun.checkpointAfter).lastEntryNo?.toString() ?? null,
             checkpointAfter: checkpointToJson(checkpointFromJson(existingRun.checkpointAfter))
           }
         };
@@ -177,6 +185,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       let rowsInserted = 0;
       let rowsUpdated = 0;
       let rowsSkipped = 0;
+      let maxSeenEntryNo: bigint | null = null;
       let maxCommittedEntryNo: bigint | null = null;
       let maxCommittedPostingDate: string | null = null;
       const issueCandidates: {
@@ -188,6 +197,9 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       for (const row of input.rows) {
         const entityId = this.resolveEntityId(row, context);
         const issues = [...row.issues];
+        if (row.normalized.entryNo !== null && (!maxSeenEntryNo || row.normalized.entryNo > maxSeenEntryNo)) {
+          maxSeenEntryNo = row.normalized.entryNo;
+        }
         const pendingEntryKey = row.normalized.entryNo?.toString() ?? null;
         if (pendingEntryKey) {
           const previousHash =
@@ -341,7 +353,8 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           rowsFetched: input.rows.length,
           rowsInserted,
           rowsUpdated,
-          rowsSkipped
+          rowsSkipped,
+          metadata: metadataSql(input.metadata)
         })
         .where(eq(syncRuns.id, input.run.id));
 
@@ -352,19 +365,26 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
         rowsInserted,
         rowsUpdated,
         rowsSkipped,
+        maxEntryNo: maxSeenEntryNo?.toString() ?? null,
         checkpointAfter: checkpointToJson(checkpointAfter)
       };
     });
   }
 
-  async markRunFailed(input: { readonly runId: string; readonly errorCode: string; readonly errorMessage: string }) {
+  async markRunFailed(input: {
+    readonly runId: string;
+    readonly errorCode: string;
+    readonly errorMessage: string;
+    readonly metadata?: Record<string, unknown>;
+  }) {
     await this.database.db
       .update(syncRuns)
       .set({
         status: "FAILED",
         finishedAt: sql`now()`,
         errorCode: input.errorCode,
-        errorMessage: input.errorMessage
+        errorMessage: input.errorMessage,
+        metadata: metadataSql(input.metadata)
       })
       .where(eq(syncRuns.id, input.runId));
   }

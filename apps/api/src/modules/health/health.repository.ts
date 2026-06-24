@@ -1,7 +1,7 @@
 import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
 import { importRuns, syncRuns, waParserRuns } from "@poip/db";
 import { Queue } from "bullmq";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Redis } from "ioredis";
 import { DATABASE, type DatabaseConnection } from "../database/database.module.js";
 
@@ -23,6 +23,7 @@ export function readinessStatus(input: {
   readonly redis: HealthStatus;
   readonly migrations: HealthStatus;
   readonly queue: HealthStatus;
+  readonly syncMode: HealthStatus;
   readonly freshness: HealthStatus;
   readonly latestSyncStatus: string | null;
 }): HealthStatus {
@@ -30,6 +31,7 @@ export function readinessStatus(input: {
   if (
     input.migrations !== "HEALTHY" ||
     input.queue !== "HEALTHY" ||
+    input.syncMode !== "HEALTHY" ||
     input.freshness !== "HEALTHY" ||
     input.latestSyncStatus === "FAILED"
   ) {
@@ -128,6 +130,8 @@ export class HealthRepository implements OnModuleDestroy {
       status: "HEALTHY" | "WARNING" | "CRITICAL";
       workers: number | null;
       counts: Record<string, number>;
+      effectiveFailedJobs?: number;
+      staleSuccessfulFailedJobs?: number;
       message: string;
     };
     try {
@@ -143,16 +147,20 @@ export class HealthRepository implements OnModuleDestroy {
         this.queue.getJobCounts("wait", "active", "completed", "failed", "delayed"),
         this.queue.getWorkersCount()
       ]);
-      const failedJobs = counts.failed ?? 0;
+      const failedJobs = await this.effectiveFailedJobCount(counts.failed ?? 0);
       queueCheck = {
-        status: workers > 0 && failedJobs === 0 ? "HEALTHY" : "WARNING",
+        status: workers > 0 && failedJobs.effectiveFailedJobs === 0 ? "HEALTHY" : "WARNING",
         workers,
         counts,
+        effectiveFailedJobs: failedJobs.effectiveFailedJobs,
+        staleSuccessfulFailedJobs: failedJobs.staleSuccessfulFailedJobs,
         message:
           workers === 0
             ? "Queue is reachable but no sync worker heartbeat is visible."
-            : failedJobs > 0
-              ? `${workers} sync worker connected; ${failedJobs} failed job(s) remain visible.`
+            : failedJobs.effectiveFailedJobs > 0
+              ? `${workers} sync worker connected; ${failedJobs.effectiveFailedJobs} unresolved failed job(s) remain visible.`
+              : failedJobs.staleSuccessfulFailedJobs > 0
+                ? `${workers} sync worker connected; stale failed queue jobs are matched by successful DB sync runs.`
               : `${workers} sync worker connected.`
       };
     } catch {
@@ -168,6 +176,16 @@ export class HealthRepository implements OnModuleDestroy {
         message: "Queue status is unavailable because Redis is not reachable."
       };
     }
+
+    const mode = process.env.ODATA_SYNC_MODE ?? "mock";
+    const syncModeCheck = {
+      status: mode === "live" ? "HEALTHY" : "WARNING",
+      mode,
+      message:
+        mode === "live"
+          ? "Business Central live OData sync mode is enabled."
+          : "OData sync is not in live mode; Business Central ingestion is not production-ready."
+    } as const;
 
     const operations =
       databaseCheck.status === "HEALTHY"
@@ -186,6 +204,7 @@ export class HealthRepository implements OnModuleDestroy {
       redis: redisCheck.status,
       migrations: migrationCheck.status,
       queue: queueCheck.status,
+      syncMode: syncModeCheck.status,
       freshness: operations.freshnessStatus,
       latestSyncStatus: operations.latestSync?.status ?? null
     });
@@ -203,19 +222,51 @@ export class HealthRepository implements OnModuleDestroy {
         database: databaseCheck,
         migrations: migrationCheck,
         redis: redisCheck,
-        queue: queueCheck
+        queue: queueCheck,
+        syncMode: syncModeCheck
       },
       operations
     };
   }
 
+  private async effectiveFailedJobCount(failedCount: number) {
+    if (failedCount <= 0) {
+      return { effectiveFailedJobs: 0, staleSuccessfulFailedJobs: 0 };
+    }
+
+    const jobs = await this.queue.getFailed(0, Math.min(failedCount, 100) - 1);
+    const jobIds = jobs
+      .map((job) => job.id)
+      .filter((id): id is string =>
+        Boolean(id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
+      );
+    if (jobIds.length === 0) {
+      return { effectiveFailedJobs: failedCount, staleSuccessfulFailedJobs: 0 };
+    }
+
+    const result = await this.database.pool.query<{ id: string }>(
+      "select id from sync_runs where id = any($1::uuid[]) and status = 'SUCCESS'",
+      [jobIds]
+    );
+    const staleSuccessfulFailedJobs = result.rows.length;
+    const uninspectedFailedJobs = Math.max(failedCount - jobs.length, 0);
+    return {
+      effectiveFailedJobs: uninspectedFailedJobs + Math.max(jobs.length - staleSuccessfulFailedJobs, 0),
+      staleSuccessfulFailedJobs
+    };
+  }
+
   private async getOperationalStatus() {
+    const requireLiveSource = process.env.ODATA_SYNC_MODE === "live";
+    const liveSuccessClause = requireLiveSource
+      ? sql`${syncRuns.sourceUrl} is not null and ${syncRuns.sourceUrl} not like 'mock://%'`
+      : undefined;
     const [latestSyncRows, successfulSyncRows, latestImportRows, latestParserRows] = await Promise.all([
       this.database.db.select().from(syncRuns).orderBy(desc(syncRuns.startedAt)).limit(1),
       this.database.db
         .select()
         .from(syncRuns)
-        .where(eq(syncRuns.status, "SUCCESS"))
+        .where(and(eq(syncRuns.status, "SUCCESS"), ...(liveSuccessClause ? [liveSuccessClause] : [])))
         .orderBy(desc(syncRuns.finishedAt))
         .limit(1),
       this.database.db.select().from(importRuns).orderBy(desc(importRuns.createdAt)).limit(1),
@@ -238,7 +289,9 @@ export class HealthRepository implements OnModuleDestroy {
             rowsFetched: latestSync.rowsFetched,
             rowsInserted: latestSync.rowsInserted,
             rowsUpdated: latestSync.rowsUpdated,
-            rowsSkipped: latestSync.rowsSkipped
+            rowsSkipped: latestSync.rowsSkipped,
+            errorCode: latestSync.errorCode,
+            errorMessage: latestSync.errorMessage
           }
         : null,
       latestSuccessfulSync: latestSuccessfulSync

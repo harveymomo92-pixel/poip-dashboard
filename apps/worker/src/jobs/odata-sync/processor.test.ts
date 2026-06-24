@@ -21,6 +21,7 @@ test("ODataSyncProcessor commits successful mocked OData rows", async () => {
         rowsInserted: 1,
         rowsUpdated: 0,
         rowsSkipped: 0,
+        maxEntryNo: "1001",
         checkpointAfter: { lastEntryNo: "1001", lastPostingDate: "2026-06-22" }
       };
     },
@@ -93,6 +94,7 @@ test("ODataSyncProcessor marks failed run and leaves commit untouched", async ()
 test("ODataSyncProcessor forwards backfill options without using incremental checkpoint", async () => {
   let receivedBackfillFrom: string | null = null;
   let receivedLastEntryNo: bigint | null | undefined;
+  let receivedMetadata: Record<string, unknown> | undefined;
   const repository: SyncRunRepository = {
     prepareRun: async () => ({
       id: "run_backfill",
@@ -100,21 +102,33 @@ test("ODataSyncProcessor forwards backfill options without using incremental che
       mode: "backfill",
       checkpointBefore: { lastEntryNo: 9999n, lastPostingDate: "2026-06-20" }
     }),
-    commitSuccessfulRun: async (input) => ({
-      runId: input.run.id,
-      status: "SUCCESS",
-      rowsFetched: input.rows.length,
-      rowsInserted: 0,
-      rowsUpdated: 0,
-      rowsSkipped: input.rows.length,
-      checkpointAfter: { lastEntryNo: null, lastPostingDate: null }
-    }),
+    commitSuccessfulRun: async (input) => {
+      receivedMetadata = input.metadata;
+      return {
+        runId: input.run.id,
+        status: "SUCCESS",
+        rowsFetched: input.rows.length,
+        rowsInserted: 0,
+        rowsUpdated: 0,
+        rowsSkipped: input.rows.length,
+        maxEntryNo: null,
+        checkpointAfter: { lastEntryNo: null, lastPostingDate: null }
+      };
+    },
     markRunFailed: async () => {
       throw new Error("should not fail");
     }
   };
   const client: ODataClient = {
     sourceUrl: () => "mock://test",
+    lastFetchStats: () => ({
+      pagesAttempted: 1,
+      pagesFetched: 1,
+      rowsFetched: 0,
+      nextLinkUsed: false,
+      keysetPaginationUsed: false,
+      truncatedByMaxPages: false
+    }),
     fetchProductionOutputs: async (request) => {
       receivedBackfillFrom = request.backfill?.from ?? null;
       receivedLastEntryNo = request.lastEntryNo;
@@ -134,4 +148,7 @@ test("ODataSyncProcessor forwards backfill options without using incremental che
   assert.equal(result.status, "SUCCESS");
   assert.equal(receivedBackfillFrom, "2026-01-01");
   assert.equal(receivedLastEntryNo, null);
+  assert.equal((receivedMetadata?.backfill as { from?: string } | undefined)?.from, "2026-01-01");
+  assert.equal((receivedMetadata?.pagination as { pagesFetched?: number } | undefined)?.pagesFetched, 1);
+  assert.equal(typeof receivedMetadata?.durationMs, "number");
 });

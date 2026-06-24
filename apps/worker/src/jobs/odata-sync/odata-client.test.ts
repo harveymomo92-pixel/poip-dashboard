@@ -4,7 +4,9 @@ import {
   buildBackfillFilter,
   buildODataRequestUrl,
   BusinessCentralODataClient,
-  createODataAuthorizationHeader
+  createODataAuthorizationHeader,
+  createODataClientFromEnv,
+  MockBusinessCentralODataClient
 } from "./odata-client.js";
 
 const incrementalRequest = {
@@ -18,6 +20,22 @@ function requireCaptured<T>(value: T | null): NonNullable<T> {
   return value as NonNullable<T>;
 }
 
+function withEnv(values: Record<string, string | undefined>, fn: () => void) {
+  const previous = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 test("createODataAuthorizationHeader creates UTF-8 Basic Auth credentials", () => {
   assert.equal(
     createODataAuthorizationHeader({
@@ -26,6 +44,58 @@ test("createODataAuthorizationHeader creates UTF-8 Basic Auth credentials", () =
       password: "unit-test-password"
     }),
     `Basic ${Buffer.from("odata-user:unit-test-password", "utf8").toString("base64")}`
+  );
+});
+
+test("createODataClientFromEnv uses mock only in explicit mock mode", () => {
+  withEnv(
+    {
+      ODATA_SYNC_MODE: "mock",
+      BC_ODATA_URL: undefined,
+      BC_ODATA_AUTH_MODE: undefined,
+      BC_ODATA_USERNAME: undefined,
+      BC_ODATA_PASSWORD: undefined,
+      BC_ODATA_BEARER_TOKEN: undefined
+    },
+    () => {
+      assert.equal(createODataClientFromEnv() instanceof MockBusinessCentralODataClient, true);
+    }
+  );
+});
+
+test("createODataClientFromEnv never silently falls back to mock in live mode", () => {
+  withEnv(
+    {
+      ODATA_SYNC_MODE: "live",
+      BC_ODATA_URL: undefined,
+      BC_ODATA_BASE_URL: undefined,
+      BC_ODATA_OUTPUT_ENDPOINT: undefined,
+      BC_ODATA_AUTH_MODE: "basic",
+      BC_ODATA_USERNAME: "unit-user",
+      BC_ODATA_PASSWORD: "unit-password",
+      BC_ODATA_BEARER_TOKEN: undefined
+    },
+    () => {
+      assert.throws(() => createODataClientFromEnv(), /Live OData sync requires BC_ODATA_URL/);
+    }
+  );
+});
+
+test("createODataClientFromEnv fails loudly when live basic auth env is incomplete", () => {
+  withEnv(
+    {
+      ODATA_SYNC_MODE: "live",
+      BC_ODATA_URL: "https://businesscentral.example.test/odata/output",
+      BC_ODATA_BASE_URL: undefined,
+      BC_ODATA_OUTPUT_ENDPOINT: undefined,
+      BC_ODATA_AUTH_MODE: "basic",
+      BC_ODATA_USERNAME: "unit-user",
+      BC_ODATA_PASSWORD: undefined,
+      BC_ODATA_BEARER_TOKEN: undefined
+    },
+    () => {
+      assert.throws(() => createODataClientFromEnv(), /BC_ODATA_PASSWORD is required/);
+    }
   );
 });
 
@@ -107,6 +177,17 @@ test("buildBackfillFilter supports BACKFILL_FROM and BACKFILL_TO", () => {
   );
 });
 
+test("buildBackfillFilter supports an Entry_No resume cursor", () => {
+  assert.equal(
+    buildBackfillFilter({
+      from: "2026-01-01",
+      dateField: "Posting_Date",
+      afterEntryNo: 1234n
+    }),
+    "Posting_Date ge 2026-01-01 and Entry_No gt 1234"
+  );
+});
+
 test("buildODataRequestUrl combines an existing filter with a backfill filter", () => {
   const url = buildODataRequestUrl(
     "http://tailscale-host:7048/ODataV4/Company('A')/Output?$filter=Entry_Type%20eq%20'Output'&$select=Entry_No,Posting_Date&$top=500&$orderby=Posting_Date%20asc",
@@ -164,6 +245,7 @@ test("BusinessCentralODataClient follows OData nextLink pagination", async () =>
   assert.equal(requestedUrls.length, 2);
   assert.equal(new URL(requireCaptured(requestedUrls[1] ?? null)).searchParams.get("$skiptoken"), "abc");
   assert.deepEqual(client.lastFetchStats(), {
+    pagesAttempted: 2,
     pagesFetched: 2,
     rowsFetched: 2,
     nextLinkUsed: true,
@@ -205,6 +287,7 @@ test("BusinessCentralODataClient uses Entry_No keyset pagination when nextLink i
   assert.equal(requestedFilters[0], "Posting_Date ge 2026-01-01");
   assert.equal(requestedFilters[1], "(Posting_Date ge 2026-01-01) and (Entry_No gt 11)");
   assert.deepEqual(client.lastFetchStats(), {
+    pagesAttempted: 2,
     pagesFetched: 2,
     rowsFetched: 3,
     nextLinkUsed: false,
@@ -248,4 +331,33 @@ test("OData network errors and source URLs do not leak credentials or query valu
     }
   );
   assert.doesNotMatch(client.sourceUrl(), /private-user|private-password|query-secret/);
+});
+
+test("OData non-JSON responses produce sanitized errors", async () => {
+  const client = new BusinessCentralODataClient(
+    "http://tailscale-host:7048/ODataV4/Company('PRIVATE')/Output",
+    { mode: "basic", username: "private-user", password: "private-password" },
+    async () =>
+      new Response("<html>private-password</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" }
+      })
+  );
+
+  await assert.rejects(
+    () => client.fetchProductionOutputs(incrementalRequest),
+    (error: Error) => {
+      assert.match(error.message, /OData response is not valid JSON/);
+      assert.doesNotMatch(error.message, /private-user|private-password/);
+      return true;
+    }
+  );
+  assert.deepEqual(client.lastFetchStats(), {
+    pagesAttempted: 1,
+    pagesFetched: 0,
+    rowsFetched: 0,
+    nextLinkUsed: false,
+    keysetPaginationUsed: false,
+    truncatedByMaxPages: false
+  });
 });

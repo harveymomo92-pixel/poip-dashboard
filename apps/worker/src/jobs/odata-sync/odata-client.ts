@@ -1,4 +1,4 @@
-import type { ODataBackfillOptions, ODataClient, ODataFetchRequest } from "./types.js";
+import type { ODataBackfillOptions, ODataClient, ODataFetchRequest, ODataFetchStats } from "./types.js";
 import { optionalEnv, requireEnv } from "../../common/env.js";
 
 export type ODataAuthConfig =
@@ -11,15 +11,8 @@ type FetchImplementation = (
   init?: RequestInit
 ) => Promise<Response>;
 
-export interface ODataFetchStats {
-  readonly pagesFetched: number;
-  readonly rowsFetched: number;
-  readonly nextLinkUsed: boolean;
-  readonly keysetPaginationUsed: boolean;
-  readonly truncatedByMaxPages: boolean;
-}
-
 const emptyFetchStats: ODataFetchStats = {
+  pagesAttempted: 0,
   pagesFetched: 0,
   rowsFetched: 0,
   nextLinkUsed: false,
@@ -37,6 +30,15 @@ function parsePositiveInteger(value: string | undefined | null, name: string): n
   return parsed;
 }
 
+function safeHeaderValue(value: string | null): string {
+  if (!value) return "unknown";
+  return value.replace(/[^\w!#$%&'*+.^`|~-]+/g, " ").slice(0, 80);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function validateDate(value: string, name: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error(`${name} must use YYYY-MM-DD format`);
@@ -48,6 +50,11 @@ function validateDateField(value: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
     throw new Error("BACKFILL_DATE_FIELD must be a simple OData field name");
   }
+  return value;
+}
+
+function validateEntryNo(value: bigint): bigint {
+  if (value < 0n) throw new Error("BACKFILL_AFTER_ENTRY_NO must be a positive integer");
   return value;
 }
 
@@ -131,6 +138,9 @@ export function buildBackfillFilter(backfill: ODataBackfillOptions): string {
     const to = validateDate(backfill.to, "BACKFILL_TO");
     if (to <= from) throw new Error("BACKFILL_TO must be after BACKFILL_FROM");
     filters.push(`${dateField} lt ${to}`);
+  }
+  if (backfill.afterEntryNo !== undefined) {
+    filters.push(`Entry_No gt ${validateEntryNo(backfill.afterEntryNo).toString()}`);
   }
   return filters.join(" and ");
 }
@@ -280,49 +290,73 @@ export class BusinessCentralODataClient implements ODataClient {
 
   async fetchProductionOutputs(request: ODataFetchRequest) {
     let url = buildODataRequestUrl(this.endpointUrl, request);
+    this.fetchStats = { ...emptyFetchStats };
     const authorization = createODataAuthorizationHeader(this.auth);
     const maxPages =
       request.backfill?.maxPages ?? parsePositiveInteger(process.env.BC_ODATA_MAX_PAGES, "BC_ODATA_MAX_PAGES");
     const timeoutMs = parsePositiveInteger(process.env.BC_ODATA_TIMEOUT_MS ?? "30000", "BC_ODATA_TIMEOUT_MS");
+    const retryAttempts =
+      parsePositiveInteger(process.env.BC_ODATA_RETRY_ATTEMPTS ?? "2", "BC_ODATA_RETRY_ATTEMPTS") ?? 2;
     const rows: Record<string, unknown>[] = [];
+    let pagesAttempted = 0;
     let pagesFetched = 0;
     let nextLinkUsed = false;
     let keysetPaginationUsed = false;
     let truncatedByMaxPages = false;
     let lastKeysetEntryNo: bigint | null = null;
     const firstPageUrl = new URL(url.toString());
+    const updateStats = () => {
+      this.fetchStats = {
+        pagesAttempted,
+        pagesFetched,
+        rowsFetched: rows.length,
+        nextLinkUsed,
+        keysetPaginationUsed,
+        truncatedByMaxPages
+      };
+    };
 
     while (true) {
       if (lastKeysetEntryNo !== null) {
         url = appendODataFilter(firstPageUrl, `Entry_No gt ${lastKeysetEntryNo.toString()}`);
       }
-      pagesFetched += 1;
-      let response: Response;
-      try {
-        response = await this.fetchImplementation(url, {
-          headers: {
-            Accept: "application/json",
-            ...(authorization ? { Authorization: authorization } : {})
-          },
-          signal: AbortSignal.timeout(timeoutMs ?? 30_000)
-        });
-      } catch {
-        throw new Error("OData request failed before receiving a response");
-      }
-      if (!response.ok) {
-        throw new Error(`OData request failed with status ${response.status}`);
-      }
-
+      pagesAttempted += 1;
+      updateStats();
       let payload: { value?: unknown; "@odata.nextLink"?: unknown; "odata.nextLink"?: unknown };
-      try {
-        payload = (await response.json()) as {
-          value?: unknown;
-          "@odata.nextLink"?: unknown;
-          "odata.nextLink"?: unknown;
-        };
-      } catch {
-        throw new Error("OData response is not valid JSON");
+      for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
+        try {
+          const response = await this.fetchImplementation(url, {
+            headers: {
+              Accept: "application/json",
+              ...(authorization ? { Authorization: authorization } : {})
+            },
+            signal: AbortSignal.timeout(timeoutMs ?? 30_000)
+          });
+          if (!response.ok) {
+            throw new Error(`OData request failed with status ${response.status}`);
+          }
+          try {
+            payload = (await response.json()) as {
+              value?: unknown;
+              "@odata.nextLink"?: unknown;
+              "odata.nextLink"?: unknown;
+            };
+            break;
+          } catch {
+            throw new Error(
+              `OData response is not valid JSON (content-type: ${safeHeaderValue(response.headers.get("content-type"))})`
+            );
+          }
+        } catch (error) {
+          const safeError =
+            error instanceof Error && error.message.startsWith("OData ")
+              ? error
+              : new Error("OData request failed before receiving a response");
+          if (attempt >= retryAttempts) throw safeError;
+          await sleep(250 * attempt);
+        }
       }
+      payload ??= {};
       if (!Array.isArray(payload.value)) {
         throw new Error("OData response missing value array");
       }
@@ -330,14 +364,18 @@ export class BusinessCentralODataClient implements ODataClient {
         Boolean(row && typeof row === "object")
       );
       rows.push(...pageRows);
+      pagesFetched += 1;
+      updateStats();
 
       const nextUrl = nextLinkUrl(url, payload["@odata.nextLink"] ?? payload["odata.nextLink"]);
       if (nextUrl) {
         if (maxPages && pagesFetched >= maxPages) {
           truncatedByMaxPages = true;
+          updateStats();
           break;
         }
         nextLinkUsed = true;
+        updateStats();
         url = nextUrl;
         continue;
       }
@@ -355,19 +393,14 @@ export class BusinessCentralODataClient implements ODataClient {
       }
       if (maxPages && pagesFetched >= maxPages) {
         truncatedByMaxPages = true;
+        updateStats();
         break;
       }
       lastKeysetEntryNo = entryNo;
       keysetPaginationUsed = true;
+      updateStats();
     }
-
-    this.fetchStats = {
-      pagesFetched,
-      rowsFetched: rows.length,
-      nextLinkUsed,
-      keysetPaginationUsed,
-      truncatedByMaxPages
-    };
+    updateStats();
     return rows;
   }
 

@@ -83,6 +83,12 @@ BACKFILL_FROM=2026-01-01 pnpm odata:backfill:check
 BACKFILL_FROM=2026-01-01 pnpm odata:backfill
 ```
 
+For fragile live OData links, use a small page size with chunked commits:
+
+```bash
+BACKFILL_FROM=2026-01-01 BACKFILL_PAGE_SIZE=1 BACKFILL_CHUNK_PAGES=10 BACKFILL_CHUNK_RETRIES=2 pnpm odata:backfill
+```
+
 See [Operations guide](docs/OPERATIONS.md) for the full live-sync and backfill checklist.
 
 ## Production and UAT docs

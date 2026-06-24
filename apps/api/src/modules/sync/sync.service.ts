@@ -128,6 +128,10 @@ export class SyncService implements OnModuleDestroy {
   }
 
   async getStatus(sourceSystem = DEFAULT_SOURCE_SYSTEM) {
+    const requireLiveSource = process.env.ODATA_SYNC_MODE === "live";
+    const liveSuccessClause = requireLiveSource
+      ? sql`${syncRuns.sourceUrl} is not null and ${syncRuns.sourceUrl} not like 'mock://%'`
+      : undefined;
     const [latestRun] = await this.database.db
       .select()
       .from(syncRuns)
@@ -137,7 +141,13 @@ export class SyncService implements OnModuleDestroy {
     const [latestSuccessfulRun] = await this.database.db
       .select()
       .from(syncRuns)
-      .where(and(eq(syncRuns.sourceSystem, sourceSystem), eq(syncRuns.status, "SUCCESS")))
+      .where(
+        and(
+          eq(syncRuns.sourceSystem, sourceSystem),
+          eq(syncRuns.status, "SUCCESS"),
+          ...(liveSuccessClause ? [liveSuccessClause] : [])
+        )
+      )
       .orderBy(desc(syncRuns.finishedAt))
       .limit(1);
     const checkpoint = await this.getCheckpoint(sourceSystem);

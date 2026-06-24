@@ -613,15 +613,21 @@ export class DashboardReadRepository {
   }
 
   private async queryLatestSuccessfulSync(sourceSystem: string): Promise<Date | null> {
+    const requireLiveSource = process.env.ODATA_SYNC_MODE === "live";
     const result = await this.database.pool.query<{ finished_at: Date | null }>(
       `
         select finished_at
         from sync_runs
-        where source_system = $1 and status = 'SUCCESS'
+        where source_system = $1
+          and status = 'SUCCESS'
+          and (
+            $2::boolean = false
+            or (source_url is not null and source_url not like 'mock://%')
+          )
         order by finished_at desc
         limit 1
       `,
-      [sourceSystem]
+      [sourceSystem, requireLiveSource]
     );
     return result.rows[0]?.finished_at ?? null;
   }

@@ -2,16 +2,16 @@ import { auditLogs, createDatabase } from "@poip/db";
 import { pathToFileURL } from "node:url";
 import {
   BusinessCentralODataClient,
-  createODataClientFromEnv,
-  type ODataFetchStats
+  createODataClientFromEnv
 } from "./odata-client.js";
 import { ODataSyncProcessor } from "./processor.js";
 import { DrizzleSyncRunRepository } from "./repository.js";
-import type { ODataBackfillOptions, SyncCommitResult } from "./types.js";
+import type { ODataBackfillOptions, ODataFetchStats, SyncCommitResult } from "./types.js";
 import { getDatabaseUrl } from "../../common/env.js";
 
 const DEFAULT_SOURCE_SYSTEM = "business-central";
 const defaultFetchStats: ODataFetchStats = {
+  pagesAttempted: 0,
   pagesFetched: 0,
   rowsFetched: 0,
   nextLinkUsed: false,
@@ -85,12 +85,14 @@ export function backfillOptionsFromEnv(): ODataBackfillOptions {
   const from = validateDate(requireEnv("BACKFILL_FROM"), "BACKFILL_FROM");
   const to = env("BACKFILL_TO") ? validateDate(requireEnv("BACKFILL_TO"), "BACKFILL_TO") : undefined;
   if (to && to <= from) throw new Error("BACKFILL_TO must be after BACKFILL_FROM");
+  const afterEntryNo = validatePositiveInteger(env("BACKFILL_AFTER_ENTRY_NO"), "BACKFILL_AFTER_ENTRY_NO");
   const pageSize = validatePositiveInteger(env("BACKFILL_PAGE_SIZE"), "BACKFILL_PAGE_SIZE");
   const maxPagesValue = validatePositiveInteger(env("BACKFILL_MAX_PAGES"), "BACKFILL_MAX_PAGES");
   return {
     from,
     ...(to ? { to } : {}),
     dateField: validateDateField(env("BACKFILL_DATE_FIELD") ?? "Posting_Date"),
+    ...(afterEntryNo ? { afterEntryNo: BigInt(afterEntryNo) } : {}),
     ...(pageSize ? { pageSize } : {}),
     ...(maxPagesValue ? { maxPages: Number.parseInt(maxPagesValue, 10) } : {})
   };
@@ -109,6 +111,7 @@ function publicBackfillConfig(backfill: ODataBackfillOptions) {
     from: backfill.from,
     ...(backfill.to ? { to: backfill.to } : {}),
     dateField: backfill.dateField,
+    ...(backfill.afterEntryNo !== undefined ? { afterEntryNo: backfill.afterEntryNo.toString() } : {}),
     ...(backfill.pageSize ? { pageSize: backfill.pageSize } : {}),
     ...(backfill.maxPages ? { maxPages: backfill.maxPages } : {})
   };
@@ -152,10 +155,13 @@ function printSummary(
   console.log(`Backfill from: ${backfill.from}`);
   if (backfill.to) console.log(`Backfill to: ${backfill.to}`);
   console.log(`Date field: ${backfill.dateField}`);
+  if (backfill.afterEntryNo !== undefined) console.log(`After Entry_No: ${backfill.afterEntryNo.toString()}`);
   console.log(`Rows fetched: ${result.rowsFetched}`);
   console.log(`Rows inserted: ${result.rowsInserted}`);
   console.log(`Rows updated: ${result.rowsUpdated}`);
   console.log(`Rows skipped: ${result.rowsSkipped}`);
+  console.log(`Max Entry_No: ${result.maxEntryNo ?? "none"}`);
+  console.log(`Pages attempted: ${pagination.pagesAttempted}`);
   console.log(`Pages fetched: ${pagination.pagesFetched}`);
   console.log(`NextLink used: ${pagination.nextLinkUsed ? "yes" : "no"}`);
   console.log(`Keyset pagination used: ${pagination.keysetPaginationUsed ? "yes" : "no"}`);
@@ -163,13 +169,55 @@ function printSummary(
   console.log(`Audit logged: ${auditLogged ? "yes" : "no"}`);
 }
 
+async function executeBackfillChunk(
+  repository: DrizzleSyncRunRepository,
+  client: BusinessCentralODataClient,
+  backfill: ODataBackfillOptions
+) {
+  const result = await new ODataSyncProcessor(repository, client).run({
+    mode: "backfill",
+    sourceSystem: env("BACKFILL_SOURCE_SYSTEM") ?? DEFAULT_SOURCE_SYSTEM,
+    requestedBy: null,
+    backfill
+  });
+  const pagination = client.lastFetchStats() ?? defaultFetchStats;
+  await logBackfillAudit(result, backfill, pagination);
+  return { result, pagination };
+}
+
+function printChunkedSummary(input: {
+  readonly chunks: number;
+  readonly rowsFetched: number;
+  readonly rowsInserted: number;
+  readonly rowsUpdated: number;
+  readonly rowsSkipped: number;
+  readonly pagesAttempted: number;
+  readonly pagesFetched: number;
+  readonly finalMaxEntryNo: string | null;
+  readonly completed: boolean;
+}) {
+  console.log("OData chunked backfill summary");
+  console.log(`Chunks completed: ${input.chunks}`);
+  console.log(`Rows fetched: ${input.rowsFetched}`);
+  console.log(`Rows inserted: ${input.rowsInserted}`);
+  console.log(`Rows updated: ${input.rowsUpdated}`);
+  console.log(`Rows skipped: ${input.rowsSkipped}`);
+  console.log(`Pages attempted: ${input.pagesAttempted}`);
+  console.log(`Pages fetched: ${input.pagesFetched}`);
+  console.log(`Final max Entry_No: ${input.finalMaxEntryNo ?? "none"}`);
+  console.log(`Completed full range: ${input.completed ? "yes" : "no"}`);
+}
+
 export async function runBackfillCheck(): Promise<void> {
   validateLiveODataEnv();
   const client = createLiveClient();
+  const checkTop = validatePositiveInteger(env("BACKFILL_CHECK_TOP"), "BACKFILL_CHECK_TOP") ?? "1";
+  const checkMaxPages =
+    validatePositiveInteger(env("BACKFILL_CHECK_MAX_PAGES"), "BACKFILL_CHECK_MAX_PAGES") ?? "1";
   const backfill = {
     ...backfillOptionsFromEnv(),
-    pageSize: "1",
-    maxPages: 1,
+    pageSize: checkTop,
+    maxPages: Number.parseInt(checkMaxPages, 10),
     forcePageSize: true
   };
   const rows = await client.fetchProductionOutputs({
@@ -180,7 +228,10 @@ export async function runBackfillCheck(): Promise<void> {
   });
   const pagination = client.lastFetchStats();
   console.log("OData backfill check HTTP 200");
+  console.log(`Check top: ${checkTop}`);
+  console.log(`Check max pages: ${checkMaxPages}`);
   console.log(`Rows returned: ${rows.length}`);
+  console.log(`Pages attempted: ${pagination.pagesAttempted}`);
   console.log(`Pages fetched: ${pagination.pagesFetched}`);
   console.log(`More pages likely: ${pagination.truncatedByMaxPages ? "yes" : "no"}`);
   console.log(`Keyset pagination available: ${pagination.keysetPaginationUsed || pagination.truncatedByMaxPages ? "yes" : "no"}`);
@@ -191,21 +242,99 @@ export async function runBackfill(): Promise<void> {
   const backfill = backfillOptionsFromEnv();
   const client = createLiveClient();
   const repository = new DrizzleSyncRunRepository();
-  let result: SyncCommitResult;
   try {
-    result = await new ODataSyncProcessor(repository, client).run({
-      mode: "backfill",
-      sourceSystem: env("BACKFILL_SOURCE_SYSTEM") ?? DEFAULT_SOURCE_SYSTEM,
-      requestedBy: null,
-      backfill
-    });
+    const chunkPagesValue = validatePositiveInteger(env("BACKFILL_CHUNK_PAGES"), "BACKFILL_CHUNK_PAGES");
+    if (!chunkPagesValue) {
+      const { result, pagination } = await executeBackfillChunk(repository, client, backfill);
+      printSummary(result, backfill, pagination, true);
+      return;
+    }
+
+    const maxChunksValue = validatePositiveInteger(env("BACKFILL_MAX_CHUNKS"), "BACKFILL_MAX_CHUNKS");
+    const chunkRetriesValue = validatePositiveInteger(env("BACKFILL_CHUNK_RETRIES"), "BACKFILL_CHUNK_RETRIES");
+    const chunkPages = Number.parseInt(chunkPagesValue, 10);
+    const maxChunks = maxChunksValue ? Number.parseInt(maxChunksValue, 10) : null;
+    const chunkRetries = chunkRetriesValue ? Number.parseInt(chunkRetriesValue, 10) : 2;
+    let afterEntryNo = backfill.afterEntryNo;
+    let chunks = 0;
+    let rowsFetched = 0;
+    let rowsInserted = 0;
+    let rowsUpdated = 0;
+    let rowsSkipped = 0;
+    let pagesAttempted = 0;
+    let pagesFetched = 0;
+    let finalMaxEntryNo: string | null = afterEntryNo?.toString() ?? null;
+
+    while (true) {
+      if (maxChunks !== null && chunks >= maxChunks) {
+        printChunkedSummary({
+          chunks,
+          rowsFetched,
+          rowsInserted,
+          rowsUpdated,
+          rowsSkipped,
+          pagesAttempted,
+          pagesFetched,
+          finalMaxEntryNo,
+          completed: false
+        });
+        return;
+      }
+
+      const chunkBackfill: ODataBackfillOptions = {
+        ...backfill,
+        ...(afterEntryNo !== undefined ? { afterEntryNo } : {}),
+        maxPages: chunkPages
+      };
+      let chunkResult: Awaited<ReturnType<typeof executeBackfillChunk>> | null = null;
+      for (let attempt = 1; attempt <= chunkRetries + 1; attempt += 1) {
+        try {
+          chunkResult = await executeBackfillChunk(repository, client, chunkBackfill);
+          break;
+        } catch (error) {
+          if (attempt > chunkRetries) throw error;
+          console.log(
+            `Chunk ${chunks + 1} attempt ${attempt} failed safely; retrying (${redactedError(error)})`
+          );
+        }
+      }
+      if (!chunkResult) throw new Error("Backfill chunk did not return a result");
+      const { result, pagination } = chunkResult;
+      chunks += 1;
+      rowsFetched += result.rowsFetched;
+      rowsInserted += result.rowsInserted;
+      rowsUpdated += result.rowsUpdated;
+      rowsSkipped += result.rowsSkipped;
+      pagesAttempted += pagination.pagesAttempted;
+      pagesFetched += pagination.pagesFetched;
+      finalMaxEntryNo = result.maxEntryNo ?? finalMaxEntryNo;
+      console.log(
+        `Chunk ${chunks} completed: run=${result.runId} fetched=${result.rowsFetched} inserted=${result.rowsInserted} updated=${result.rowsUpdated} skipped=${result.rowsSkipped} maxEntry=${result.maxEntryNo ?? "none"}`
+      );
+
+      if (!pagination.truncatedByMaxPages || result.rowsFetched === 0) {
+        printChunkedSummary({
+          chunks,
+          rowsFetched,
+          rowsInserted,
+          rowsUpdated,
+          rowsSkipped,
+          pagesAttempted,
+          pagesFetched,
+          finalMaxEntryNo,
+          completed: true
+        });
+        return;
+      }
+
+      if (!result.maxEntryNo) {
+        throw new Error("Backfill chunk could not advance because no Entry_No cursor was available");
+      }
+      afterEntryNo = BigInt(result.maxEntryNo);
+    }
   } finally {
     await repository.close();
   }
-
-  const pagination = client.lastFetchStats() ?? defaultFetchStats;
-  await logBackfillAudit(result, backfill, pagination);
-  printSummary(result, backfill, pagination, true);
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
