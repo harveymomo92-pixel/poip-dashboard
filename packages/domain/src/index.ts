@@ -6,6 +6,7 @@ export * from "./downtime/natural-key.js";
 export * from "./downtime/status.js";
 export * from "./imports/downtime-import.js";
 export * from "./kpi/output.js";
+export * from "./kpi/output-classification.js";
 export * from "./kpi/dashboard.js";
 export * from "./kpi/daily-item-resume.js";
 export * from "./kpi/target-bucket.js";

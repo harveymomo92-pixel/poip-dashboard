@@ -34,6 +34,7 @@ test("normalizeODataOutputRow reports critical and warning quality issues", () =
     Entry_No: "",
     Posting_Date: "2026-22-99",
     Item_No: "",
+    Entry_Type: "Output",
     Quantity: "-1",
     Reject_KG: "2"
   });
@@ -47,7 +48,7 @@ test("normalizeODataOutputRow reports critical and warning quality issues", () =
       "INVALID_DATE",
       "MISSING_DOCUMENT_NO",
       "MISSING_ITEM_NO",
-      "MISSING_GROSS_WEIGHT",
+      "UNKNOWN_OUTPUT_CLASS",
       "NEGATIVE_QUANTITY"
     ]
   );
@@ -60,6 +61,7 @@ test("normalizeODataOutputRow treats negative Output quantity as an informationa
     Document_No: "PROD-CORR",
     Entry_Type: "Output",
     Item_No: "FG-001",
+    Unit_of_Measure_Code: "PCS",
     Quantity: "-2",
     Reject_KG: "0"
   });
@@ -69,6 +71,53 @@ test("normalizeODataOutputRow treats negative Output quantity as an informationa
   assert.deepEqual(result.issues.map((issue) => `${issue.code}:${issue.severity}`), [
     "OUTPUT_CORRECTION:INFO"
   ]);
+});
+
+test("normalizeODataOutputRow classifies RJ KG rows as reject using quantity kg", () => {
+  const result = normalizeODataOutputRow({
+    Entry_No: "44",
+    Posting_Date: "2026-06-22",
+    Document_No: "SPK2606/F0012",
+    Entry_Type: "Output",
+    Item_No: "rj015",
+    Description: "REJECT GUMPALAN PET",
+    Quantity: "2.5",
+    Unit_of_Measure_Code: "kg",
+    Gross_Weight: "0.5"
+  });
+
+  assert.equal(result.canCommit, true);
+  assert.equal(result.normalized.normalizedOutputType, "REJECT");
+  assert.equal(result.normalized.itemNo, "RJ015");
+  assert.equal(result.normalized.uom, "KG");
+  assert.equal(result.normalized.rejectKg, 2.5);
+  assert.equal(result.normalized.rejectPcsEq, 5);
+});
+
+test("normalizeODataOutputRow flags output classification mismatches", () => {
+  const rejectMismatch = normalizeODataOutputRow({
+    Entry_No: "45",
+    Posting_Date: "2026-06-22",
+    Document_No: "SPK-MISMATCH-1",
+    Entry_Type: "Output",
+    Item_No: "RJ015",
+    Quantity: "1",
+    Unit_of_Measure_Code: "PCS"
+  });
+  const okMismatch = normalizeODataOutputRow({
+    Entry_No: "46",
+    Posting_Date: "2026-06-22",
+    Document_No: "SPK-MISMATCH-2",
+    Entry_Type: "Output",
+    Item_No: "PF192CL12",
+    Quantity: "1",
+    Unit_of_Measure_Code: "KG"
+  });
+
+  assert.equal(rejectMismatch.normalized.normalizedOutputType, "REJECT_UOM_MISMATCH");
+  assert.ok(rejectMismatch.issues.some((issue) => issue.code === "REJECT_UOM_MISMATCH"));
+  assert.equal(okMismatch.normalized.normalizedOutputType, "OK_UOM_MISMATCH");
+  assert.ok(okMismatch.issues.some((issue) => issue.code === "OK_UOM_MISMATCH"));
 });
 
 test("createODataRowHash is stable across object key order", () => {

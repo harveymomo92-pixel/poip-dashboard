@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDashboardKpiSummary } from "../packages/domain/src/kpi/dashboard.js";
+import { classifyOutputRow } from "../packages/domain/src/kpi/output-classification.js";
 import { createDatabase } from "../packages/db/src/client.js";
 import {
   buildDailyItemResume,
@@ -182,6 +183,39 @@ function outputEntryTypePredicate(alias?: string): string {
   return `upper(coalesce(${column}, '')) = 'OUTPUT'`;
 }
 
+function okOutputPredicate(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `upper(coalesce(${prefix}item_no, '')) not like 'RJ%' and upper(coalesce(${prefix}uom, '')) = 'PCS'`;
+}
+
+function rejectOutputPredicate(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `upper(coalesce(${prefix}item_no, '')) like 'RJ%' and upper(coalesce(${prefix}uom, '')) = 'KG'`;
+}
+
+function rejectKgExpression(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `case when ${rejectOutputPredicate(alias)} then abs(${prefix}quantity) else 0 end`;
+}
+
+function rejectPcsEqExpression(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `case when ${rejectOutputPredicate(alias)} and ${prefix}gross_weight_per_pcs > 0 then abs(${prefix}quantity) / ${prefix}gross_weight_per_pcs else null end`;
+}
+
+function outputClassCase(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `
+    case
+      when ${okOutputPredicate(alias)} then 'OK'
+      when ${rejectOutputPredicate(alias)} then 'REJECT'
+      when upper(coalesce(${prefix}item_no, '')) like 'RJ%' then 'REJECT_UOM_MISMATCH'
+      when nullif(btrim(coalesce(${prefix}item_no, '')), '') is not null then 'OK_UOM_MISMATCH'
+      else 'UNKNOWN_OUTPUT_CLASS'
+    end
+  `;
+}
+
 function buildFilters(): Filters {
   const fallback = { from: jakartaDate(-6), to: jakartaDate() };
   const from = validateDate(process.env.RECONCILE_FROM?.trim() || fallback.from, "RECONCILE_FROM");
@@ -228,10 +262,10 @@ async function mappingCoverageSummary(pool: DatabasePool): Promise<MappingCovera
         count(*) as total_rows,
         count(*) filter (where entity_id is not null) as mapped_rows,
         count(*) filter (where entity_id is null) as unmapped_rows,
-        count(*) filter (where normalized_output_type = 'OK') as ok_rows,
-        count(*) filter (where entity_id is not null and normalized_output_type = 'OK') as mapped_ok_rows,
-        count(*) filter (where entity_id is null and normalized_output_type = 'OK') as unmapped_ok_rows,
-        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK'), 0) as unmapped_ok_qty
+        count(*) filter (where ${okOutputPredicate()}) as ok_rows,
+        count(*) filter (where entity_id is not null and ${okOutputPredicate()}) as mapped_ok_rows,
+        count(*) filter (where entity_id is null and ${okOutputPredicate()}) as unmapped_ok_rows,
+        coalesce(sum(quantity) filter (where entity_id is null and ${okOutputPredicate()}), 0) as unmapped_ok_qty
       from production_outputs
       where source_system = $1
         and ${outputEntryTypePredicate()}
@@ -321,7 +355,7 @@ async function fetchUnmappedSourceGroups(
                po.posting_date,
                po.quantity
         from production_outputs po
-        where po.source_system = $1 and ${outputEntryTypePredicate("po")} and po.entity_id is null and po.normalized_output_type = 'OK'
+        where po.source_system = $1 and ${outputEntryTypePredicate("po")} and po.entity_id is null and ${okOutputPredicate("po")}
       )
       select source_field,
              coalesce(source_value, '') as source_value,
@@ -363,10 +397,10 @@ async function previewMappingPlanRow(pool: DatabasePool, row: Pick<MappingPlanRo
       select
         count(*) filter (where po.entity_id is null) as affected_rows,
         count(*) filter (where po.entity_id is not null) as already_mapped_rows,
-        coalesce(sum(po.quantity) filter (where po.entity_id is null and po.normalized_output_type = 'OK'), 0) as ok_qty,
+        coalesce(sum(po.quantity) filter (where po.entity_id is null and ${okOutputPredicate("po")}), 0) as ok_qty,
         count(*) filter (
           where po.entity_id is null
-            and po.normalized_output_type = 'OK'
+            and ${okOutputPredicate("po")}
             and exists (
               select 1
               from production_targets pt
@@ -407,7 +441,7 @@ async function printEntitySourceUsage(pool: DatabasePool, title = "Entity source
         select ${preferredEntitySourceFieldSql("po")} as source_field,
                count(*) as rows,
                count(*) filter (where po.entity_id is null) as unmapped_rows,
-               coalesce(sum(po.quantity) filter (where po.normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(po.quantity) filter (where ${okOutputPredicate("po")}), 0) as ok_qty
         from production_outputs po
         where po.source_system = $1
           and ${outputEntryTypePredicate("po")}
@@ -436,10 +470,10 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       count(*) as total_rows,
       min(posting_date)::text as min_posting_date,
       max(posting_date)::text as max_posting_date,
-      count(*) filter (where normalized_output_type = 'OK') as ok_rows,
-      count(*) filter (where reject_kg > 0) as reject_rows,
+      count(*) filter (where ${okOutputPredicate()}) as ok_rows,
+      count(*) filter (where ${rejectOutputPredicate()}) as reject_rows,
       count(*) filter (where entity_id is null) as unmapped_rows,
-      count(*) filter (where reject_kg > 0 and reject_pcs_eq is null) as conversion_gaps
+      count(*) filter (where ${rejectOutputPredicate()} and (gross_weight_per_pcs is null or gross_weight_per_pcs <= 0)) as conversion_gaps
     from production_outputs
     where source_system = $1
   `, [SOURCE_SYSTEM]);
@@ -479,13 +513,13 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
     )
   );
   await printRows(
-    "Rows by normalized output type",
+    "Rows by item/UOM output classification",
     pool.query(
-      `select normalized_output_type, count(*) as rows, coalesce(sum(quantity), 0) as quantity
+      `select ${outputClassCase()} as output_class, count(*) as rows, coalesce(sum(quantity), 0) as quantity
        from production_outputs
        where source_system = $1
        group by 1
-       order by rows desc, normalized_output_type asc`,
+       order by rows desc, output_class asc`,
       [SOURCE_SYSTEM]
     )
   );
@@ -495,7 +529,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       `select ${preferredEntitySourceFieldSql("po")} as source_field,
               coalesce(${preferredEntitySourceValueSql("po")}, '(blank)') as source_value,
               count(*) as rows,
-              coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as ok_qty
+              coalesce(sum(case when ${okOutputPredicate("po")} then po.quantity else 0 end), 0) as ok_qty
        from production_outputs po
        where po.source_system = $1 and po.entity_id is null
        group by 1, 2
@@ -513,7 +547,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
               coalesce(sum(po.quantity), 0) as ok_qty
        from production_outputs po
        inner join master_entities me on me.id = po.entity_id
-       where po.source_system = $1 and po.normalized_output_type = 'OK'
+       where po.source_system = $1 and ${okOutputPredicate("po")}
        group by me.entity_code, me.display_name
        order by ok_qty desc, rows desc
        limit 15`,
@@ -542,7 +576,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
               count(*) as rows,
               coalesce(sum(quantity), 0) as ok_qty
        from production_outputs
-       where source_system = $1 and normalized_output_type = 'OK'
+       where source_system = $1 and ${okOutputPredicate()}
        group by item_no
        order by ok_qty desc
        limit 15`,
@@ -569,19 +603,25 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
       reject_pcs_equivalent: string | number | null;
       incomplete_reject_conversion_count: string | number | null;
       active_days: string | number | null;
+      ok_rows: string | number;
+      reject_rows: string | number;
+      reject_conversion_complete_count: string | number;
       raw_rows: string | number;
       excluded_rows: string | number;
     }>(
       `
         select
-          coalesce(sum(case when normalized_output_type = 'OK' then quantity else 0 end), 0) as output_ok_qty,
-          coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as raw_ok_qty,
-          coalesce(sum(case when reject_kg > 0 then reject_kg else 0 end), 0) as reject_kg,
-          coalesce(sum(case when reject_pcs_eq > 0 then reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
-          count(*) filter (where reject_kg > 0 and reject_pcs_eq is null) as incomplete_reject_conversion_count,
-          count(distinct posting_date) filter (where normalized_output_type = 'OK') as active_days,
+          coalesce(sum(case when ${okOutputPredicate()} then quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as raw_ok_qty,
+          coalesce(sum(${rejectKgExpression()}), 0) as reject_kg,
+          coalesce(sum(${rejectPcsEqExpression()}), 0) as reject_pcs_equivalent,
+          count(*) filter (where ${rejectOutputPredicate()} and (gross_weight_per_pcs is null or gross_weight_per_pcs <= 0)) as incomplete_reject_conversion_count,
+          count(distinct posting_date) filter (where ${okOutputPredicate()}) as active_days,
+          count(*) filter (where ${okOutputPredicate()}) as ok_rows,
+          count(*) filter (where ${rejectOutputPredicate()}) as reject_rows,
+          count(*) filter (where ${rejectOutputPredicate()} and gross_weight_per_pcs > 0) as reject_conversion_complete_count,
           count(*) as raw_rows,
-          count(*) filter (where normalized_output_type <> 'OK') as excluded_rows
+          count(*) filter (where not ${okOutputPredicate()}) as excluded_rows
         from production_outputs
         where ${where.where}
       `,
@@ -593,7 +633,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
         from production_outputs
         where ${where.where}
           and entity_id is not null
-          and normalized_output_type = 'OK'
+          and ${okOutputPredicate()}
         group by entity_id, posting_date
       `,
       where.params
@@ -670,6 +710,8 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   console.log(`Reject PCS equivalent: ${formatNumber(kpis.rejectPcsEquivalent, 4)}`);
   console.log(`Reject conversion status: ${kpis.rejectConversionStatus}; gaps: ${kpis.incompleteRejectConversionCount}`);
   console.log(`Reject rate: ${formatPct(kpis.rejectRatePct)}`);
+  console.log(`OK rows count: ${row?.ok_rows ?? 0}; reject rows count: ${row?.reject_rows ?? 0}`);
+  console.log(`Reject PCS Eq complete/incomplete count: ${row?.reject_conversion_complete_count ?? 0}/${row?.incomplete_reject_conversion_count ?? 0}`);
   console.log(`Raw rows in window: ${row?.raw_rows ?? 0}; excluded from OK KPI: ${row?.excluded_rows ?? 0}`);
   console.log(`Active entity-days: ${coverage.activeEntityDays}; missing target entity-days: ${coverage.missingTargetEntityDays}`);
   console.log(
@@ -852,34 +894,85 @@ async function runDailyItemResume(pool: DatabasePool) {
   }));
   const resume = buildDailyItemResume(sourceRows, targets, filters);
   const allRows = buildDailyItemResume(sourceRows, targets, { ...filters, pageSize: Math.max(1, sourceRows.length) }).rows;
+  const classificationCounts = sourceRows.reduce(
+    (acc, row) => {
+      const classification = classifyOutputRow({ entryType: "Output", itemNo: row.itemNo, uom: row.uom });
+      if (classification === "OK") acc.okRows += 1;
+      else if (classification === "REJECT") acc.rejectRows += 1;
+      else acc.unknownRows += 1;
+      return acc;
+    },
+    { okRows: 0, rejectRows: 0, unknownRows: 0 }
+  );
   const totals = allRows.reduce(
     (acc, row) => ({
       netOutput: acc.netOutput + row.netOutputQty,
       positiveOutput: acc.positiveOutput + row.positiveOutputQty,
       correctionOutput: acc.correctionOutput + row.correctionOutputQty,
-      rejectAttachedCount: acc.rejectAttachedCount + row.rejectDetails.length,
-      rejectOnlyGroupCount: acc.rejectOnlyGroupCount + (row.netOutputQty === 0 && row.rejectDetails.length > 0 ? 1 : 0),
+      rejectAttachedCount: acc.rejectAttachedCount + (row.rejectAttachmentStatus === "ATTACHED" ? row.rejectDetails.length : 0),
+      rejectOnlyGroupCount: acc.rejectOnlyGroupCount + (row.rejectAttachmentStatus === "REJECT_ONLY" ? 1 : 0),
+      ambiguousRejectAttachmentCount: acc.ambiguousRejectAttachmentCount + (row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT" ? 1 : 0),
+      totalRejectKg: acc.totalRejectKg + row.rejectKg,
+      conversionCompleteCount: acc.conversionCompleteCount + row.rejectDetails.filter((detail) => detail.conversionStatus === "COMPLETE").length,
       conversionGaps: acc.conversionGaps + row.rejectDetails.filter((detail) => detail.conversionStatus === "INCOMPLETE").length,
       targetMissingCount: acc.targetMissingCount + (row.dailyTarget === null ? 1 : 0),
       targetNonMatchedCount: acc.targetNonMatchedCount + (row.targetReason === "TARGET_MATCHED" ? 0 : 1)
     }),
-    { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, conversionGaps: 0, targetMissingCount: 0, targetNonMatchedCount: 0 }
+    { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, ambiguousRejectAttachmentCount: 0, totalRejectKg: 0, conversionCompleteCount: 0, conversionGaps: 0, targetMissingCount: 0, targetNonMatchedCount: 0 }
   );
 
   console.log("Business Central daily item resume");
   console.log(`Window: ${baseFilters.from} to ${baseFilters.to}`);
   console.log(`Raw Output row count: ${sourceRows.length}`);
+  console.log(`OK rows count: ${classificationCounts.okRows}`);
+  console.log(`Reject rows count: ${classificationCounts.rejectRows}`);
+  console.log(`Unknown/mismatch output rows count: ${classificationCounts.unknownRows}`);
   console.log(`Grouped resume row count: ${resume.pagination.totalRows}`);
   console.log(`Net output: ${formatNumber(totals.netOutput, 4)}`);
   console.log(`Positive output: ${formatNumber(totals.positiveOutput, 4)}`);
   console.log(`Correction output: ${formatNumber(totals.correctionOutput, 4)}`);
   console.log(`Reject attached count: ${totals.rejectAttachedCount}`);
   console.log(`Reject-only group count: ${totals.rejectOnlyGroupCount}`);
-  console.log(`Conversion gaps: ${totals.conversionGaps}`);
+  console.log(`Ambiguous reject attachment count: ${totals.ambiguousRejectAttachmentCount}`);
+  console.log(`Total reject kg: ${formatNumber(totals.totalRejectKg, 4)}`);
+  console.log(`Reject PCS Eq complete/incomplete count: ${totals.conversionCompleteCount}/${totals.conversionGaps}`);
   console.log(`Target missing count: ${totals.targetMissingCount}`);
   console.log(`Target non-matched count: ${totals.targetNonMatchedCount}`);
   await printEntitySourceUsage(pool);
   printDailyItemResumeTargetBreakdown(allRows);
+  const rejectDocuments = new Map<string, { rejectKg: number; rows: number; okItems: Set<string>; rejectItems: Set<string> }>();
+  for (const row of allRows) {
+    for (const detail of row.rejectDetails) {
+      const documentNo = String(detail.documentNo ?? "(blank)");
+      const current = rejectDocuments.get(documentNo) ?? { rejectKg: 0, rows: 0, okItems: new Set<string>(), rejectItems: new Set<string>() };
+      current.rejectKg += numberValue(detail.rejectKg as string | number | null | undefined);
+      current.rows += 1;
+      current.okItems.add(row.itemNo);
+      current.rejectItems.add(String(detail.itemNo ?? "N/A"));
+      rejectDocuments.set(documentNo, current);
+    }
+  }
+  console.log("Top reject documents:");
+  const topRejectDocuments = [...rejectDocuments.entries()]
+    .sort((left, right) => right[1].rejectKg - left[1].rejectKg || right[1].rows - left[1].rows)
+    .slice(0, 5);
+  if (topRejectDocuments.length === 0) console.log("- none");
+  for (const [documentNo, value] of topRejectDocuments) {
+    console.log(`- ${documentNo}: reject_kg=${formatNumber(value.rejectKg, 4)}; rows=${value.rows}; ok_items=${[...value.okItems].join(", ")}; reject_items=${[...value.rejectItems].join(", ")}`);
+  }
+  const attachedSample = allRows.flatMap((row) =>
+    row.rejectAttachmentStatus === "ATTACHED"
+      ? row.rejectDetails.map((detail) => ({ row, detail }))
+      : []
+  )[0];
+  console.log("Sample attached reject:");
+  if (attachedSample) {
+    console.log(
+      `- ${String(attachedSample.detail.documentNo ?? "N/A")}: OK item ${attachedSample.row.itemNo}; Reject item ${String(attachedSample.detail.itemNo ?? "N/A")}; reject_kg=${formatNumber(numberValue(attachedSample.detail.rejectKg as string | number | null | undefined), 4)}; attached to OK group`
+    );
+  } else {
+    console.log("- none");
+  }
   console.log("Sample grouped rows:");
   for (const row of resume.rows.slice(0, 5)) {
     console.log(`- ${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; reason=${row.targetReason}; achievement=${formatPct(row.achievementPct)}; status=${row.achievementStatus}`);
@@ -929,7 +1022,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(machine_description, '(blank)') as machine_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
@@ -945,7 +1038,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(machine_center_no, '(blank)') as machine_center_no,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
@@ -961,7 +1054,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(prod_line_no, '(blank)') as prod_line_no,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
@@ -977,7 +1070,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(prod_line_description, '(blank)') as prod_line_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
@@ -998,7 +1091,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
                coalesce(prod_line_no, '(blank)') as prod_line_no,
                coalesce(prod_line_description, '(blank)') as prod_line_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate("po")}), 0) as ok_qty
         from production_outputs po
         where po.source_system = $1 and ${outputEntryTypePredicate("po")} and po.entity_id is null
         group by 1, 2, 3, 4, 5, 6
@@ -1016,7 +1109,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
                coalesce(item_no, '(blank)') as item_no,
                left(coalesce(max(item_description), ''), 80) as item_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1, 2
@@ -1032,7 +1125,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select date_trunc('month', posting_date)::date::text as month,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+               coalesce(sum(quantity) filter (where ${okOutputPredicate()}), 0) as ok_qty
         from production_outputs
         where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
@@ -1338,7 +1431,7 @@ async function runMappingApply(pool: ReturnType<typeof createDatabase>["pool"]) 
       select
         count(*) filter (where entity_id is null) as affected_rows,
         count(*) filter (where entity_id is not null) as already_mapped_rows,
-        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK'), 0) as ok_qty
+        coalesce(sum(quantity) filter (where entity_id is null and ${okOutputPredicate()}), 0) as ok_qty
       from production_outputs
       where source_system = $1
         and ${sqlNormalizeExpression(sourceColumn)} = $2
@@ -1545,7 +1638,7 @@ function targetCoverageSummary(pool: ReturnType<typeof createDatabase>["pool"]) 
         from production_outputs po
         where po.source_system = $1
           and ${outputEntryTypePredicate("po")}
-          and po.normalized_output_type = 'OK'
+          and ${okOutputPredicate("po")}
       )
       select
         output_rows.month,
@@ -1570,7 +1663,7 @@ function conversionGapSummary(pool: ReturnType<typeof createDatabase>["pool"]) {
       select po.item_no,
              coalesce(po.uom, '') as uom,
              count(*) as rows,
-             coalesce(sum(po.reject_kg), 0) as reject_kg,
+             coalesce(sum(${rejectKgExpression("po")}), 0) as reject_kg,
              max(icm.gross_weight_per_pcs) as mapped_gross_weight_per_pcs
       from production_outputs po
       left join item_conversion_mappings icm
@@ -1578,8 +1671,8 @@ function conversionGapSummary(pool: ReturnType<typeof createDatabase>["pool"]) {
        and upper(icm.item_no) = upper(po.item_no)
        and upper(coalesce(icm.uom, '')) = upper(coalesce(po.uom, ''))
       where po.source_system = $1
-        and po.reject_kg > 0
-        and (po.reject_pcs_eq is null or po.gross_weight_per_pcs is null or po.gross_weight_per_pcs <= 0)
+        and ${rejectOutputPredicate("po")}
+        and (po.gross_weight_per_pcs is null or po.gross_weight_per_pcs <= 0)
       group by po.item_no, coalesce(po.uom, '')
       order by reject_kg desc, rows desc
       limit 20

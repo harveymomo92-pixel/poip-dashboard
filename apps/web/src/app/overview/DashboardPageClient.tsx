@@ -99,6 +99,7 @@ interface DailyItemResumeRow {
   readonly rejectKg: number;
   readonly rejectPcsEq: number | null;
   readonly rejectConversionStatus: string;
+  readonly rejectAttachmentStatus: string;
   readonly rejectPct: number | null;
   readonly achievementPct: number | null;
   readonly achievementStatus: string;
@@ -179,6 +180,14 @@ function TargetDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
     ? `N/A / ${row.targetReason}`
     : `${formatNumber(row.transactionProrataTarget ?? 0, 1)} / ${row.targetReason}`;
   return <DetailList summary={summary} rows={[row.targetDetails]} />;
+}
+
+function RejectDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
+  const summary = row.rejectDetails.length === 0
+    ? `$<RejectDetail row={row} />`
+    : `${formatNumber(row.rejectKg, 1)} kg · ${row.rejectDetails.length} detail`;
+
+  return <DetailList summary={summary} rows={row.rejectDetails} />;
 }
 
 function buildQuery(filters: Filters, page = 1) {
@@ -469,7 +478,12 @@ export function DashboardPageClient() {
                   <tr key={`${row.postingDate}-${row.machineLabel}-${row.itemNo}`}>
                     <td>{row.postingDate}</td>
                     <td>{row.machineLabel}</td>
-                    <td><strong>{row.itemNo}</strong><br /><span className="muted-cell">{row.itemDescription ?? "—"}</span></td>
+                    <td>
+                      <strong>{row.itemNo}</strong><br />
+                      <span className="muted-cell">{row.itemDescription ?? "—"}</span>
+                      {row.rejectAttachmentStatus === "REJECT_ONLY" ? <><br /><StatusBadge status="WARNING" label="Reject only" /></> : null}
+                      {row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT" ? <><br /><StatusBadge status="WARNING" label="Ambiguous reject" /></> : null}
+                    </td>
                     <td>{row.itemCategoryCode ?? "—"}</td>
                     <td><DetailList summary={row.documentSummary} rows={row.documentDetails} /></td>
                     <td>{row.shiftSummary}</td>
@@ -479,7 +493,10 @@ export function DashboardPageClient() {
                     <td><strong>{formatNumber(row.netOutputQty, 1)}</strong></td>
                     <td>{row.uom}</td>
                     <td className={row.correctionOutputQty < 0 ? "negative-number" : ""}>{formatNumber(row.correctionOutputQty, 1)}</td>
-                    <td><DetailList summary={`${formatNumber(row.rejectKg, 2)} kg`} rows={row.rejectDetails} /></td>
+                    <td>
+                      <DetailList summary={`${formatNumber(row.rejectKg, 2)} kg`} rows={row.rejectDetails} />
+                      {row.rejectAttachmentStatus === "ATTACHED" ? <StatusBadge status="COVERED" label="Attached" /> : null}
+                    </td>
                     <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>
                     <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /> {row.targetReason !== "TARGET_MATCHED" ? <StatusBadge status={row.targetReason} /> : null}</td>
                     <td>{formatPct(row.rejectPct)}</td>

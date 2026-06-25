@@ -23,8 +23,8 @@ function row(input: Partial<DailyItemResumeSourceRow> = {}): DailyItemResumeSour
     documentNo: input.documentNo ?? "DOC-1",
     externalDocumentNo: input.externalDocumentNo ?? null,
     normalizedOutputType: input.normalizedOutputType ?? "OK",
-    itemNo: input.itemNo ?? "FG-001",
-    itemDescription: input.itemDescription ?? "Cup 12 oz",
+    itemNo: input.itemNo ?? "PF192CL12",
+    itemDescription: input.itemDescription ?? "PREFORM 19.2 GR CLEAR JB - 12000",
     itemCategoryCode: input.itemCategoryCode ?? "THERMO",
     machineDescription: input.machineDescription ?? null,
     machineCenterNo: input.machineCenterNo ?? "MC-1",
@@ -102,32 +102,82 @@ test("daily item resume uses machine description label when no mapped entity exi
   assert.equal(result.rows[0]?.targetReason, "UNMAPPED_ENTITY");
 });
 
-test("reject rows attach by same date, machine, and document with PCS equivalent from OK gross weight", () => {
+test("RJ KG reject rows attach by same document with PCS equivalent from OK gross weight", () => {
   const result = buildDailyItemResume([
-    row({ id: "ok", documentNo: "DOC-1", quantity: 100, grossWeightPerPcs: 0.5 }),
-    row({ id: "reject", normalizedOutputType: "REJECT", documentNo: "DOC-1", quantity: 10, rejectKg: 10, grossWeightPerPcs: null })
+    row({ id: "ok", documentNo: "SPK2606/F0012", itemNo: "PF192CL12", quantity: 100, grossWeightPerPcs: 0.5 }),
+    row({
+      id: "reject",
+      normalizedOutputType: "REJECT",
+      documentNo: "SPK2606/F0012",
+      itemNo: "RJ015",
+      itemDescription: "REJECT GUMPALAN PET",
+      quantity: 10,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null
+    })
   ], [], filters);
 
   assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0]?.itemNo, "PF192CL12");
   assert.equal(result.rows[0]?.rejectKg, 10);
   assert.equal(result.rows[0]?.rejectPcsEq, 20);
   assert.equal(result.rows[0]?.rejectConversionStatus, "COMPLETE");
+  assert.equal(result.rows[0]?.rejectAttachmentStatus, "ATTACHED");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.itemNo, "RJ015");
 });
 
-test("reject rows fallback by same date and machine, and create reject-only group when no OK group exists", () => {
+test("RJ KG reject rows with unmatched document become reject-only groups", () => {
   const fallback = buildDailyItemResume([
     row({ id: "ok", documentNo: "DOC-1", quantity: 100, grossWeightPerPcs: 1 }),
-    row({ id: "reject", normalizedOutputType: "REJECT", documentNo: "DOC-X", quantity: 5, rejectKg: 5 })
+    row({ id: "reject", normalizedOutputType: "REJECT", itemNo: "RJ015", uom: "KG", documentNo: "DOC-X", quantity: 5, rejectKg: 0 })
   ], [], filters);
-  assert.equal(fallback.rows.length, 1);
-  assert.equal(fallback.rows[0]?.rejectKg, 5);
+  assert.equal(fallback.rows.length, 2);
+  assert.equal(fallback.rows.find((item) => item.itemNo === "RJ015")?.rejectAttachmentStatus, "REJECT_ONLY");
+  assert.equal(fallback.rows.find((item) => item.itemNo === "RJ015")?.rejectKg, 5);
 
   const rejectOnly = buildDailyItemResume([
-    row({ id: "reject-only", normalizedOutputType: "REJECT", documentNo: "DOC-X", quantity: 5, rejectKg: 5 })
+    row({ id: "reject-only", normalizedOutputType: "REJECT", itemNo: "RJ015", uom: "KG", documentNo: "DOC-X", quantity: 5, rejectKg: 0 })
   ], [], filters);
   assert.equal(rejectOnly.rows.length, 1);
   assert.equal(rejectOnly.rows[0]?.netOutputQty, 0);
+  assert.equal(rejectOnly.rows[0]?.rejectAttachmentStatus, "REJECT_ONLY");
   assert.equal(rejectOnly.rows[0]?.rejectConversionStatus, "INCOMPLETE");
+});
+
+test("multiple RJ KG reject rows attach to one OK document", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok", documentNo: "DOC-MULTI", quantity: 100, grossWeightPerPcs: 0.5 }),
+    row({ id: "reject-a", normalizedOutputType: "REJECT", itemNo: "RJ015", uom: "KG", documentNo: "DOC-MULTI", quantity: 3, rejectKg: 0 }),
+    row({ id: "reject-b", normalizedOutputType: "REJECT", itemNo: "RJ016", uom: "KG", documentNo: "DOC-MULTI", quantity: 2, rejectKg: 0 })
+  ], [], filters);
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0]?.rejectKg, 5);
+  assert.equal(result.rows[0]?.rejectPcsEq, 10);
+  assert.equal(result.rows[0]?.rejectDetails.length, 2);
+});
+
+test("multiple OK items with same document do not double count reject kg", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok-a", documentNo: "DOC-AMB", itemNo: "PF192CL12", quantity: 100, grossWeightPerPcs: 0.5 }),
+    row({ id: "ok-b", documentNo: "DOC-AMB", itemNo: "PF27CLJB82", quantity: 50, grossWeightPerPcs: 0.25 }),
+    row({ id: "reject", normalizedOutputType: "REJECT", itemNo: "RJ015", uom: "KG", documentNo: "DOC-AMB", quantity: 4, rejectKg: 0 })
+  ], [], filters);
+
+  const rejectOnly = result.rows.find((item) => item.itemNo === "RJ015");
+  assert.equal(result.rows.length, 3);
+  assert.equal(rejectOnly?.rejectAttachmentStatus, "AMBIGUOUS_REJECT_ATTACHMENT");
+  assert.equal(rejectOnly?.rejectKg, 4);
+  assert.equal(result.rows.filter((item) => item.itemNo !== "RJ015").reduce((sum, item) => sum + item.rejectKg, 0), 0);
+});
+
+test("non-RJ KG rows are excluded from OK output instead of becoming resume rows", () => {
+  const result = buildDailyItemResume([
+    row({ id: "bad-uom", itemNo: "PF192CL12", uom: "KG", quantity: 100 })
+  ], [], filters);
+
+  assert.equal(result.rows.length, 0);
 });
 
 test("target prorata uses daily target times work hours over 24 and pagination is server result shaped", () => {

@@ -12,8 +12,8 @@ const base: DailyItemResumeSourceRow = {
   entityName: "Illig 1",
   machineDescription: null,
   machineCenterNo: "ILLIG1",
-  itemNo: "FG-001",
-  itemDescription: "Cup 240ml",
+  itemNo: "PF192CL12",
+  itemDescription: "PREFORM 19.2 GR CLEAR JB - 12000",
   itemCategoryCode: "JADI",
   documentNo: "DOC-1",
   operatorName: "Operator A",
@@ -86,43 +86,51 @@ test("buildDailyItemResumeRows uses machine description before machine center wh
   assert.equal(rows[0]?.achievementStatus, "TARGET_MISSING");
 });
 
-test("buildDailyItemResumeRows attaches reject by same date machine and document", () => {
+test("buildDailyItemResumeRows attaches RJ KG reject by same document", () => {
   const rows = buildDailyItemResumeRows([
     base,
     {
       ...base,
       normalizedOutputType: "REJECT",
-      itemNo: "REJ-001",
-      itemDescription: "Reject cup",
-      quantity: 0,
-      rejectKg: 5,
+      itemNo: "RJ015",
+      itemDescription: "REJECT GUMPALAN PET",
+      quantity: 5,
+      uom: "KG",
+      rejectKg: 0,
       documentNo: "DOC-1",
       grossWeightPerPcs: null
     }
   ]);
 
   assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.itemNo, "PF192CL12");
   assert.equal(rows[0]?.rejectKg, 5);
   assert.equal(rows[0]?.rejectPcsEq, 10);
   assert.equal(rows[0]?.rejectConversionStatus, "COMPLETE");
+  assert.equal(rows[0]?.rejectAttachmentStatus, "ATTACHED");
+  assert.equal(rows[0]?.rejectDetails[0]?.itemNo, "RJ015");
 });
 
-test("buildDailyItemResumeRows attaches reject by same date and machine fallback", () => {
+test("buildDailyItemResumeRows creates reject-only when document does not match an OK group", () => {
   const rows = buildDailyItemResumeRows([
     base,
     {
       ...base,
       normalizedOutputType: "REJECT",
-      quantity: 0,
-      rejectKg: 4,
+      itemNo: "RJ015",
+      quantity: 4,
+      uom: "KG",
+      rejectKg: 0,
       documentNo: "REJECT-DOC",
       grossWeightPerPcs: null
     }
   ]);
 
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.rejectKg, 4);
-  assert.equal(rows[0]?.rejectPcsEq, 8);
+  assert.equal(rows.length, 2);
+  const rejectOnly = rows.find((row) => row.itemNo === "RJ015");
+  assert.equal(rejectOnly?.rejectAttachmentStatus, "REJECT_ONLY");
+  assert.equal(rejectOnly?.rejectKg, 4);
+  assert.equal(rejectOnly?.rejectPcsEq, null);
 });
 
 test("buildDailyItemResumeRows creates reject-only groups and flags missing gross weight", () => {
@@ -130,18 +138,42 @@ test("buildDailyItemResumeRows creates reject-only groups and flags missing gros
     {
       ...base,
       normalizedOutputType: "REJECT",
-      itemNo: "REJ-ONLY",
-      quantity: 0,
-      rejectKg: 3,
+      itemNo: "RJ015",
+      uom: "KG",
+      quantity: 3,
+      rejectKg: 0,
       grossWeightPerPcs: null
     }
   ]);
 
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.itemNo, "REJ-ONLY");
+  assert.equal(rows[0]?.itemNo, "RJ015");
   assert.equal(rows[0]?.netOutputQty, 0);
+  assert.equal(rows[0]?.rejectAttachmentStatus, "REJECT_ONLY");
   assert.equal(rows[0]?.rejectConversionStatus, "INCOMPLETE");
   assert.equal(rows[0]?.rejectPcsEq, null);
+});
+
+test("buildDailyItemResumeRows does not double count ambiguous reject attachment", () => {
+  const rows = buildDailyItemResumeRows([
+    base,
+    { ...base, itemNo: "PF27CLJB82", itemDescription: "PREFORM 27.5 GR", quantity: 40 },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      uom: "KG",
+      quantity: 2,
+      rejectKg: 0,
+      grossWeightPerPcs: null
+    }
+  ]);
+
+  const rejectOnly = rows.find((row) => row.itemNo === "RJ015");
+  assert.equal(rows.length, 3);
+  assert.equal(rejectOnly?.rejectAttachmentStatus, "AMBIGUOUS_REJECT_ATTACHMENT");
+  assert.equal(rejectOnly?.rejectKg, 2);
+  assert.equal(rows.filter((row) => row.itemNo !== "RJ015").reduce((sum, row) => sum + row.rejectKg, 0), 0);
 });
 
 test("buildDailyItemResumeRows calculates transaction prorata target and missing target status", () => {

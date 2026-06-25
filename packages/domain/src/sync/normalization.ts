@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isProductionEntryType } from "../constants/business-central.js";
+import { classifyOutputRow, type OutputClassification } from "../kpi/output-classification.js";
 
 export type DataQualitySeverity = "CRITICAL" | "WARNING" | "INFO";
 
@@ -15,6 +15,9 @@ export interface DataQualitySignal {
     | "MISSING_GROSS_WEIGHT"
     | "NEGATIVE_QUANTITY"
     | "OUTPUT_CORRECTION"
+    | "REJECT_UOM_MISMATCH"
+    | "OK_UOM_MISMATCH"
+    | "UNKNOWN_OUTPUT_CLASS"
     | "ZERO_QUANTITY"
     | "INVALID_DATE";
   readonly severity: DataQualitySeverity;
@@ -28,7 +31,7 @@ export interface NormalizedODataOutputRow {
   readonly documentNo: string | null;
   readonly externalDocumentNo: string | null;
   readonly entryType: string | null;
-  readonly normalizedOutputType: "OK" | "REJECT" | "OTHER";
+  readonly normalizedOutputType: OutputClassification;
   readonly itemNo: string | null;
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
@@ -133,25 +136,23 @@ export function createOutputFallbackNaturalKey(row: {
     .join("|");
 }
 
-function normalizeOutputType(entryType: string | null, quantity: number, rejectKg: number) {
-  const value = entryType?.toUpperCase() ?? "";
-  if (rejectKg > 0 || value.includes("REJECT") || value.includes("SCRAP")) return "REJECT";
-  if (quantity > 0 || value.includes("OUTPUT")) return "OK";
-  return "OTHER";
-}
-
 export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationResult {
   const issues: DataQualitySignal[] = [];
   const entryNo = parseEntryNo(readField(row, "Entry_No", "EntryNo", "entry_no"));
   const posting = strictDate(readField(row, "Posting_Date", "PostingDate", "posting_date"));
   const document = strictDate(readField(row, "Document_Date", "DocumentDate", "document_date"));
   const quantity = parseNumber(readField(row, "Quantity", "quantity")) ?? 0;
-  const rejectKg = parseNumber(readField(row, "Reject_KG", "RejectKg", "reject_kg")) ?? 0;
+  const sourceRejectKg = parseNumber(readField(row, "Reject_KG", "RejectKg", "reject_kg")) ?? 0;
   const grossWeightPerPcs = parseNumber(
     readField(row, "Gross_Weight", "GrossWeight", "gross_weight_per_pcs")
   );
   const itemNo = cleanString(readField(row, "Item_No", "ItemNo", "item_no"), true);
   const entryType = cleanString(readField(row, "Entry_Type", "EntryType", "entry_type"), true);
+  const uom = cleanString(readField(row, "Unit_of_Measure_Code", "UOM", "uom"), true);
+  const normalizedOutputType = classifyOutputRow({ entryType, itemNo, uom });
+  const rejectKg = normalizedOutputType === "REJECT"
+    ? Math.abs(quantity) || Math.abs(sourceRejectKg)
+    : 0;
   const machineCenterNo = cleanString(
     readField(row, "Machine_Center_No", "MachineCenterNo", "machine_center_no"),
     true
@@ -197,6 +198,25 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
       description: "Item_No is required"
     });
   }
+  if (normalizedOutputType === "REJECT_UOM_MISMATCH") {
+    issues.push({
+      code: "REJECT_UOM_MISMATCH",
+      severity: "WARNING",
+      description: "Item_No starts with RJ but UOM is not KG"
+    });
+  } else if (normalizedOutputType === "OK_UOM_MISMATCH") {
+    issues.push({
+      code: "OK_UOM_MISMATCH",
+      severity: "WARNING",
+      description: "Non-RJ Output item has a UOM other than PCS"
+    });
+  } else if (normalizedOutputType === "UNKNOWN_OUTPUT_CLASS") {
+    issues.push({
+      code: "UNKNOWN_OUTPUT_CLASS",
+      severity: "WARNING",
+      description: "Output row could not be classified as OK or Reject from Item_No and UOM"
+    });
+  }
   if (rejectKg > 0 && (!grossWeightPerPcs || grossWeightPerPcs <= 0)) {
     issues.push({
       code: "MISSING_GROSS_WEIGHT",
@@ -204,7 +224,7 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
       description: "Reject_KG exists but Gross_Weight is empty or zero"
     });
   }
-  if (quantity < 0 && isProductionEntryType(entryType)) {
+  if (quantity < 0 && normalizedOutputType === "OK") {
     issues.push({
       code: "OUTPUT_CORRECTION",
       severity: "INFO",
@@ -234,7 +254,7 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
       readField(row, "External_Document_No", "ExternalDocumentNo", "external_document_no")
     ),
     entryType,
-    normalizedOutputType: normalizeOutputType(entryType, quantity, rejectKg),
+    normalizedOutputType,
     itemNo,
     itemDescription: cleanString(readField(row, "Description", "item_description")),
     itemCategoryCode: cleanString(
@@ -252,7 +272,7 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
     shiftCode: cleanString(readField(row, "Shift", "shift_code"), true),
     operatorName: cleanString(readField(row, "Operator", "operator_name")),
     quantity,
-    uom: cleanString(readField(row, "Unit_of_Measure_Code", "UOM", "uom"), true),
+    uom,
     grossWeightPerPcs,
     rejectKg,
     rejectPcsEq: rejectKg > 0 && grossWeightPerPcs && grossWeightPerPcs > 0 ? rejectKg / grossWeightPerPcs : null,

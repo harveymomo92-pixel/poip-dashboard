@@ -76,6 +76,20 @@ function numberValue(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function uniqueSourceRefs(values: readonly unknown[]): string[] {
+  const refs = new Set<string>();
+  for (const value of values) {
+    if (value === null || typeof value === "undefined") continue;
+    const ref = String(value).trim();
+    if (ref) refs.add(ref);
+  }
+  return [...refs];
+}
+
+function textArraySql(values: readonly string[]) {
+  return sql`array[${sql.join(values.map((value) => sql`${value}`), sql`, `)}]::text[]`;
+}
+
 function timestampText(value: Date | string | null): string | null {
   if (!value) return null;
   return value instanceof Date ? value.toISOString() : value;
@@ -663,7 +677,7 @@ export class MasterRepository {
           and (po.entity_id is null or ${input.remap ?? false})
         returning po.entry_no::text
       `);
-      const entryNos = updated.rows.map((row) => String((row as { entry_no: string }).entry_no));
+      const entryNos = uniqueSourceRefs(updated.rows.map((row) => (row as { entry_no?: unknown }).entry_no));
       let resolvedIssues = 0;
       if (entryNos.length > 0) {
         const issueUpdate = await tx.execute(sql`
@@ -675,7 +689,7 @@ export class MasterRepository {
           where source_system = ${sourceSystem}
             and status in ('OPEN', 'ACKNOWLEDGED')
             and issue_code in ('UNKNOWN_MACHINE', 'UNMAPPED_ENTITY')
-            and source_ref = any(${entryNos}::text[])
+            and source_ref = any(${textArraySql(entryNos)})
         `);
         resolvedIssues = issueUpdate.rowCount ?? 0;
       }

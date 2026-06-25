@@ -68,6 +68,22 @@ function machineLabelSql(outputAlias = "po", entityAlias = "me"): string {
   return `coalesce(${entityAlias}.display_name, ${entityAlias}.entity_code, nullif(btrim(${outputAlias}.machine_description), ''), nullif(btrim(${outputAlias}.machine_center_no), ''), nullif(btrim(${outputAlias}.prod_line_description), ''), nullif(btrim(${outputAlias}.prod_line_no), ''), 'Unmapped')`;
 }
 
+function okOutputPredicateSql(outputAlias = "po"): string {
+  return `upper(coalesce(${outputAlias}.item_no, '')) not like 'RJ%' and upper(coalesce(${outputAlias}.uom, '')) = 'PCS'`;
+}
+
+function rejectOutputPredicateSql(outputAlias = "po"): string {
+  return `upper(coalesce(${outputAlias}.item_no, '')) like 'RJ%' and upper(coalesce(${outputAlias}.uom, '')) = 'KG'`;
+}
+
+function rejectKgSql(outputAlias = "po"): string {
+  return `case when ${rejectOutputPredicateSql(outputAlias)} then abs(${outputAlias}.quantity) else 0 end`;
+}
+
+function rejectPcsEquivalentSql(outputAlias = "po"): string {
+  return `case when ${rejectOutputPredicateSql(outputAlias)} and ${outputAlias}.gross_weight_per_pcs > 0 then abs(${outputAlias}.quantity) / ${outputAlias}.gross_weight_per_pcs else null end`;
+}
+
 function rawMachineSourceFilterSql(outputAlias = "po", paramIndex: number): string {
   return `(
     upper(coalesce(${outputAlias}.machine_description, '')) = $${paramIndex}
@@ -273,9 +289,9 @@ export class DashboardReadRepository {
       `
         select
           po.posting_date::text,
-          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
-          coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
-          coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent
+          coalesce(sum(case when ${okOutputPredicateSql("po")} then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(${rejectKgSql("po")}), 0) as reject_kg,
+          coalesce(sum(${rejectPcsEquivalentSql("po")}), 0) as reject_pcs_equivalent
         from production_outputs po
         where ${where.where}
         group by po.posting_date
@@ -343,9 +359,9 @@ export class DashboardReadRepository {
         select
           ${group.key} as key,
           ${group.label} as label,
-          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
-          coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
-          coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
+          coalesce(sum(case when ${okOutputPredicateSql("po")} then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(${rejectKgSql("po")}), 0) as reject_kg,
+          coalesce(sum(${rejectPcsEquivalentSql("po")}), 0) as reject_pcs_equivalent,
           count(*) as row_count
         from production_outputs po
         left join master_entities me on me.id = po.entity_id
@@ -467,6 +483,8 @@ export class DashboardReadRepository {
           po.operator_name,
           po.quantity,
           po.reject_kg,
+          ${okOutputPredicateSql("po")} as is_ok_output,
+          ${rejectOutputPredicateSql("po")} as is_reject_output,
           ${machineLabelSql()} as machine_label
         from production_outputs po
         left join master_entities me on me.id = po.entity_id
@@ -490,7 +508,7 @@ export class DashboardReadRepository {
             string_agg(distinct coalesce(shift_code, ''), ' ')
           )) as searchable_text
         from base
-        where normalized_output_type = 'OK'
+        where is_ok_output
         group by posting_date, machine_label, item_no
       ),
       reject_only_groups as (
@@ -511,13 +529,35 @@ export class DashboardReadRepository {
             string_agg(distinct coalesce(b.shift_code, ''), ' ')
           )) as searchable_text
         from base b
-        where (b.normalized_output_type = 'REJECT' or b.reject_kg > 0)
-          and not exists (
-            select 1
-            from base ok
-            where ok.posting_date = b.posting_date
-              and ok.machine_label = b.machine_label
-              and ok.normalized_output_type = 'OK'
+        where b.is_reject_output
+          and (
+            b.document_no is null
+            or (
+              (
+                select count(distinct ok.item_no)
+                from base ok
+                where ok.is_ok_output
+                  and ok.document_no = b.document_no
+                  and ok.posting_date = b.posting_date
+                  and ok.machine_label = b.machine_label
+              ) <> 1
+              and not (
+                (
+                  select count(distinct ok.item_no)
+                  from base ok
+                  where ok.is_ok_output
+                    and ok.document_no = b.document_no
+                    and ok.posting_date = b.posting_date
+                    and ok.machine_label = b.machine_label
+                ) = 0
+                and (
+                  select count(distinct concat_ws('|', ok.posting_date::text, ok.machine_label, ok.item_no))
+                  from base ok
+                  where ok.is_ok_output
+                    and ok.document_no = b.document_no
+                ) = 1
+              )
+            )
           )
         group by b.posting_date, b.machine_label, b.item_no
       ),
@@ -863,11 +903,11 @@ export class DashboardReadRepository {
     const result = await this.database.pool.query<AggregateRow>(
       `
         select
-          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
-          coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
-          coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
-          count(*) filter (where po.reject_kg > 0 and po.reject_pcs_eq is null) as incomplete_reject_conversion_count,
-          count(distinct po.posting_date) filter (where po.normalized_output_type = 'OK') as active_days,
+          coalesce(sum(case when ${okOutputPredicateSql("po")} then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(${rejectKgSql("po")}), 0) as reject_kg,
+          coalesce(sum(${rejectPcsEquivalentSql("po")}), 0) as reject_pcs_equivalent,
+          count(*) filter (where ${rejectOutputPredicateSql("po")} and (po.gross_weight_per_pcs is null or po.gross_weight_per_pcs <= 0)) as incomplete_reject_conversion_count,
+          count(distinct po.posting_date) filter (where ${okOutputPredicateSql("po")}) as active_days,
           count(*) as row_count
         from production_outputs po
         where ${where.where}
@@ -893,7 +933,7 @@ export class DashboardReadRepository {
         from production_outputs po
         where ${where.where}
           and po.entity_id is not null
-          and po.normalized_output_type = 'OK'
+          and ${okOutputPredicateSql("po")}
         group by po.entity_id, po.posting_date
       `,
       where.params

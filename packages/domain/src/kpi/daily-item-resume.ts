@@ -1,9 +1,11 @@
 import { isProductionEntryType } from "../constants/business-central.js";
+import { classifyOutputRow } from "./output-classification.js";
 import { parseExternalDocument, type ParsedExternalDocument } from "../sync/external-document.js";
 
 export type ResumeRejectConversionStatus = "COMPLETE" | "INCOMPLETE";
 export type ResumeAchievementStatus = "COVERED" | "TARGET_MISSING" | "NO_OUTPUT" | "TARGET_ZERO";
 export type ResumeWorkHoursSource = "EXTERNAL_DOCUMENT" | "FALLBACK" | "UNKNOWN";
+export type ResumeRejectAttachmentStatus = "NONE" | "ATTACHED" | "REJECT_ONLY" | "AMBIGUOUS_REJECT_ATTACHMENT";
 
 export interface DailyItemResumeSourceRow {
   readonly sourceSystem?: string | null;
@@ -57,6 +59,7 @@ export interface DailyItemResumeRow {
   readonly rejectKg: number;
   readonly rejectPcsEq: number | null;
   readonly rejectConversionStatus: ResumeRejectConversionStatus;
+  readonly rejectAttachmentStatus: ResumeRejectAttachmentStatus;
   readonly rejectPct: number | null;
   readonly achievementPct: number | null;
   readonly achievementStatus: ResumeAchievementStatus;
@@ -79,8 +82,14 @@ export interface DailyItemResumeRow {
     readonly itemNo: string;
     readonly itemDescription: string | null;
     readonly rejectKg: number;
+    readonly uom: string | null;
+    readonly postingDate: string;
+    readonly attachmentStatus: ResumeRejectAttachmentStatus;
     readonly grossWeight: number | null;
     readonly rejectPcsEq: number | null;
+    readonly rawExternalDocument: string | null;
+    readonly operatorName: string | null;
+    readonly shiftCode: string | null;
   }[];
 }
 
@@ -91,6 +100,8 @@ interface Group {
   readonly itemNo: string;
   readonly okRows: DailyItemResumeSourceRow[];
   readonly rejectRows: DailyItemResumeSourceRow[];
+  rejectAttachmentStatus: ResumeRejectAttachmentStatus;
+  attachmentWarnings: string[];
 }
 
 function clean(value: string | null | undefined, fallback = ""): string {
@@ -118,6 +129,26 @@ function groupKey(row: DailyItemResumeSourceRow, label = machineLabel(row), suff
     normalized(row.itemNo),
     suffix
   ].join("|");
+}
+
+function rowClass(row: DailyItemResumeSourceRow): string {
+  return classifyOutputRow({
+    entryType: row.entryType ?? "Output",
+    itemNo: row.itemNo,
+    uom: row.uom ?? null
+  });
+}
+
+function isOkOutput(row: DailyItemResumeSourceRow): boolean {
+  return rowClass(row) === "OK";
+}
+
+function isRejectOutput(row: DailyItemResumeSourceRow): boolean {
+  return rowClass(row) === "REJECT";
+}
+
+function rejectKgForRow(row: DailyItemResumeSourceRow): number {
+  return row.quantity !== 0 ? Math.abs(row.quantity) : Math.max(row.rejectKg ?? 0, 0);
 }
 
 function uniqueSummary(values: readonly (string | null | undefined)[], fallback = "-"): string {
@@ -164,20 +195,6 @@ function resolveGroupWorkHours(
   return { workHours: 0, source: "UNKNOWN" };
 }
 
-function chooseGroup(groups: readonly Group[], documentNo: string | null | undefined): Group | null {
-  if (groups.length === 0) return null;
-  const doc = normalized(documentNo);
-  if (doc) {
-    const exact = groups.find((group) => group.okRows.some((row) => normalized(row.documentNo) === doc));
-    if (exact) return exact;
-  }
-  return [...groups].sort((a, b) => {
-    const qtyA = a.okRows.reduce((sum, row) => sum + row.quantity, 0);
-    const qtyB = b.okRows.reduce((sum, row) => sum + row.quantity, 0);
-    return b.okRows.length - a.okRows.length || qtyB - qtyA;
-  })[0] ?? null;
-}
-
 function representativeGrossWeight(rows: readonly DailyItemResumeSourceRow[]): number | null {
   return rows.find((row) => row.grossWeightPerPcs && row.grossWeightPerPcs > 0)?.grossWeightPerPcs ?? null;
 }
@@ -194,10 +211,12 @@ export function buildDailyItemResumeRows(
 ): readonly DailyItemResumeRow[] {
   const fallbackWorkHours = options.fallbackWorkHours ?? 24;
   const groups = new Map<string, Group>();
+  const docDateMachineToGroups = new Map<string, Set<string>>();
   const docToGroups = new Map<string, Set<string>>();
+  const dateMachineToGroups = new Map<string, Set<string>>();
   const rows = inputRows.filter((row) => isProductionEntryType(row.entryType));
-  const okRows = rows.filter((row) => row.normalizedOutputType === "OK");
-  const rejectRows = rows.filter((row) => row.normalizedOutputType === "REJECT" || (row.rejectKg ?? 0) > 0);
+  const okRows = rows.filter(isOkOutput);
+  const rejectRows = rows.filter(isRejectOutput);
 
   for (const row of okRows) {
     const label = machineLabel(row);
@@ -208,45 +227,65 @@ export function buildDailyItemResumeRows(
       machineLabel: label,
       itemNo: row.itemNo,
       okRows: [],
-      rejectRows: []
+      rejectRows: [],
+      rejectAttachmentStatus: "NONE",
+      attachmentWarnings: []
     };
     group.okRows.push(row);
     groups.set(key, group);
-    const docKey = `${row.postingDate}|${normalized(label)}|${normalized(row.documentNo)}`;
+    const dateMachineKey = `${row.postingDate}|${normalized(label)}`;
+    const machineSet = dateMachineToGroups.get(dateMachineKey) ?? new Set<string>();
+    machineSet.add(key);
+    dateMachineToGroups.set(dateMachineKey, machineSet);
     if (normalized(row.documentNo)) {
-      const set = docToGroups.get(docKey) ?? new Set<string>();
-      set.add(key);
-      docToGroups.set(docKey, set);
+      const docKey = normalized(row.documentNo);
+      const docSet = docToGroups.get(docKey) ?? new Set<string>();
+      docSet.add(key);
+      docToGroups.set(docKey, docSet);
+      const exactKey = `${docKey}|${row.postingDate}|${normalized(label)}`;
+      const exactSet = docDateMachineToGroups.get(exactKey) ?? new Set<string>();
+      exactSet.add(key);
+      docDateMachineToGroups.set(exactKey, exactSet);
     }
   }
 
   for (const row of rejectRows) {
     const label = machineLabel(row);
-    const docKey = `${row.postingDate}|${normalized(label)}|${normalized(row.documentNo)}`;
-    const linked = docToGroups.get(docKey);
-    const linkedGroups = linked
-      ? [...linked].map((key) => groups.get(key)).filter((value): value is Group => Boolean(value))
+    const docKey = normalized(row.documentNo);
+    const exact = docKey ? docDateMachineToGroups.get(`${docKey}|${row.postingDate}|${normalized(label)}`) : null;
+    const docOnly = docKey ? docToGroups.get(docKey) : null;
+    const noDocumentFallback = !docKey ? dateMachineToGroups.get(`${row.postingDate}|${normalized(label)}`) : null;
+    const candidateKeys = exact && exact.size > 0 ? exact : docOnly && docOnly.size === 1 ? docOnly : noDocumentFallback;
+    const candidateGroups = candidateKeys
+      ? [...candidateKeys].map((key) => groups.get(key)).filter((value): value is Group => Boolean(value))
       : [];
-    let group = linkedGroups.length ? chooseGroup(linkedGroups, row.documentNo) : null;
-    if (!group) {
-      group = chooseGroup(
-        [...groups.values()].filter((candidate) => candidate.postingDate === row.postingDate && normalized(candidate.machineLabel) === normalized(label)),
-        row.documentNo
-      );
+    const ambiguous = Boolean(
+      (exact && exact.size > 1)
+      || (!exact?.size && docOnly && docOnly.size > 1)
+      || (!docKey && noDocumentFallback && noDocumentFallback.size > 1)
+    );
+    const group = !ambiguous && candidateGroups.length === 1 ? candidateGroups[0] ?? null : null;
+    if (group) {
+      group.rejectRows.push(row);
+      group.rejectAttachmentStatus = "ATTACHED";
+      continue;
     }
-    if (!group) {
+    {
       const key = groupKey(row, label, "REJECT");
-      group = groups.get(key) ?? {
+      const rejectOnly = groups.get(key) ?? {
         key,
         postingDate: row.postingDate,
         machineLabel: label,
         itemNo: row.itemNo,
         okRows: [],
-        rejectRows: []
+        rejectRows: [],
+        rejectAttachmentStatus: ambiguous ? "AMBIGUOUS_REJECT_ATTACHMENT" : "REJECT_ONLY",
+        attachmentWarnings: []
       };
-      groups.set(key, group);
+      if (ambiguous) rejectOnly.attachmentWarnings.push("AMBIGUOUS_REJECT_ATTACHMENT");
+      groups.set(key, rejectOnly);
+      rejectOnly.rejectRows.push(row);
     }
-    group.rejectRows.push(row);
   }
 
   return [...groups.values()]
@@ -256,12 +295,12 @@ export function buildDailyItemResumeRows(
       const positiveOutputQty = group.okRows.reduce((sum, row) => sum + (row.quantity > 0 ? row.quantity : 0), 0);
       const correctionOutputQty = group.okRows.reduce((sum, row) => sum + (row.quantity < 0 ? row.quantity : 0), 0);
       const netOutputQty = group.okRows.reduce((sum, row) => sum + row.quantity, 0);
-      const grossWeight = representativeGrossWeight(group.okRows) ?? representativeGrossWeight(allRows);
+      const grossWeight = representativeGrossWeight(group.okRows);
       let rejectPcsEq = 0;
       let incompleteRejectConversion = false;
       const rejectDetails = group.rejectRows.map((row) => {
-        const rejectKg = row.rejectKg && row.rejectKg > 0 ? row.rejectKg : Math.abs(row.quantity);
-        const rowGrossWeight = row.grossWeightPerPcs && row.grossWeightPerPcs > 0 ? row.grossWeightPerPcs : grossWeight;
+        const rejectKg = rejectKgForRow(row);
+        const rowGrossWeight = grossWeight;
         const rowRejectPcsEq = rowGrossWeight && rowGrossWeight > 0 ? rejectKg / rowGrossWeight : null;
         if (rowRejectPcsEq === null && rejectKg > 0) incompleteRejectConversion = true;
         else rejectPcsEq += rowRejectPcsEq ?? 0;
@@ -270,8 +309,14 @@ export function buildDailyItemResumeRows(
           itemNo: row.itemNo,
           itemDescription: row.itemDescription ?? null,
           rejectKg,
+          uom: row.uom ?? null,
+          postingDate: row.postingDate,
+          attachmentStatus: group.rejectAttachmentStatus,
           grossWeight: rowGrossWeight ?? null,
-          rejectPcsEq: rowRejectPcsEq
+          rejectPcsEq: rowRejectPcsEq,
+          rawExternalDocument: row.externalDocumentNo ?? null,
+          operatorName: resolveOperatorName(row),
+          shiftCode: resolveShiftCode(row)
         };
       });
       const totalForRejectRate = netOutputQty + rejectPcsEq;
@@ -291,12 +336,12 @@ export function buildDailyItemResumeRows(
         const key = clean(row.documentNo, "-");
         return [key, {
           documentNo: key,
-          quantity: allRows.filter((candidate) => clean(candidate.documentNo, "-") === key && candidate.normalizedOutputType === "OK").reduce((sum, candidate) => sum + candidate.quantity, 0),
-          rejectKg: allRows.filter((candidate) => clean(candidate.documentNo, "-") === key).reduce((sum, candidate) => sum + (candidate.rejectKg ?? 0), 0),
-          type: allRows.some((candidate) => clean(candidate.documentNo, "-") === key && candidate.normalizedOutputType === "OK")
-            && allRows.some((candidate) => clean(candidate.documentNo, "-") === key && (candidate.normalizedOutputType === "REJECT" || (candidate.rejectKg ?? 0) > 0))
+          quantity: allRows.filter((candidate) => clean(candidate.documentNo, "-") === key && isOkOutput(candidate)).reduce((sum, candidate) => sum + candidate.quantity, 0),
+          rejectKg: allRows.filter((candidate) => clean(candidate.documentNo, "-") === key && isRejectOutput(candidate)).reduce((sum, candidate) => sum + rejectKgForRow(candidate), 0),
+          type: allRows.some((candidate) => clean(candidate.documentNo, "-") === key && isOkOutput(candidate))
+            && allRows.some((candidate) => clean(candidate.documentNo, "-") === key && isRejectOutput(candidate))
             ? "MIXED" as const
-            : row.normalizedOutputType === "OK" ? "OK" as const : "REJECT" as const
+            : isOkOutput(row) ? "OK" as const : "REJECT" as const
         }];
       })).values()];
       const operatorDetails = [...new Map(allRows.map((row) => {
@@ -362,6 +407,7 @@ export function buildDailyItemResumeRows(
         rejectKg: rejectDetails.reduce((sum, detail) => sum + detail.rejectKg, 0),
         rejectPcsEq: incompleteRejectConversion ? null : rejectPcsEq,
         rejectConversionStatus: incompleteRejectConversion ? "INCOMPLETE" : "COMPLETE",
+        rejectAttachmentStatus: group.rejectAttachmentStatus,
         rejectPct: totalForRejectRate > 0 && !incompleteRejectConversion ? (rejectPcsEq / totalForRejectRate) * 100 : null,
         achievementPct,
         achievementStatus,
@@ -372,6 +418,8 @@ export function buildDailyItemResumeRows(
         notes: [
           ...(correctionOutputQty < 0 ? ["Contains negative Output correction"] : []),
           ...(incompleteRejectConversion ? ["Reject conversion incomplete"] : []),
+          ...group.attachmentWarnings,
+          ...(group.rejectAttachmentStatus === "REJECT_ONLY" ? ["No matching OK row for reject document"] : []),
           ...(achievementStatus === "TARGET_MISSING" ? ["Target missing"] : []),
           ...(allRows.some((row) => {
             const parsed = parseExternalDocument(row.externalDocumentNo);
