@@ -4951,3 +4951,30 @@ Full operating plan: `docs/V1_MASTER_DATA_MIGRATION_PLAN.md`.
 8. Validation passes without printing or committing secrets.
 
 <!-- M11_MASTER_DATA_MAPPING_END -->
+
+---
+
+## V1 Parity Minimum Gate
+
+Before adding more advanced v2-only capabilities, v2 must reach minimum parity with the proven v1 project.
+
+Reference plan:
+
+- `docs/V1_PARITY_IMPLEMENTATION_PLAN.md`
+- `docs/V1_PARITY_GAP_AUDIT.md`
+- `OPENCLAW_V1_PARITY_MINIMUM.md`
+
+This gate requires v2 to preserve the proven v1 business behavior while keeping the stronger v2 architecture.
+
+Minimum parity requirements:
+
+1. Production dashboard scope is `Entry_Type = Output`.
+2. Negative Output quantity is treated as correction and reduces net output.
+3. `Latest Production Outputs` is replaced by v1-style `Resume Harian per Item`.
+4. Target achievement and reject calculations are explainable from grouped resume rows.
+5. Incremental OData sync uses latest remote/local `Entry_No` behavior.
+6. Master entity/target mapping from v1 is importable through dry-run and reviewed commit workflows.
+7. Downtime CSV/XLSX import is preview-first, idempotent, and auditable.
+8. WA parser keeps preview/commit separation, alias registry, explainable match/warning codes, and regression fixtures.
+9. Drilldown/export behavior does not mislabel raw ledger rows as production resume.
+10. All validation commands pass before sign-off.
