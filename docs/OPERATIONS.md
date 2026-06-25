@@ -196,6 +196,8 @@ Operational commands:
 
 ```bash
 pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:mapping-plan-apply
 
 SOURCE_FIELD=machine_center_no \
 SOURCE_VALUE="REPLACE_WITH_BC_MACHINE" \
@@ -209,9 +211,32 @@ APPLY_MAPPING_COMMIT=true \
 pnpm bc:mapping-apply
 ```
 
-`pnpm bc:mapping-candidates` is read-only. `pnpm bc:mapping-apply` is also dry-run by default; it mutates only when `APPLY_MAPPING_COMMIT=true` is set. Commit mode creates or reuses an alias, updates only unmapped matching `production_outputs` rows, resolves related unmapped-entity data-quality issues, and writes an audit log.
+`pnpm bc:mapping-candidates` is read-only and shows current mapped/unmapped counts, coverage percentage, top unmapped groups by machine, production line, description, combined context, item family, month, row count, and OK quantity. Suggestions are scored as HIGH, MEDIUM, or LOW and show whether the suggested entity has an approved/active target.
+
+`pnpm bc:mapping-plan` writes `.tmp/mapping-plan/business-central-mapping-plan.csv`. Every row defaults to `action=REVIEW`; the command never marks a row `COMMIT`. Review the source value, normalized value, row count, OK quantity, suggested entity, confidence, reason, and target flag before editing the CSV.
+
+`pnpm bc:mapping-plan-apply` is a dry-run unless `MAPPING_PLAN_COMMIT=true` is set. It reads `MAPPING_PLAN_FILE` or the default CSV path, applies only rows with `action=COMMIT`, skips LOW confidence and blank source values, creates missing aliases, updates only unmapped matching `production_outputs` rows, resolves related unmapped-entity data-quality issues, and writes an audit log. It does not overwrite existing mapped rows.
+
+Commit reviewed CSV rows only after backup and review:
+
+```bash
+MAPPING_PLAN_FILE=.tmp/mapping-plan/business-central-mapping-plan.csv \
+MAPPING_PLAN_COMMIT=true \
+pnpm bc:mapping-plan-apply
+```
+
+`pnpm bc:mapping-apply` remains available for a single reviewed source value and is also dry-run by default; it mutates only when `APPLY_MAPPING_COMMIT=true` is set.
 
 Do not map low-confidence source values just to make achievement numeric. If a source group is operationally ambiguous, leave it unmapped and ask PPIC/production owners to confirm the canonical entity.
+
+Rollback should use a PostgreSQL backup restore whenever possible. A targeted rollback must be reviewed from `audit_logs` and aliases with `source = 'mapping-plan'`; unmap only rows updated by the reviewed plan, deactivate or delete only the inserted aliases, then re-run:
+
+```bash
+pnpm bc:profile
+pnpm bc:mapping-candidates
+pnpm bc:target-coverage
+pnpm bc:reconcile
+```
 
 ### V1 master-data import
 

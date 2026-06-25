@@ -97,6 +97,8 @@ pnpm bc:profile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
 pnpm bc:target-coverage
 pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:mapping-plan-apply
 ```
 
 Dashboard calculations use canonical `source_system = 'business-central'`. Missing approved targets produce `N/A` achievement rather than a misleading zero target, and unmapped machines/entities remain visible until master entities/aliases are loaded.
@@ -110,6 +112,22 @@ pnpm v1:master-reconcile
 ```
 
 The import command is a dry-run unless `V1_MASTER_IMPORT_COMMIT=true` is set. It imports real v1 entities, reviewed aliases, approved targets, and stable item gross-weight mappings; ambiguous machine/product mappings stay in the conflict list for manual review. See [V1 migration plan](docs/V1_MASTER_DATA_MIGRATION_PLAN.md).
+
+After the v1 import, coverage can still be low because many BC source values differ from the reviewed v1 aliases (`NEWDO 1 REG`, `ILLIG1`, `HENGFENG 4 OZ`, `OMSO2 OZ`, and blank machine groups). Generate a reviewable mapping plan instead of auto-mapping them:
+
+```bash
+pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:mapping-plan-apply
+```
+
+The plan is written to `.tmp/mapping-plan/business-central-mapping-plan.csv` with every row defaulting to `REVIEW`. After a human changes reviewed rows to `action=COMMIT`, apply it with:
+
+```bash
+MAPPING_PLAN_FILE=.tmp/mapping-plan/business-central-mapping-plan.csv MAPPING_PLAN_COMMIT=true pnpm bc:mapping-plan-apply
+```
+
+`bc:mapping-plan-apply` is a dry-run unless `MAPPING_PLAN_COMMIT=true`; it skips LOW confidence, blank source values, invalid entities, and non-allowlisted source fields.
 
 Map Business Central machine/line values only after review:
 

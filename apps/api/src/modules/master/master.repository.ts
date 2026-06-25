@@ -8,6 +8,8 @@ import {
 import {
   normalizeAliasDisplay,
   normalizeAliasKey,
+  suggestMappingCandidates,
+  type CandidateEntityInput,
   type MasterSourceField
 } from "@poip/domain";
 import { and, eq, sql } from "drizzle-orm";
@@ -59,28 +61,27 @@ function pagination(page: number, pageSize: number, totalRows: number): Paginati
   return { page, pageSize, totalRows, totalPages: Math.ceil(totalRows / pageSize) };
 }
 
-function similarity(source: string, target: string): number {
-  const left = normalizeAliasKey(source);
-  const right = normalizeAliasKey(target);
-  if (!left || !right) return 0;
-  if (left === right) return 100;
-  if (left.includes(right) || right.includes(left)) return 80;
-  let common = 0;
-  for (const char of new Set(left)) if (right.includes(char)) common += 1;
-  return Math.round((common / Math.max(new Set([...left, ...right]).size, 1)) * 60);
-}
-
 @Injectable()
 export class MasterRepository {
   constructor(@Inject(DATABASE) private readonly database: DatabaseConnection) {}
 
   async overview() {
-    const [entities, aliases, unmapped, targetCoverage, gaps] = await Promise.all([
+    const [entities, aliases, outputSummary, unmapped, targetCoverage, gaps] = await Promise.all([
       this.database.pool.query<{ total: string | number; active: string | number }>(
         "select count(*) as total, count(*) filter (where is_active) as active from master_entities"
       ),
       this.database.pool.query<{ active: string | number }>(
         "select count(*) filter (where is_active) as active from master_entity_aliases"
+      ),
+      this.database.pool.query<{ total_rows: string | number; mapped_rows: string | number; unmapped_rows: string | number }>(
+        `
+          select count(*) as total_rows,
+                 count(*) filter (where entity_id is not null) as mapped_rows,
+                 count(*) filter (where entity_id is null) as unmapped_rows
+          from production_outputs
+          where source_system = $1
+        `,
+        [SOURCE_SYSTEM]
       ),
       this.database.pool.query<{ groups: string | number; rows: string | number }>(
         `
@@ -127,8 +128,13 @@ export class MasterRepository {
       totalEntities: numberValue(entities.rows[0]?.total),
       activeEntities: numberValue(entities.rows[0]?.active),
       activeAliases: numberValue(aliases.rows[0]?.active),
+      totalOutputRows: numberValue(outputSummary.rows[0]?.total_rows),
+      mappedRows: numberValue(outputSummary.rows[0]?.mapped_rows),
       unmappedSourceGroups: numberValue(unmapped.rows[0]?.groups),
-      unmappedRows: numberValue(unmapped.rows[0]?.rows),
+      unmappedRows: numberValue(outputSummary.rows[0]?.unmapped_rows),
+      mappingCoveragePct: numberValue(outputSummary.rows[0]?.total_rows) > 0
+        ? (numberValue(outputSummary.rows[0]?.mapped_rows) / numberValue(outputSummary.rows[0]?.total_rows)) * 100
+        : null,
       targetCoverageGapRows: numberValue(targetCoverage.rows[0]?.uncovered),
       conversionGaps: numberValue(gaps.rows[0]?.gaps)
     };
@@ -391,7 +397,7 @@ export class MasterRepository {
       dateClauses.push(`posting_date <= $${params.length}`);
     }
     const sourceFilterParams: unknown[] = [];
-    const sourceClauses = ["source_value is not null", "source_value <> ''"];
+    const sourceClauses = ["1 = 1"];
     if (filters.sourceField) {
       sourceFilterParams.push(filters.sourceField);
       sourceClauses.push(`source_field = $${params.length + sourceFilterParams.length}`);
@@ -413,7 +419,7 @@ export class MasterRepository {
         from production_outputs where ${dateClauses.join(" and ")}
       ),
       grouped as (
-        select source_field, source_value,
+        select source_field, coalesce(source_value, '') as source_value,
                upper(regexp_replace(trim(coalesce(source_value, '')), '[^A-Za-z0-9]+', '', 'g')) as normalized_value,
                count(*) as row_count,
                coalesce(sum(quantity), 0) as output_ok_qty,
@@ -424,7 +430,7 @@ export class MasterRepository {
                array_remove((array_agg(distinct uom))[1:5], null) as uoms
         from source_rows
         where ${sourceClauses.join(" and ")}
-        group by source_field, source_value
+        group by source_field, coalesce(source_value, '')
       )
     `;
     const [countResult, rowsResult, entities] = await Promise.all([
@@ -941,13 +947,27 @@ export class MasterRepository {
       entity_id: string;
       entity_code: string;
       display_name: string;
+      line_code: string | null;
+      product_family: string | null;
+      report_group: string | null;
       alias_values: string[] | null;
+      target_exists: boolean;
     }>(
       `
         select me.id as entity_id,
                me.entity_code,
                me.display_name,
-               array_remove(array_agg(distinct mea.alias), null) as alias_values
+               me.line_code,
+               me.product_family,
+               me.report_group,
+               array_remove(array_agg(distinct mea.alias), null) as alias_values,
+               exists (
+                 select 1
+                 from production_targets pt
+                 where pt.entity_id = me.id
+                   and pt.status in ('APPROVED', 'ACTIVE')
+                   and pt.daily_target_qty > 0
+               ) as target_exists
         from master_entities me
         left join master_entity_aliases mea on mea.entity_id = me.id and mea.is_active
         where me.is_active
@@ -960,24 +980,28 @@ export class MasterRepository {
 
   private suggestCandidates(
     sourceValue: string,
-    entities: readonly { readonly entity_id: string; readonly entity_code: string; readonly display_name: string; readonly alias_values: string[] | null }[]
+    entities: readonly {
+      readonly entity_id: string;
+      readonly entity_code: string;
+      readonly display_name: string;
+      readonly line_code: string | null;
+      readonly product_family: string | null;
+      readonly report_group: string | null;
+      readonly alias_values: string[] | null;
+      readonly target_exists: boolean;
+    }[]
   ): readonly MappingCandidateDto[] {
-    return entities
-      .flatMap((entity) => {
-        const values = [entity.entity_code, entity.display_name, ...(entity.alias_values ?? [])];
-        const score = Math.max(...values.map((value) => similarity(sourceValue, value)));
-        return score >= 30
-          ? [{
-              entityId: entity.entity_id,
-              entityCode: entity.entity_code,
-              displayName: entity.display_name,
-              reason: score >= 100 ? "Exact normalized match" : score >= 80 ? "Strong normalized similarity" : "Possible name similarity",
-              score
-            }]
-          : [];
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+    const candidates: readonly CandidateEntityInput[] = entities.map((entity) => ({
+      entityId: entity.entity_id,
+      entityCode: entity.entity_code,
+      displayName: entity.display_name,
+      aliasValues: entity.alias_values ?? [],
+      targetExists: entity.target_exists,
+      lineCode: entity.line_code,
+      productFamily: entity.product_family,
+      reportGroup: entity.report_group
+    }));
+    return suggestMappingCandidates(sourceValue, candidates);
   }
 
   private async findConversion(itemNo: string, uom: string): Promise<ConversionMappingDto | null> {

@@ -1,4 +1,5 @@
 import type { MasterSourceField } from "@poip/domain";
+import type { MappingConfidence } from "@poip/domain";
 
 export interface Pagination {
   readonly page: number;
@@ -58,6 +59,8 @@ export interface MappingCandidateDto {
   readonly displayName: string;
   readonly reason: string;
   readonly score: number;
+  readonly confidence: MappingConfidence;
+  readonly targetExists: boolean;
 }
 
 export interface MappingPreviewDto {

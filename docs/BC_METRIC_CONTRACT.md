@@ -104,6 +104,15 @@ Concepts:
 
 Alias commits must preview affected rows, update only unmapped output rows by default, write audit logs, and resolve related `UNMAPPED_ENTITY` data-quality issues where applicable. They must not overwrite existing mapped rows unless a future explicit remap workflow is approved.
 
+Assisted mapping candidates are advisory only:
+
+1. HIGH confidence means an exact normalized entity/alias match was found.
+2. MEDIUM confidence means one clear entity has strong normalized containment or shared machine-family tokens.
+3. LOW confidence means weak overlap, multiple possible entities, or missing source value.
+4. LOW confidence and blank machine groups must not be batch-committed. Blank machine groups require production-line, item, document, or owner context.
+5. `pnpm bc:mapping-plan` creates a review CSV under `.tmp/mapping-plan/` with every row defaulting to `REVIEW`.
+6. `pnpm bc:mapping-plan-apply` mutates only with `MAPPING_PLAN_COMMIT=true` and only for rows explicitly changed to `action=COMMIT`.
+
 Target coverage after mapping:
 
 1. Rows still without `entity_id` report `UNMAPPED_ENTITY`.

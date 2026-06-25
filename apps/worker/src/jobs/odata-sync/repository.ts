@@ -1,5 +1,5 @@
 import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
-import { createDuplicateEntryIssue, legacyMachineFamilyKey, nextSyncCheckpoint, normalizeAliasKey, normalizeAliasDisplay, sourceAliasCandidates, type DataQualitySignal } from "@poip/domain";
+import { createDuplicateEntryIssue, nextSyncCheckpoint, normalizeAliasKey, normalizeAliasDisplay, sourceAliasCandidates, type DataQualitySignal } from "@poip/domain";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDatabaseUrl } from "../../common/env.js";
 import type {
@@ -23,15 +23,6 @@ function addEntityLookupKey(map: Map<string, string>, key: string | null | undef
   if (exact && !map.has(exact)) map.set(exact, entityId);
   const normalized = normalizeAliasKey(key);
   if (normalized && !map.has(normalized)) map.set(normalized, entityId);
-}
-
-function addLegacyMachineFamilyLookupKey(
-  map: Map<string, string>,
-  key: string | null | undefined,
-  entityId: string
-): void {
-  const family = legacyMachineFamilyKey(key);
-  if (family && !map.has(family)) map.set(family, entityId);
 }
 
 function fieldAliasKey(sourceField: string, value: string): string {
@@ -468,15 +459,12 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       addEntityLookupKey(entityByAlias, entity.displayName, entity.id);
       addEntityLookupKey(entityByAlias, entity.lineCode, entity.id);
       addEntityLookupKey(entityByAlias, entity.reportGroup, entity.id);
-      addLegacyMachineFamilyLookupKey(entityByAlias, entity.code, entity.id);
-      addLegacyMachineFamilyLookupKey(entityByAlias, entity.displayName, entity.id);
     }
     for (const alias of aliases) {
       addEntityLookupKey(entityByAlias, alias.alias, alias.entityId);
       if (alias.aliasNormalized) entityByAlias.set(fieldAliasKey(alias.sourceField, alias.aliasNormalized), alias.entityId);
       const aliasDisplay = normalizeAliasDisplay(alias.alias);
       if (aliasDisplay) entityByAlias.set(fieldAliasKey(alias.sourceField, aliasDisplay), alias.entityId);
-      addLegacyMachineFamilyLookupKey(entityByAlias, alias.alias, alias.entityId);
     }
 
     return {
@@ -499,13 +487,11 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
     const machine = row.normalized.machineCenterNo;
     const exact = normalizeAliasDisplay(machine);
     const normalized = normalizeAliasKey(machine);
-    const family = legacyMachineFamilyKey(machine);
     return (
       context.entityByCode.get(exact) ??
       (normalized ? context.entityByCode.get(normalized) : null) ??
       context.entityByAlias.get(exact) ??
       (normalized ? context.entityByAlias.get(normalized) : null) ??
-      (family ? context.entityByAlias.get(family) : null) ??
       null
     );
   }

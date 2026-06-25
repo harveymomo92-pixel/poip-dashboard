@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildDashboardKpiSummary } from "../packages/domain/src/kpi/dashboard.js";
 import { createDatabase } from "../packages/db/src/client.js";
 import {
@@ -6,10 +9,32 @@ import {
   normalizeAliasKey,
   type MasterSourceField
 } from "../packages/domain/src/master-data/alias.js";
+import {
+  buildMappingPlanRows,
+  containsMappingSecretLikeText,
+  mappingPlanRowsToCsv,
+  mappingPlanSourceFields,
+  parseMappingPlanCsv,
+  suggestMappingCandidates,
+  type CandidateEntityInput,
+  type MappingPlanRow,
+  type MappingSuggestion
+} from "../packages/domain/src/master-data/mapping-candidates.js";
 
 const SOURCE_SYSTEM = "business-central";
+const DEFAULT_MAPPING_PLAN_PATH = ".tmp/mapping-plan/business-central-mapping-plan.csv";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-type Command = "profile" | "reconcile" | "target-coverage" | "mapping-candidates" | "mapping-apply";
+type Command =
+  | "profile"
+  | "reconcile"
+  | "target-coverage"
+  | "mapping-candidates"
+  | "mapping-apply"
+  | "mapping-plan"
+  | "mapping-plan-apply";
+
+type DatabasePool = ReturnType<typeof createDatabase>["pool"];
 
 interface Filters {
   readonly from: string;
@@ -31,10 +56,41 @@ const sourceFieldColumns: Record<MasterSourceField, string> = {
   uom: "uom"
 };
 
+interface MappingCoverageSummary {
+  readonly totalRows: number;
+  readonly mappedRows: number;
+  readonly unmappedRows: number;
+  readonly okRows: number;
+  readonly mappedOkRows: number;
+  readonly unmappedOkRows: number;
+  readonly unmappedOkQty: number;
+}
+
+interface UnmappedSourceGroup {
+  readonly sourceField: MasterSourceField;
+  readonly sourceValue: string;
+  readonly normalizedValue: string;
+  readonly rows: number;
+  readonly okQty: number;
+  readonly firstPostingDate: string | null;
+  readonly lastPostingDate: string | null;
+  readonly suggestions: readonly MappingSuggestion[];
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function resolveRepoPath(value: string): string {
+  return path.isAbsolute(value) ? value : path.join(REPO_ROOT, value);
+}
+
+function displayRepoPath(value: string): string {
+  const absolute = resolveRepoPath(value);
+  const relative = path.relative(REPO_ROOT, absolute);
+  return relative.startsWith("..") ? absolute : relative;
 }
 
 function validateDate(value: string, name: string): string {
@@ -87,17 +143,6 @@ function sqlNormalizeExpression(column: string): string {
   return `upper(regexp_replace(trim(coalesce(${column}, '')), '[^A-Za-z0-9]+', '', 'g'))`;
 }
 
-function similarity(source: string, target: string): number {
-  const left = normalizeAliasKey(source);
-  const right = normalizeAliasKey(target);
-  if (!left || !right) return 0;
-  if (left === right) return 100;
-  if (left.includes(right) || right.includes(left)) return 80;
-  let common = 0;
-  for (const char of new Set(left)) if (right.includes(char)) common += 1;
-  return Math.round((common / Math.max(new Set([...left, ...right]).size, 1)) * 60);
-}
-
 function buildFilters(): Filters {
   const fallback = { from: jakartaDate(-6), to: jakartaDate() };
   const from = validateDate(process.env.RECONCILE_FROM?.trim() || fallback.from, "RECONCILE_FROM");
@@ -127,6 +172,196 @@ function outputWhere(filters: Filters): SqlParts {
     clauses.push(`item_no = $${params.length}`);
   }
   return { where: clauses.join(" and "), params };
+}
+
+async function mappingCoverageSummary(pool: DatabasePool): Promise<MappingCoverageSummary> {
+  const result = await pool.query<{
+    total_rows: string | number;
+    mapped_rows: string | number;
+    unmapped_rows: string | number;
+    ok_rows: string | number;
+    mapped_ok_rows: string | number;
+    unmapped_ok_rows: string | number;
+    unmapped_ok_qty: string | number | null;
+  }>(
+    `
+      select
+        count(*) as total_rows,
+        count(*) filter (where entity_id is not null) as mapped_rows,
+        count(*) filter (where entity_id is null) as unmapped_rows,
+        count(*) filter (where normalized_output_type = 'OK' and quantity > 0) as ok_rows,
+        count(*) filter (where entity_id is not null and normalized_output_type = 'OK' and quantity > 0) as mapped_ok_rows,
+        count(*) filter (where entity_id is null and normalized_output_type = 'OK' and quantity > 0) as unmapped_ok_rows,
+        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK' and quantity > 0), 0) as unmapped_ok_qty
+      from production_outputs
+      where source_system = $1
+    `,
+    [SOURCE_SYSTEM]
+  );
+  const row = result.rows[0];
+  return {
+    totalRows: numberValue(row?.total_rows),
+    mappedRows: numberValue(row?.mapped_rows),
+    unmappedRows: numberValue(row?.unmapped_rows),
+    okRows: numberValue(row?.ok_rows),
+    mappedOkRows: numberValue(row?.mapped_ok_rows),
+    unmappedOkRows: numberValue(row?.unmapped_ok_rows),
+    unmappedOkQty: numberValue(row?.unmapped_ok_qty)
+  };
+}
+
+function mappingCoveragePct(summary: MappingCoverageSummary): number | null {
+  return summary.totalRows > 0 ? (summary.mappedRows / summary.totalRows) * 100 : null;
+}
+
+async function activeEntityCandidates(pool: DatabasePool): Promise<readonly CandidateEntityInput[]> {
+  const result = await pool.query<{
+    entity_id: string;
+    entity_code: string;
+    display_name: string;
+    line_code: string | null;
+    product_family: string | null;
+    report_group: string | null;
+    alias_values: string[] | null;
+    target_exists: boolean;
+  }>(
+    `
+      select me.id as entity_id,
+             me.entity_code,
+             me.display_name,
+             me.line_code,
+             me.product_family,
+             me.report_group,
+             array_remove(array_agg(distinct mea.alias), null) as alias_values,
+             exists (
+               select 1
+               from production_targets pt
+               where pt.entity_id = me.id
+                 and pt.status in ('APPROVED', 'ACTIVE')
+                 and pt.daily_target_qty > 0
+             ) as target_exists
+      from master_entities me
+      left join master_entity_aliases mea on mea.entity_id = me.id and mea.is_active
+      where me.is_active
+      group by me.id
+      order by me.entity_code
+      limit 1000
+    `
+  );
+  return result.rows.map((row) => ({
+    entityId: row.entity_id,
+    entityCode: row.entity_code,
+    displayName: row.display_name,
+    aliasValues: row.alias_values ?? [],
+    targetExists: row.target_exists,
+    lineCode: row.line_code,
+    productFamily: row.product_family,
+    reportGroup: row.report_group
+  }));
+}
+
+async function fetchUnmappedSourceGroups(
+  pool: DatabasePool,
+  limit: number,
+  entities: readonly CandidateEntityInput[]
+): Promise<readonly UnmappedSourceGroup[]> {
+  const result = await pool.query<{
+    source_field: MasterSourceField;
+    source_value: string | null;
+    normalized_value: string;
+    rows: string | number;
+    ok_qty: string | number;
+    first_posting_date: string | null;
+    last_posting_date: string | null;
+  }>(
+    `
+      with source_rows as (
+        select 'machine_center_no'::text as source_field, machine_center_no as source_value, posting_date, quantity
+        from production_outputs
+        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+        union all
+        select 'prod_line_no', prod_line_no, posting_date, quantity
+        from production_outputs
+        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+        union all
+        select 'prod_line_description', prod_line_description, posting_date, quantity
+        from production_outputs
+        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+      )
+      select source_field,
+             coalesce(source_value, '') as source_value,
+             upper(regexp_replace(trim(coalesce(source_value, '')), '[^A-Za-z0-9]+', '', 'g')) as normalized_value,
+             count(*) as rows,
+             coalesce(sum(quantity), 0) as ok_qty,
+             min(posting_date)::text as first_posting_date,
+             max(posting_date)::text as last_posting_date
+      from source_rows
+      group by source_field, coalesce(source_value, '')
+      order by ok_qty desc, rows desc
+      limit $2
+    `,
+    [SOURCE_SYSTEM, limit]
+  );
+  return result.rows.map((row) => ({
+    sourceField: row.source_field,
+    sourceValue: row.source_value ?? "",
+    normalizedValue: row.normalized_value,
+    rows: numberValue(row.rows),
+    okQty: numberValue(row.ok_qty),
+    firstPostingDate: row.first_posting_date,
+    lastPostingDate: row.last_posting_date,
+    suggestions: suggestMappingCandidates(row.source_value ?? "", entities)
+  }));
+}
+
+async function previewMappingPlanRow(pool: DatabasePool, row: Pick<MappingPlanRow, "source_field" | "source_value" | "suggested_entity_id">) {
+  const sourceColumn = sourceFieldColumn(row.source_field);
+  const normalized = normalizeAliasKey(row.source_value);
+  return pool.query<{
+    affected_rows: string | number;
+    already_mapped_rows: string | number;
+    ok_qty: string | number | null;
+    target_covered_rows: string | number;
+  }>(
+    `
+      select
+        count(*) filter (where po.entity_id is null) as affected_rows,
+        count(*) filter (where po.entity_id is not null) as already_mapped_rows,
+        coalesce(sum(po.quantity) filter (where po.entity_id is null and po.normalized_output_type = 'OK' and po.quantity > 0), 0) as ok_qty,
+        count(*) filter (
+          where po.entity_id is null
+            and po.normalized_output_type = 'OK'
+            and po.quantity > 0
+            and exists (
+              select 1
+              from production_targets pt
+              where pt.entity_id = $3::uuid
+                and pt.status in ('APPROVED', 'ACTIVE')
+                and pt.daily_target_qty > 0
+                and pt.effective_from <= po.posting_date
+                and (pt.effective_to is null or pt.effective_to >= po.posting_date)
+            )
+        ) as target_covered_rows
+      from production_outputs po
+      where po.source_system = $1
+        and ${sqlNormalizeExpression(`po.${sourceColumn}`)} = $2
+    `,
+    [SOURCE_SYSTEM, normalized, row.suggested_entity_id]
+  ).then((result) => ({
+    affectedRows: numberValue(result.rows[0]?.affected_rows),
+    alreadyMappedRows: numberValue(result.rows[0]?.already_mapped_rows),
+    okQty: numberValue(result.rows[0]?.ok_qty),
+    targetCoveredRows: numberValue(result.rows[0]?.target_covered_rows)
+  }));
+}
+
+function printCoverageSummary(summary: MappingCoverageSummary) {
+  console.log(
+    `Rows: total=${formatNumber(summary.totalRows, 0)}; mapped=${formatNumber(summary.mappedRows, 0)}; unmapped=${formatNumber(summary.unmappedRows, 0)}; coverage=${formatPct(mappingCoveragePct(summary))}`
+  );
+  console.log(
+    `OK rows: total=${formatNumber(summary.okRows, 0)}; mapped=${formatNumber(summary.mappedOkRows, 0)}; unmapped=${formatNumber(summary.unmappedOkRows, 0)}; unmapped_ok_qty=${formatNumber(summary.unmappedOkQty, 2)}`
+  );
 }
 
 async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
@@ -403,84 +638,392 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
   console.log(`Source system: ${SOURCE_SYSTEM}`);
   console.log(`Limit: ${limit}`);
 
-  const [groups, entities] = await Promise.all([
-    pool.query<{
-      source_field: MasterSourceField;
-      source_value: string;
-      normalized_value: string;
-      rows: string | number;
-      ok_qty: string | number;
-      first_posting_date: string | null;
-      last_posting_date: string | null;
-    }>(
+  const [coverage, entities] = await Promise.all([
+    mappingCoverageSummary(pool),
+    activeEntityCandidates(pool)
+  ]);
+  printCoverageSummary(coverage);
+
+  const groups = await fetchUnmappedSourceGroups(pool, limit, entities);
+  if (groups.length === 0) {
+    console.log("- no unmapped source groups found");
+    return;
+  }
+
+  console.log("");
+  console.log("Top unmapped source groups with suggestions");
+  for (const group of groups) {
+    const top = group.suggestions[0];
+    const candidates = group.suggestions
+      .slice(0, 3)
+      .map((candidate) => `${candidate.entityCode} ${candidate.confidence}/${candidate.score}${candidate.targetExists ? "/target" : "/no-target"} (${candidate.reason})`);
+    console.log(
+      `- source_field=${group.sourceField}; source_value=${group.sourceValue || "(blank)"}; normalized=${group.normalizedValue || "(blank)"}; rows=${group.rows}; ok_qty=${formatNumber(group.okQty, 2)}; range=${group.firstPostingDate ?? "N/A"}..${group.lastPostingDate ?? "N/A"}; confidence=${top?.confidence ?? "LOW"}; estimated_mapped_rows_if_committed=${group.sourceValue ? group.rows : 0}; candidates=${candidates.join(" | ") || "none"}`
+    );
+  }
+
+  await printRows(
+    "Top unmapped by machine_center_no",
+    pool.query(
       `
-        with source_rows as (
-          select 'machine_center_no'::text as source_field, machine_center_no as source_value, posting_date, quantity
-          from production_outputs
-          where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
-          union all
-          select 'prod_line_no', prod_line_no, posting_date, quantity
-          from production_outputs
-          where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
-          union all
-          select 'prod_line_description', prod_line_description, posting_date, quantity
-          from production_outputs
-          where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
-        )
-        select source_field,
-               source_value,
-               upper(regexp_replace(trim(coalesce(source_value, '')), '[^A-Za-z0-9]+', '', 'g')) as normalized_value,
+        select coalesce(machine_center_no, '(blank)') as machine_center_no,
                count(*) as rows,
-               coalesce(sum(quantity), 0) as ok_qty,
-               min(posting_date)::text as first_posting_date,
-               max(posting_date)::text as last_posting_date
-        from source_rows
-        where source_value is not null and source_value <> ''
-        group by source_field, source_value
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1
         order by ok_qty desc, rows desc
         limit $2
       `,
       [SOURCE_SYSTEM, limit]
-    ),
-    pool.query<{
-      entity_id: string;
-      entity_code: string;
-      display_name: string;
-      alias_values: string[] | null;
-    }>(
-      `
-        select me.id as entity_id,
-               me.entity_code,
-               me.display_name,
-               array_remove(array_agg(distinct mea.alias), null) as alias_values
-        from master_entities me
-        left join master_entity_aliases mea on mea.entity_id = me.id and mea.is_active
-        where me.is_active
-        group by me.id
-        order by me.entity_code
-        limit 500
-      `
     )
-  ]);
+  );
+  await printRows(
+    "Top unmapped by prod_line_no",
+    pool.query(
+      `
+        select coalesce(prod_line_no, '(blank)') as prod_line_no,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1
+        order by ok_qty desc, rows desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+  await printRows(
+    "Top unmapped by prod_line_description",
+    pool.query(
+      `
+        select coalesce(prod_line_description, '(blank)') as prod_line_description,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1
+        order by ok_qty desc, rows desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+  await printRows(
+    "Top unmapped by machine/prod-line/description",
+    pool.query(
+      `
+        select coalesce(machine_center_no, '(blank)') as machine_center_no,
+               coalesce(prod_line_no, '(blank)') as prod_line_no,
+               coalesce(prod_line_description, '(blank)') as prod_line_description,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1, 2, 3
+        order by ok_qty desc, rows desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+  await printRows(
+    "Top unmapped by item/product family",
+    pool.query(
+      `
+        select coalesce(item_category_code, '(blank)') as item_category_code,
+               coalesce(item_no, '(blank)') as item_no,
+               left(coalesce(max(item_description), ''), 80) as item_description,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1, 2
+        order by ok_qty desc, rows desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+  await printRows(
+    "Top unmapped by month",
+    pool.query(
+      `
+        select date_trunc('month', posting_date)::date::text as month,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and entity_id is null
+        group by 1
+        order by month desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+}
 
-  if (groups.rows.length === 0) {
-    console.log("- no unmapped source groups found");
+async function runMappingPlan(pool: DatabasePool) {
+  const limit = Math.min(Number(process.env.MAPPING_PLAN_LIMIT ?? 250) || 250, 1000);
+  const outputPathInput = process.env.MAPPING_PLAN_OUTPUT?.trim() || DEFAULT_MAPPING_PLAN_PATH;
+  const outputPath = resolveRepoPath(outputPathInput);
+  console.log("Business Central mapping plan");
+  console.log(`Mode: DRY_RUN`);
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`Output: ${displayRepoPath(outputPath)}`);
+  console.log(`Limit: ${limit}`);
+
+  const [coverage, entities] = await Promise.all([
+    mappingCoverageSummary(pool),
+    activeEntityCandidates(pool)
+  ]);
+  printCoverageSummary(coverage);
+
+  const groups = await fetchUnmappedSourceGroups(pool, limit, entities);
+  const rows = buildMappingPlanRows(groups.map((group) => ({
+    sourceSystem: SOURCE_SYSTEM,
+    sourceField: group.sourceField,
+    sourceValue: group.sourceValue,
+    rowCount: group.rows,
+    okQty: group.okQty,
+    firstPostingDate: group.firstPostingDate,
+    lastPostingDate: group.lastPostingDate,
+    suggestions: group.suggestions
+  })));
+  const csv = mappingPlanRowsToCsv(rows);
+  if (containsMappingSecretLikeText(csv)) {
+    throw new Error("Generated mapping plan contains secret-like text; refusing to write it.");
+  }
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, csv, "utf8");
+
+  const suggestedRows = rows.filter((row) => row.suggested_entity_id);
+  const highRows = rows.filter((row) => row.confidence === "HIGH");
+  const mediumRows = rows.filter((row) => row.confidence === "MEDIUM");
+  const targetRows = rows.filter((row) => row.target_exists === "TRUE");
+  console.log("");
+  console.log("Plan summary");
+  console.log(`- rows_written=${rows.length}`);
+  console.log(`- suggested_rows=${suggestedRows.length}; high=${highRows.length}; medium=${mediumRows.length}; low_or_none=${rows.length - highRows.length - mediumRows.length}`);
+  console.log(`- target_exists_for_suggestion=${targetRows.length}`);
+  console.log(`- default_action=REVIEW`);
+  console.log(`- review_file=${displayRepoPath(outputPath)}`);
+  console.log("Dry-run only. Edit action=COMMIT for reviewed rows, then run MAPPING_PLAN_COMMIT=true pnpm bc:mapping-plan-apply.");
+}
+
+function isPlanSourceField(value: string): value is (typeof mappingPlanSourceFields)[number] {
+  return (mappingPlanSourceFields as readonly string[]).includes(value);
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function runMappingPlanApply(pool: DatabasePool) {
+  const filePathInput = process.env.MAPPING_PLAN_FILE?.trim() || DEFAULT_MAPPING_PLAN_PATH;
+  const filePath = resolveRepoPath(filePathInput);
+  const commit = process.env.MAPPING_PLAN_COMMIT === "true";
+  console.log("Business Central mapping plan apply");
+  console.log(`Mode: ${commit ? "COMMIT" : "DRY_RUN"}`);
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`Plan file: ${displayRepoPath(filePath)}`);
+
+  const csv = await readFile(filePath, "utf8");
+  if (containsMappingSecretLikeText(csv)) {
+    throw new Error("Mapping plan contains secret-like text; refusing to process it.");
+  }
+  const rows = parseMappingPlanCsv(csv);
+  const commitRows = rows.filter((row) => row.action === "COMMIT");
+  const warnings: string[] = [];
+  const conflicts: string[] = [];
+  console.log(`Rows in plan: ${rows.length}; action=COMMIT rows: ${commitRows.length}`);
+
+  const entities = await activeEntityCandidates(pool);
+  const entityIds = new Set(entities.map((entity) => entity.entityId));
+  const validRows = commitRows.flatMap((row) => {
+    if (row.source_system !== SOURCE_SYSTEM) {
+      warnings.push(`Skipped ${row.source_field}:${row.source_value || "(blank)"} because source_system is ${row.source_system}.`);
+      return [];
+    }
+    if (!isPlanSourceField(row.source_field)) {
+      warnings.push(`Skipped ${row.source_field}:${row.source_value || "(blank)"} because the source field is not allowlisted for entity mapping.`);
+      return [];
+    }
+    if (!normalizeAliasKey(row.source_value)) {
+      warnings.push(`Skipped ${row.source_field} blank source value; blank machine groups require row context.`);
+      return [];
+    }
+    if (!isUuid(row.suggested_entity_id) || !entityIds.has(row.suggested_entity_id)) {
+      warnings.push(`Skipped ${row.source_field}:${row.source_value} because suggested_entity_id is not an active master entity.`);
+      return [];
+    }
+    if (row.confidence === "LOW") {
+      warnings.push(`Skipped LOW confidence row ${row.source_field}:${row.source_value}; low-confidence mappings require manual one-off handling.`);
+      return [];
+    }
+    return [row];
+  });
+
+  let aliasesInserted = 0;
+  let aliasesSkipped = 0;
+  let rowsUpdated = 0;
+  let rowsWouldUpdate = 0;
+  let targetCoveredRows = 0;
+  let alreadyMappedRows = 0;
+
+  const previews = await Promise.all(validRows.map((row) => previewMappingPlanRow(pool, row)));
+  const coverage = await mappingCoverageSummary(pool);
+  previews.forEach((preview) => {
+    rowsWouldUpdate += preview.affectedRows;
+    targetCoveredRows += preview.targetCoveredRows;
+    alreadyMappedRows += preview.alreadyMappedRows;
+  });
+
+  console.log("");
+  console.log("Dry-run estimate");
+  console.log(`- valid_commit_rows=${validRows.length}`);
+  console.log(`- rows_would_update=${rowsWouldUpdate}`);
+  console.log(`- mapped_rows_before=${coverage.mappedRows}; mapped_rows_after_estimate=${coverage.mappedRows + rowsWouldUpdate}`);
+  console.log(`- unmapped_rows_before=${coverage.unmappedRows}; unmapped_rows_after_estimate=${Math.max(coverage.unmappedRows - rowsWouldUpdate, 0)}`);
+  console.log(`- already_mapped_rows_not_overwritten=${alreadyMappedRows}`);
+  console.log(`- target_covered_rows_after_mapping_estimate=${targetCoveredRows}`);
+
+  if (!commit) {
+    console.log("Dry-run only. Set MAPPING_PLAN_COMMIT=true after reviewing the CSV to create aliases and update unmapped rows.");
+    if (warnings.length > 0) {
+      console.log("Warnings:");
+      for (const warning of warnings) console.log(`- ${warning}`);
+    }
     return;
   }
-  for (const group of groups.rows) {
-    const candidates = entities.rows
-      .flatMap((entity) => {
-        const score = Math.max(
-          ...[entity.entity_code, entity.display_name, ...(entity.alias_values ?? [])].map((value) => similarity(group.source_value, value))
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (const row of validRows) {
+      const sourceValue = normalizeAliasDisplay(row.source_value);
+      const normalized = normalizeAliasKey(sourceValue);
+      const sourceColumn = sourceFieldColumn(row.source_field);
+      const alias = await client.query<{
+        id: string;
+        entity_id: string;
+        source_field: string;
+        alias_normalized: string;
+        is_active: boolean;
+      }>(
+        `
+          select id, entity_id, source_field, alias_normalized, is_active
+          from master_entity_aliases
+          where alias = $4
+             or (
+               source_system = $1
+               and source_field = $2
+               and alias_normalized = $3
+             )
+          order by is_active desc, created_at desc
+        `,
+        [SOURCE_SYSTEM, row.source_field, normalized, sourceValue]
+      );
+      const conflictingAlias = alias.rows.find((candidate) => (
+        candidate.entity_id !== row.suggested_entity_id
+        || candidate.source_field !== row.source_field
+        || candidate.alias_normalized !== normalized
+      ));
+      if (conflictingAlias) {
+        conflicts.push(`${row.source_field}:${sourceValue} conflicts with existing alias ${conflictingAlias.id}`);
+        continue;
+      }
+      const existingAlias = alias.rows[0];
+      if (existingAlias) {
+        if (!existingAlias.is_active) {
+          await client.query("update master_entity_aliases set is_active = true, updated_at = now() where id = $1", [existingAlias.id]);
+        }
+        aliasesSkipped += 1;
+      } else {
+        await client.query(
+          `
+            insert into master_entity_aliases
+              (entity_id, alias, source_system, source_field, alias_normalized, source, confidence, match_confidence)
+            values ($1, $2, $3, $4, $5, 'mapping-plan', $6, $6)
+          `,
+          [
+            row.suggested_entity_id,
+            sourceValue,
+            SOURCE_SYSTEM,
+            row.source_field,
+            normalized,
+            row.confidence === "HIGH" ? 100 : 80
+          ]
         );
-        return score >= 30
-          ? [`${entity.entity_code} (${score})`]
-          : [];
-      })
-      .slice(0, 3);
-    console.log(
-      `- source_field=${group.source_field}; source_value=${group.source_value}; normalized=${group.normalized_value}; rows=${group.rows}; ok_qty=${group.ok_qty}; range=${group.first_posting_date ?? "N/A"}..${group.last_posting_date ?? "N/A"}; candidates=${candidates.join(", ") || "none"}`
+        aliasesInserted += 1;
+      }
+
+      const updated = await client.query<{ entry_no: string }>(
+        `
+          update production_outputs
+          set entity_id = $3,
+              updated_at = now()
+          where source_system = $1
+            and ${sqlNormalizeExpression(sourceColumn)} = $2
+            and entity_id is null
+          returning entry_no::text
+        `,
+        [SOURCE_SYSTEM, normalized, row.suggested_entity_id]
+      );
+      rowsUpdated += updated.rowCount ?? 0;
+      const entryNos = updated.rows.map((updatedRow) => updatedRow.entry_no);
+      if (entryNos.length > 0) {
+        await client.query(
+          `
+            update data_quality_issues
+            set status = 'RESOLVED',
+                resolved_at = now(),
+                resolution_note = 'Resolved by reviewed mapping plan'
+            where source_system = $1
+              and status in ('OPEN', 'ACKNOWLEDGED')
+              and issue_code in ('UNKNOWN_MACHINE', 'UNMAPPED_ENTITY')
+              and source_ref = any($2::text[])
+          `,
+          [SOURCE_SYSTEM, entryNos]
+        );
+      }
+    }
+
+    await client.query(
+      `
+        insert into audit_logs (action, entity_type, entity_id, before_value, after_value, user_agent)
+        values ('master.mapping_plan.script_commit', 'production_output_mapping', $1, $2::jsonb, $3::jsonb, 'bc-metrics-script')
+      `,
+      [
+        displayRepoPath(filePath),
+        JSON.stringify({ sourceSystem: SOURCE_SYSTEM, filePath: displayRepoPath(filePath), planRows: rows.length, commitRows: commitRows.length }),
+        JSON.stringify({ aliasesInserted, aliasesSkipped, rowsUpdated, conflicts: conflicts.length, warnings: warnings.length })
+      ]
     );
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  console.log("");
+  console.log("Commit summary");
+  console.log(`- aliases_inserted=${aliasesInserted}`);
+  console.log(`- aliases_skipped=${aliasesSkipped}`);
+  console.log(`- rows_updated=${rowsUpdated}`);
+  console.log(`- conflicts=${conflicts.length}`);
+  console.log(`- warnings=${warnings.length}`);
+  if (conflicts.length > 0) {
+    console.log("Conflicts:");
+    for (const conflict of conflicts) console.log(`- ${conflict}`);
+  }
+  if (warnings.length > 0) {
+    console.log("Warnings:");
+    for (const warning of warnings) console.log(`- ${warning}`);
   }
 }
 
@@ -778,8 +1321,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "mapping-candidates", "mapping-apply"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|mapping-candidates|mapping-apply>");
+  if (!["profile", "reconcile", "target-coverage", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -787,6 +1330,8 @@ async function main() {
     else if (command === "reconcile") await runReconcile(database.pool);
     else if (command === "target-coverage") await runTargetCoverage(database.pool);
     else if (command === "mapping-candidates") await runMappingCandidates(database.pool);
+    else if (command === "mapping-plan") await runMappingPlan(database.pool);
+    else if (command === "mapping-plan-apply") await runMappingPlanApply(database.pool);
     else await runMappingApply(database.pool);
   } finally {
     await database.pool.end();

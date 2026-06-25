@@ -14,6 +14,8 @@ test("normalizeAliasDisplay trims, uppercases, and collapses whitespace", () => 
 test("normalizeAliasKey removes common separators safely", () => {
   assert.equal(normalizeAliasKey("CP1-9.7/12.5/14"), "CP19712514");
   assert.equal(normalizeAliasKey("HENGFENG\u00a04\u00a0OZ"), "HENGFENG4OZ");
+  assert.equal(normalizeAliasKey("newdo_1/reg"), "NEWDO1REG");
+  assert.equal(normalizeAliasKey(" Illig - 1 "), "ILLIG1");
 });
 
 test("legacyMachineFamilyKey maps v1 machine families", () => {

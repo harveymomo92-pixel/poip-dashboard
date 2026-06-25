@@ -22,13 +22,17 @@ import {
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../lib/api";
 
 type SourceField = "machine_center_no" | "prod_line_no" | "prod_line_description" | "item_no" | "uom";
+type MappingConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 interface Overview {
   readonly totalEntities: number;
   readonly activeEntities: number;
   readonly activeAliases: number;
+  readonly totalOutputRows: number;
+  readonly mappedRows: number;
   readonly unmappedSourceGroups: number;
   readonly unmappedRows: number;
+  readonly mappingCoveragePct: number | null;
   readonly targetCoverageGapRows: number;
   readonly conversionGaps: number;
 }
@@ -57,7 +61,15 @@ interface UnmappedGroup {
   readonly firstPostingDate: string | null;
   readonly lastPostingDate: string | null;
   readonly sampleDocumentNos: readonly string[];
-  readonly candidates: readonly { readonly entityId: string; readonly entityCode: string; readonly displayName: string; readonly reason: string; readonly score: number }[];
+  readonly candidates: readonly {
+    readonly entityId: string;
+    readonly entityCode: string;
+    readonly displayName: string;
+    readonly reason: string;
+    readonly score: number;
+    readonly confidence: MappingConfidence;
+    readonly targetExists: boolean;
+  }[];
 }
 
 interface PageResult<T> {
@@ -100,8 +112,18 @@ const sourceFieldOptions: readonly { readonly value: SourceField; readonly label
   { value: "prod_line_description", label: "Prod line description" }
 ];
 
+const confidenceOptions: readonly { readonly value: MappingConfidence; readonly label: string }[] = [
+  { value: "HIGH", label: "High" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "LOW", label: "Low" }
+];
+
 function formatNumber(value: number, digits = 0) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(value);
+}
+
+function formatPct(value: number | null | undefined) {
+  return value === null || value === undefined ? "N/A" : `${formatNumber(value, 2)}%`;
 }
 
 function query(params: Record<string, string | number | undefined>) {
@@ -144,6 +166,7 @@ export function MasterDataPageClient() {
   const [entityForm, setEntityForm] = useState({ entityCode: "", displayName: "", area: "", lineCode: "" });
   const [conversionForm, setConversionForm] = useState({ itemNo: "", uom: "", grossWeightPerPcs: "" });
   const [sourceField, setSourceField] = useState<SourceField | "">("");
+  const [confidenceFilter, setConfidenceFilter] = useState<MappingConfidence | "">("");
   const [search, setSearch] = useState("");
   const [unmappedPage, setUnmappedPage] = useState(1);
   const [entityPage, setEntityPage] = useState(1);
@@ -156,6 +179,10 @@ export function MasterDataPageClient() {
   const canManage = currentUser?.permissions.includes("master_data.manage") ?? false;
 
   const unmappedQuery = useMemo(() => query({ page: unmappedPage, pageSize: 15, sourceField: sourceField || undefined, search }), [search, sourceField, unmappedPage]);
+  const visibleUnmapped = useMemo(() => {
+    if (!unmapped || !confidenceFilter) return unmapped?.rows ?? [];
+    return unmapped.rows.filter((group) => (group.candidates[0]?.confidence ?? "LOW") === confidenceFilter);
+  }, [confidenceFilter, unmapped]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -216,6 +243,10 @@ export function MasterDataPageClient() {
   async function previewMapping(group = selectedGroup, entityId = selectedEntityId) {
     if (!group || !entityId) {
       setError("Pilih source group dan entity tujuan dulu.");
+      return;
+    }
+    if (!group.normalizedValue) {
+      setError("Blank source group tidak bisa dipetakan otomatis. Gunakan konteks prod line, item, atau document untuk review manual.");
       return;
     }
     setBusy(true);
@@ -315,6 +346,7 @@ export function MasterDataPageClient() {
           <section className="metric-grid metric-grid-five">
             <MetricCard icon={<Icons.database />} label="Entities" value={formatNumber(overview.activeEntities)} detail={`${formatNumber(overview.totalEntities)} total`} tone="info" />
             <MetricCard icon={<Icons.filter />} label="Active aliases" value={formatNumber(overview.activeAliases)} detail="Reviewed mapping rules" tone="success" />
+            <MetricCard icon={<Icons.percent />} label="Mapping coverage" value={formatPct(overview.mappingCoveragePct)} detail={`${formatNumber(overview.mappedRows)} / ${formatNumber(overview.totalOutputRows)} rows`} tone={overview.unmappedRows ? "warning" : "success"} />
             <MetricCard icon={<Icons.alert />} label="Unmapped rows" value={formatNumber(overview.unmappedRows)} detail={`${formatNumber(overview.unmappedSourceGroups)} source groups`} tone={overview.unmappedRows ? "warning" : "success"} />
             <MetricCard icon={<Icons.target />} label="Target gaps" value={formatNumber(overview.targetCoverageGapRows)} detail="Rows not eligible for achievement" tone={overview.targetCoverageGapRows ? "warning" : "success"} />
             <MetricCard icon={<Icons.scale />} label="Conversion gaps" value={formatNumber(overview.conversionGaps)} detail="Reject rows missing gross weight" tone={overview.conversionGaps ? "danger" : "success"} />
@@ -323,21 +355,22 @@ export function MasterDataPageClient() {
 
         <section className="master-detail-layout has-detail">
           <div>
-            <SectionHeader title="Alias Mapping Center" description="Review top unmapped BC source groups, preview affected rows, then commit an explicit alias mapping." actions={canManage ? <button className="secondary-button" disabled={busy || !selectedGroup || !selectedEntityId} onClick={() => void previewMapping()}>Preview selected</button> : null} />
-            <FilterBar compact actions={<><button className="secondary-button" onClick={() => { setSearch(""); setSourceField(""); setUnmappedPage(1); }}>Reset</button><button onClick={() => setUnmappedPage(1)}>Apply</button></>}>
+            <SectionHeader title="Alias Mapping Center" description="Review top unmapped BC source groups, preview affected rows, then commit an explicit alias mapping." actions={canManage ? <button className="secondary-button" disabled={busy || !selectedGroup || !selectedGroup.normalizedValue || !selectedEntityId} onClick={() => void previewMapping()}>Preview selected</button> : null} />
+            <FilterBar compact actions={<><button className="secondary-button" onClick={() => { setSearch(""); setSourceField(""); setConfidenceFilter(""); setUnmappedPage(1); }}>Reset</button><button onClick={() => setUnmappedPage(1)}>Apply</button></>}>
               <Field label="Source field"><select value={sourceField} onChange={(event) => setSourceField(event.target.value as SourceField | "")}><option value="">All</option>{sourceFieldOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+              <Field label="Confidence"><select value={confidenceFilter} onChange={(event) => setConfidenceFilter(event.target.value as MappingConfidence | "")}><option value="">All</option>{confidenceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
               <Field label="Search source"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ILLIG, HENGFENG, NEWDO…" /></Field>
             </FilterBar>
-            {!unmapped || unmapped.rows.length === 0 ? <EmptyState title="No unmapped groups" description="Current filters do not show unmapped Business Central source groups." /> : (
+            {!unmapped || visibleUnmapped.length === 0 ? <EmptyState title="No unmapped groups" description="Current filters do not show unmapped Business Central source groups." /> : (
               <>
                 <DataTable headers={["Source", "Rows", "OK qty", "Range", "Candidate", "Action"]}>
-                  {unmapped.rows.map((group) => (
+                  {visibleUnmapped.map((group) => (
                     <tr className={selectedGroup?.sourceField === group.sourceField && selectedGroup.sourceValue === group.sourceValue ? "selected-row" : ""} key={`${group.sourceField}:${group.sourceValue}`}>
-                      <td><strong>{group.sourceValue}</strong><small>{group.sourceField.replaceAll("_", " ")} · {group.normalizedValue}</small></td>
+                      <td><strong>{group.sourceValue || "(blank)"}</strong><small>{group.sourceField.replaceAll("_", " ")} · {group.normalizedValue || "needs context"}</small></td>
                       <td>{formatNumber(group.rowCount)}</td>
                       <td>{formatNumber(group.outputOkQty, 1)}</td>
                       <td>{group.firstPostingDate ?? "—"} → {group.lastPostingDate ?? "—"}<small>{group.sampleDocumentNos.slice(0, 2).join(", ")}</small></td>
-                      <td>{group.candidates[0] ? <>{group.candidates[0].entityCode}<small>{group.candidates[0].reason} · {group.candidates[0].score}</small></> : "No candidate"}</td>
+                      <td>{group.candidates[0] ? <>{group.candidates[0].entityCode}<small>{group.candidates[0].confidence} · score {group.candidates[0].score} · {group.candidates[0].targetExists ? "target exists" : "target missing"}</small><small>{group.candidates[0].reason}</small></> : "No candidate"}</td>
                       <td><button className="secondary-button" onClick={() => { setSelectedGroup(group); if (group.candidates[0]) setSelectedEntityId(group.candidates[0].entityId); }}>Select</button></td>
                     </tr>
                   ))}
@@ -355,15 +388,21 @@ export function MasterDataPageClient() {
                   <div><dt>Source field</dt><dd>{selectedGroup.sourceField}</dd></div>
                   <div><dt>Rows</dt><dd>{formatNumber(selectedGroup.rowCount)}</dd></div>
                   <div><dt>OK quantity</dt><dd>{formatNumber(selectedGroup.outputOkQty, 1)}</dd></div>
+                  <div><dt>Confidence</dt><dd>{selectedGroup.candidates[0]?.confidence ?? "LOW"}</dd></div>
+                  <div><dt>Target impact</dt><dd>{selectedGroup.candidates[0]?.targetExists ? `${formatNumber(selectedGroup.rowCount)} rows may become target-eligible` : "Target missing or no candidate"}</dd></div>
                 </dl>
                 <Field label="Map to existing entity" helper="No automatic low-confidence mapping is applied.">
                   <select value={selectedEntityId} onChange={(event) => setSelectedEntityId(event.target.value)}>
                     <option value="">Choose entity</option>
-                    {entities?.rows.map((entity) => <option key={entity.id} value={entity.id}>{entity.entityCode} · {entity.displayName}</option>)}
+                    {selectedGroup.candidates.map((candidate) => <option key={`candidate:${candidate.entityId}`} value={candidate.entityId}>{candidate.entityCode} · {candidate.displayName} · {candidate.confidence}</option>)}
+                    {selectedGroup.candidates.length > 0 ? <option disabled>----------</option> : null}
+                    {entities?.rows
+                      .filter((entity) => !selectedGroup.candidates.some((candidate) => candidate.entityId === entity.id))
+                      .map((entity) => <option key={entity.id} value={entity.id}>{entity.entityCode} · {entity.displayName}</option>)}
                   </select>
                 </Field>
                 {preview ? <div className="detail-section"><h3>Preview result</h3><p>{formatNumber(preview.affectedRows)} rows will be mapped. {formatNumber(preview.alreadyMappedRows)} rows are already mapped. {formatNumber(preview.unresolvedIssueCount)} related issues may be resolved.</p><small>Samples: {preview.sampleEntryNos.join(", ") || "—"}</small></div> : null}
-                {canManage ? <div className="detail-actions"><button disabled={busy || !selectedEntityId} onClick={() => void previewMapping()}>Preview</button><button className="secondary-button" disabled={busy || !preview || !selectedEntityId} onClick={() => setConfirmMapping(true)}>Commit mapping</button></div> : <p className="permission-note">Mapping commits require master data management permission.</p>}
+                {canManage ? <div className="detail-actions"><button disabled={busy || !selectedGroup.normalizedValue || !selectedEntityId} onClick={() => void previewMapping()}>Preview</button><button className="secondary-button" disabled={busy || !selectedGroup.normalizedValue || !preview || !selectedEntityId} onClick={() => setConfirmMapping(true)}>Commit mapping</button></div> : <p className="permission-note">Mapping commits require master data management permission.</p>}
               </>
             ) : <EmptyState title="No source selected" description="Select an unmapped Business Central source group from the table." />}
           </aside>

@@ -4867,6 +4867,9 @@ Live Business Central ingestion and P0.1 reconciliation prove data can enter Pos
 8. Conversion commit that recomputes missing reject PCS equivalent only where conversion is missing.
 9. Data-quality integration for unmapped entity and missing gross-weight resolution.
 10. Audit logs for every entity, alias, mapping, and conversion write.
+11. Assisted mapping diagnostics by machine center, production line, description, combined context, item/product family, month, OK quantity, and row count.
+12. Reviewable CSV mapping plan generation with confidence, reason, target-exists flag, and default `action=REVIEW`.
+13. Batch application of only reviewed `action=COMMIT` rows with dry-run default and audit logging.
 
 ### Mapping Priority
 
@@ -4879,17 +4882,37 @@ For each Business Central output row:
 
 The system must not silently create fake entities or auto-map low-confidence source values.
 
+### Milestone 11.2 - Assisted Business Central Mapping Coverage
+
+After the v1 import, active master entities and aliases can exist while most live BC rows remain unmapped because source values do not exactly match reviewed aliases. Examples include `NEWDO 1 REG`, `ILLIG1`, `HENGFENG 4 OZ`, `OMSO2 OZ`, and blank machine groups.
+
+Candidate generation rules:
+
+1. HIGH confidence: exact normalized match to an active entity code, display name, or active alias.
+2. MEDIUM confidence: one clear active entity has strong normalized containment or shared family tokens such as `ILLIG`, `NEWDO`, `HENGFENG`, `OMSO`, `OZ`, or `REG`.
+3. LOW confidence: weak overlap, multiple possible entities, or blank source value.
+4. HIGH and MEDIUM rows can be proposed for human CSV review.
+5. LOW rows and blank machine groups must stay `REVIEW` and must not be batch-committed.
+6. Item/product-family hints are diagnostic unless they clearly support a source-field alias.
+
+The review artifact is `.tmp/mapping-plan/business-central-mapping-plan.csv` and must include source system, source field, source value, normalized value, row count, OK quantity, posting-date range, suggested entity, confidence, reason, target-exists flag, action, and review note. Default action is always `REVIEW`.
+
+Batch apply must be dry-run by default, require `MAPPING_PLAN_COMMIT=true`, apply only `action=COMMIT`, create aliases if missing, update only unmapped `production_outputs`, resolve related data-quality issues, and write audit entries. Existing mapped rows are not overwritten.
+
 ### Commands
 
 ```bash
 pnpm bc:profile
 pnpm bc:target-coverage
 pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:mapping-plan-apply
 SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
 SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
 ```
 
 `bc:mapping-apply` must be dry-run by default and require `APPLY_MAPPING_COMMIT=true` for mutation.
+`bc:mapping-plan-apply` must be dry-run by default and require `MAPPING_PLAN_COMMIT=true` for mutation.
 
 ### Milestone 11.1 — V1 Master Data Import
 
