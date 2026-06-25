@@ -21,6 +21,8 @@
     "bc:profile": "bash scripts/bc-metrics.sh profile",
     "bc:reconcile": "bash scripts/bc-metrics.sh reconcile",
     "bc:target-coverage": "bash scripts/bc-metrics.sh target-coverage",
+    "bc:mapping-candidates": "bash scripts/bc-metrics.sh mapping-candidates",
+    "bc:mapping-apply": "bash scripts/bc-metrics.sh mapping-apply",
     "db:migrate": "pnpm --filter @poip/db migrate",
     "db:seed": "pnpm --filter @poip/db seed",
     "db:create-admin": "pnpm --filter @poip/db create-admin",

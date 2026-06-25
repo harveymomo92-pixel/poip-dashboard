@@ -166,9 +166,63 @@ pnpm bc:target-coverage
 
 `pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when gross-weight conversion is missing, and whether OK output exists without mapped entities.
 
-`pnpm bc:target-coverage` groups positive OK output by month and entity/machine, then labels rows as `COVERED`, `TARGET_MISSING`, or `UNMAPPED_ENTITY`. Load/approve master entities and targets before expecting achievement to become numeric.
+`pnpm bc:target-coverage` groups positive OK output by month and entity/machine, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: OK Output uses positive `normalized_output_type = 'OK'` rows from `source_system = 'business-central'`; targets must be approved/active and effective for the entity/date; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps.
+
+### Master data mapping operations
+
+Use `/master-data` when live BC rows are loaded but dashboard achievement is still `N/A` because output rows are unmapped. The Mapping Center is the reviewed bridge from raw Business Central values to internal master entities.
+
+Safe review flow:
+
+1. Open `/master-data`.
+2. Review overview cards for active entities, aliases, unmapped rows, target gaps, and conversion gaps.
+3. In Alias Mapping Center, filter by source field or source value.
+4. Select an unmapped group such as a machine center or production line.
+5. Choose an existing canonical entity, or create the entity first if it truly does not exist.
+6. Preview affected rows.
+7. Commit only after the affected row count and entity are correct.
+8. Re-run `pnpm bc:target-coverage` and `/overview` to verify rows moved from `UNMAPPED_ENTITY` to `COVERED` or a specific target reason.
+
+Mapping priority:
+
+1. Active exact alias for `business-central` + source field + source value.
+2. Active normalized alias after trimming, uppercasing, collapsing whitespace, and removing common separators.
+3. Exact `master_entities.entity_code`.
+4. Leave unmapped and classify as `UNMAPPED_ENTITY`.
+
+Operational commands:
+
+```bash
+pnpm bc:mapping-candidates
+
+SOURCE_FIELD=machine_center_no \
+SOURCE_VALUE="REPLACE_WITH_BC_MACHINE" \
+ENTITY_ID="00000000-0000-0000-0000-000000000000" \
+pnpm bc:mapping-apply
+
+SOURCE_FIELD=machine_center_no \
+SOURCE_VALUE="REPLACE_WITH_BC_MACHINE" \
+ENTITY_ID="00000000-0000-0000-0000-000000000000" \
+APPLY_MAPPING_COMMIT=true \
+pnpm bc:mapping-apply
+```
+
+`pnpm bc:mapping-candidates` is read-only. `pnpm bc:mapping-apply` is also dry-run by default; it mutates only when `APPLY_MAPPING_COMMIT=true` is set. Commit mode creates or reuses an alias, updates only unmapped matching `production_outputs` rows, resolves related unmapped-entity data-quality issues, and writes an audit log.
+
+Do not map low-confidence source values just to make achievement numeric. If a source group is operationally ambiguous, leave it unmapped and ask PPIC/production owners to confirm the canonical entity.
+
+### Conversion gap operations
+
+Use `/master-data` → Conversion Gap View when reject PCS equivalent is incomplete.
+
+1. Review item/UOM groups with `reject_kg > 0` and missing gross-weight conversion.
+2. Enter the reviewed gross weight per PCS for that exact item/UOM.
+3. Commit only after checking the affected reject row count.
+4. Re-run `pnpm bc:profile` or `pnpm bc:reconcile` to verify conversion gaps decreased.
+
+Conversion commits update only rows where `reject_pcs_eq` or `gross_weight_per_pcs` is missing/invalid. They do not overwrite already converted rows.
 
 ## Data quality operations
 

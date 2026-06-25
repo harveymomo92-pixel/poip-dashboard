@@ -9,6 +9,7 @@ The app currently includes:
 - BullMQ worker foundation for OData sync.
 - PostgreSQL schema, migrations, role/permission seed, and local admin bootstrap.
 - Dashboard/KPI read model, targets, downtime, WhatsApp Parser, Import Center, Data Quality, Audit Viewer, and System Health.
+- Master Data & Mapping Center for reviewed Business Central entity aliases, target coverage, and gross-weight conversion gaps.
 
 ## Prerequisites
 
@@ -95,9 +96,19 @@ After live rows are in PostgreSQL, verify the calculation gate with read-only di
 pnpm bc:profile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
 pnpm bc:target-coverage
+pnpm bc:mapping-candidates
 ```
 
 Dashboard calculations use canonical `source_system = 'business-central'`. Missing approved targets produce `N/A` achievement rather than a misleading zero target, and unmapped machines/entities remain visible until master entities/aliases are loaded.
+
+Map Business Central machine/line values only after review:
+
+```bash
+SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
+SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
+```
+
+The first command is a dry-run preview. Commit mode creates/reuses an alias, updates only unmapped matching output rows, resolves related unmapped-entity issues, and writes an audit event. The same workflow is available in `/master-data`.
 
 See [Operations guide](docs/OPERATIONS.md) for the full live-sync, backfill, and reconciliation checklist.
 

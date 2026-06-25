@@ -17,6 +17,7 @@ const navigation: readonly { readonly group: string; readonly items: readonly Na
   { group: "Dashboard", items: [{ href: "/overview", label: "Overview", icon: Icons.overview }] },
   { group: "Operations", items: [
     { href: "/downtime", label: "Downtime", icon: Icons.downtime },
+    { href: "/master-data", label: "Master Data", icon: Icons.database },
     { href: "/data-quality", label: "Data Quality", icon: Icons.quality }
   ] },
   { group: "Tools", items: [

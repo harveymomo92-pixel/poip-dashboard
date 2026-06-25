@@ -4833,3 +4833,73 @@ This P0.1 gate is complete only when:
 Until this gate passes, do not prioritize cosmetic dashboard work. Calculation correctness and sync efficiency are higher priority than visual polish.
 
 <!-- P0_1_BC_CALCULATION_SYNC_END -->
+
+<!-- M11_MASTER_DATA_MAPPING_START -->
+
+## Milestone 11 — Master Data and Mapping Center
+
+### Purpose
+
+Live Business Central ingestion and P0.1 reconciliation prove data can enter PostgreSQL and that OK Output can reconcile with raw SQL. The next production gate is master-data actionability: Business Central source values must map to canonical internal entities, target coverage must become explainable, and reject PCS equivalent must identify/resolve gross-weight conversion gaps.
+
+### Problem Found by P0.1
+
+1. Most live `business-central` output rows can remain unmapped to `master_entities`.
+2. Target coverage cannot be calculated for unmapped rows.
+3. Achievement must stay `N/A / TARGET_MISSING` until rows have both entity mapping and approved effective targets.
+4. Reject PCS equivalent can remain incomplete when item/UOM gross-weight data is missing.
+
+### Required Capabilities
+
+1. Master Data Overview showing entity count, alias count, unmapped BC groups, target coverage gaps, and conversion gaps.
+2. Entity management for canonical machines/lines/reporting groups.
+3. Alias Mapping Center for reviewed mapping from raw BC source values to canonical entities.
+4. Mapping preview before commit.
+5. Mapping commit that updates only unmapped matching `production_outputs.entity_id` by default.
+6. Target Coverage View with explicit reasons:
+   - `UNMAPPED_ENTITY`
+   - `NO_ACTIVE_TARGET`
+   - `TARGET_NOT_APPROVED`
+   - `OUTSIDE_EFFECTIVE_DATE`
+   - `TARGET_ZERO`
+   - `COVERED`
+7. Conversion Gap View for missing item/UOM gross-weight mappings.
+8. Conversion commit that recomputes missing reject PCS equivalent only where conversion is missing.
+9. Data-quality integration for unmapped entity and missing gross-weight resolution.
+10. Audit logs for every entity, alias, mapping, and conversion write.
+
+### Mapping Priority
+
+For each Business Central output row:
+
+1. Try an active exact alias match using `source_system = 'business-central'`, source field, and source value.
+2. Try an active normalized alias match using trim, uppercase, whitespace collapse, and safe separator removal.
+3. Try exact `master_entities.entity_code`.
+4. If no reviewed match exists, keep `entity_id = null` and classify as `UNMAPPED_ENTITY`.
+
+The system must not silently create fake entities or auto-map low-confidence source values.
+
+### Commands
+
+```bash
+pnpm bc:profile
+pnpm bc:target-coverage
+pnpm bc:mapping-candidates
+SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
+SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
+```
+
+`bc:mapping-apply` must be dry-run by default and require `APPLY_MAPPING_COMMIT=true` for mutation.
+
+### Definition of Done
+
+1. `/master-data` exists and uses the production design system.
+2. Top unmapped BC source groups are visible in UI and scripts.
+3. Users with `master_data.manage` can create aliases and commit mapping after preview.
+4. Mapping commit updates `production_outputs.entity_id` idempotently and writes audit logs.
+5. Target coverage reasons become specific after mapping.
+6. Conversion gaps are visible and can be resolved through reviewed item/UOM conversion mappings.
+7. Dashboard achievement remains `N/A` for missing targets and becomes numeric only where entity and target match.
+8. Validation passes without printing or committing secrets.
+
+<!-- M11_MASTER_DATA_MAPPING_END -->

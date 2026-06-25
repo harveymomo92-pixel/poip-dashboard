@@ -25,6 +25,8 @@ export const permissions = [
   "import.commit",
   "sync.view",
   "sync.run",
+  "master_data.view",
+  "master_data.manage",
   "data_quality.view",
   "audit.view",
   "settings.manage",
@@ -61,6 +63,8 @@ export const permissionDescriptions = {
   "import.commit": "Commit reviewed import runs.",
   "sync.view": "View sync status and history.",
   "sync.run": "Run sync jobs.",
+  "master_data.view": "View master data and mapping coverage.",
+  "master_data.manage": "Manage master data, aliases, and mapping jobs.",
   "data_quality.view": "View data quality issues.",
   "audit.view": "View audit logs.",
   "settings.manage": "Manage system settings.",
@@ -77,6 +81,7 @@ export const rolePermissionMatrix = {
     "target.approve",
     "downtime.view",
     "downtime.close",
+    "master_data.view",
     "data_quality.view",
     "audit.view"
   ],
@@ -94,6 +99,8 @@ export const rolePermissionMatrix = {
     "import.preview",
     "import.commit",
     "sync.view",
+    "master_data.view",
+    "master_data.manage",
     "data_quality.view"
   ],
   ProductionLeader: [
@@ -116,7 +123,7 @@ export const rolePermissionMatrix = {
     "downtime.close"
   ],
   QC: ["dashboard.view", "output.view", "output.export", "downtime.view", "data_quality.view"],
-  Viewer: ["dashboard.view", "output.view", "target.view", "downtime.view"]
+  Viewer: ["dashboard.view", "output.view", "target.view", "downtime.view", "master_data.view"]
 } as const satisfies Record<Role, readonly Permission[]>;
 
 export function isRole(value: string): value is Role {

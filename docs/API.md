@@ -183,6 +183,30 @@ Commit body can be `{}` to commit all valid rows, or:
 | `POST` | `/data-quality/issues/:id/ignore` | `settings.manage` | Ignore an active issue with a required note. |
 | `POST` | `/data-quality/issues/:id/reopen` | `settings.manage` | Reopen a resolved or ignored issue. |
 
+## Master Data and Mapping
+
+Read endpoints require `master_data.view`. Write endpoints require `master_data.manage` and create audit logs.
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| `GET` | `/master/overview` | `master_data.view` | Master data summary cards for entities, aliases, unmapped groups, target gaps, and conversion gaps. |
+| `GET` | `/master/entities` | `master_data.view` | Paginated master entity list. |
+| `POST` | `/master/entities` | `master_data.manage` | Create a canonical master entity. |
+| `GET` | `/master/entities/:id` | `master_data.view` | Entity detail with aliases. |
+| `PATCH` | `/master/entities/:id` | `master_data.manage` | Update a master entity. |
+| `POST` | `/master/entities/:id/aliases` | `master_data.manage` | Create a reviewed Business Central alias for an entity. |
+| `PATCH` | `/master/entities/:id/aliases/:aliasId` | `master_data.manage` | Update alias metadata or active state. |
+| `DELETE` | `/master/entities/:id/aliases/:aliasId` | `master_data.manage` | Deactivate an alias. |
+| `GET` | `/master/mapping/unmapped-sources` | `master_data.view` | Paginated unmapped BC source groups with candidate entities. |
+| `GET` | `/master/mapping/suggestions` | `master_data.view` | Candidate entity suggestions for one source value. |
+| `POST` | `/master/mapping/apply/preview` | `master_data.view` | Dry-run mapping preview with affected row count and samples. |
+| `POST` | `/master/mapping/apply/commit` | `master_data.manage` | Create/reuse alias and map matching unmapped `production_outputs` rows. |
+| `GET` | `/master/mapping/target-coverage` | `master_data.view` | Target coverage grouped by month/entity/source group and reason. |
+| `GET` | `/master/mapping/conversion-gaps` | `master_data.view` | Reject conversion gaps grouped by item/UOM. |
+| `POST` | `/master/mapping/conversions` | `master_data.manage` | Create item/UOM gross-weight mapping. |
+| `POST` | `/master/mapping/conversions/apply/preview` | `master_data.view` | Dry-run conversion apply preview. |
+| `POST` | `/master/mapping/conversions/apply/commit` | `master_data.manage` | Recompute missing reject PCS equivalent for reviewed item/UOM mapping. |
+
 ## Audit
 
 Audit endpoints require `audit.view`. Returned before/after values redact credentials, tokens, raw payloads, source text, and stored file paths.
@@ -206,6 +230,7 @@ Primary frontend routes backed by these APIs:
 | `/settings/sync` | Sync Center. |
 | `/settings/targets` | Target Management. |
 | `/settings/users` | User Management. |
+| `/master-data` | Master Data and Mapping Center. |
 | `/data-quality` | Data Quality Cockpit. |
 | `/settings/audit` | Read-only Audit Viewer. |
 | `/settings/health` | System Health and readiness dashboard. |

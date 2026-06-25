@@ -49,7 +49,12 @@ Use this before first v2 production cutover.
 - [ ] Dashboard loads.
 - [ ] `pnpm bc:profile` explains live BC row counts, date range, source-system mix, unmapped machines, and conversion gaps.
 - [ ] `pnpm bc:reconcile` matches dashboard OK output against raw SQL for the UAT window.
-- [ ] `pnpm bc:target-coverage` shows expected `COVERED`, `TARGET_MISSING`, and `UNMAPPED_ENTITY` groups.
+- [ ] `pnpm bc:target-coverage` shows expected `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, and `TARGET_ZERO` groups.
+- [ ] `pnpm bc:mapping-candidates` shows top unmapped Business Central source groups and candidate entities.
+- [ ] `/master-data` Mapping Center loads for Admin/PPIC and is read-only for view-only roles.
+- [ ] A reviewed alias mapping preview shows the expected affected row count before any commit.
+- [ ] A reviewed alias mapping commit writes an audit event and moves rows out of `UNMAPPED_ENTITY`.
+- [ ] Conversion Gap View shows missing gross-weight item/UOM groups, and reviewed conversion commits reduce the gap count.
 - [ ] Missing approved targets show `N/A` achievement, not a misleading zero target.
 - [ ] Latest dashboard freshness is based on latest successful `business-central` sync.
 - [ ] Manual/mock sync verified before live sync.

@@ -1,5 +1,5 @@
 import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
-import { createDuplicateEntryIssue, nextSyncCheckpoint, type DataQualitySignal } from "@poip/domain";
+import { createDuplicateEntryIssue, legacyMachineFamilyKey, nextSyncCheckpoint, normalizeAliasKey, normalizeAliasDisplay, sourceAliasCandidates, type DataQualitySignal } from "@poip/domain";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDatabaseUrl } from "../../common/env.js";
 import type {
@@ -18,31 +18,10 @@ interface EntityLookup {
   readonly targetKeys: ReadonlySet<string>;
 }
 
-function normalizedLookupKey(value: string | null | undefined): string | null {
-  const compact = value?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
-  if (!compact) return null;
-  return compact;
-}
-
-function legacyMachineFamilyKey(value: string | null | undefined): string | null {
-  const compact = normalizedLookupKey(value);
-  if (!compact) return null;
-  if (compact.startsWith("LONGSUNG")) return "LONGSUN";
-  if (compact.startsWith("BORCH")) return "BORCHE";
-  if (compact.startsWith("HENGFENG") || /^HF\d*/.test(compact)) return "HENGFENG";
-  if (compact.startsWith("TF") || compact.startsWith("ILLIG")) return "ILLIG";
-  if (compact.startsWith("VFINE") || compact.startsWith("VF")) return "VFINE";
-  if (compact.startsWith("CHUMPOWER") || /^CP\d*/.test(compact)) return "CHUMPOWER";
-  if (compact.startsWith("POLY")) return "POLYPRINT";
-  if (compact.startsWith("NEWDO")) return "NEWDO";
-  if (compact.startsWith("OMSO")) return "OMSO";
-  return compact;
-}
-
 function addEntityLookupKey(map: Map<string, string>, key: string | null | undefined, entityId: string): void {
-  const exact = key?.trim().toUpperCase();
+  const exact = normalizeAliasDisplay(key);
   if (exact && !map.has(exact)) map.set(exact, entityId);
-  const normalized = normalizedLookupKey(key);
+  const normalized = normalizeAliasKey(key);
   if (normalized && !map.has(normalized)) map.set(normalized, entityId);
 }
 
@@ -53,6 +32,10 @@ function addLegacyMachineFamilyLookupKey(
 ): void {
   const family = legacyMachineFamilyKey(key);
   if (family && !map.has(family)) map.set(family, entityId);
+}
+
+function fieldAliasKey(sourceField: string, value: string): string {
+  return `${sourceField}|${value}`;
 }
 
 function checkpointToJson(checkpoint: SyncCheckpointSnapshot) {
@@ -461,7 +444,12 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       .from(masterEntities)
       .where(eq(masterEntities.isActive, true));
     const aliases = await tx
-      .select({ entityId: masterEntityAliases.entityId, alias: masterEntityAliases.alias })
+      .select({
+        entityId: masterEntityAliases.entityId,
+        alias: masterEntityAliases.alias,
+        sourceField: masterEntityAliases.sourceField,
+        aliasNormalized: masterEntityAliases.aliasNormalized
+      })
       .from(masterEntityAliases)
       .where(eq(masterEntityAliases.isActive, true));
     const targets = await tx
@@ -485,6 +473,9 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
     }
     for (const alias of aliases) {
       addEntityLookupKey(entityByAlias, alias.alias, alias.entityId);
+      if (alias.aliasNormalized) entityByAlias.set(fieldAliasKey(alias.sourceField, alias.aliasNormalized), alias.entityId);
+      const aliasDisplay = normalizeAliasDisplay(alias.alias);
+      if (aliasDisplay) entityByAlias.set(fieldAliasKey(alias.sourceField, aliasDisplay), alias.entityId);
       addLegacyMachineFamilyLookupKey(entityByAlias, alias.alias, alias.entityId);
     }
 
@@ -498,10 +489,16 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
   }
 
   private resolveEntityId(row: StagedOutputRow, context: EntityLookup): string | null {
+    const candidates = sourceAliasCandidates(row.normalized);
+    for (const candidate of candidates) {
+      const fieldExact = context.entityByAlias.get(fieldAliasKey(candidate.sourceField, candidate.sourceValue));
+      if (fieldExact) return fieldExact;
+      const fieldNormalized = context.entityByAlias.get(fieldAliasKey(candidate.sourceField, candidate.normalizedValue));
+      if (fieldNormalized) return fieldNormalized;
+    }
     const machine = row.normalized.machineCenterNo;
-    if (!machine) return null;
-    const exact = machine.trim().toUpperCase();
-    const normalized = normalizedLookupKey(machine);
+    const exact = normalizeAliasDisplay(machine);
+    const normalized = normalizeAliasKey(machine);
     const family = legacyMachineFamilyKey(machine);
     return (
       context.entityByCode.get(exact) ??

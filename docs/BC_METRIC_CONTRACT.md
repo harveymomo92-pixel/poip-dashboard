@@ -84,6 +84,42 @@ If `reject_kg > 0` and `gross_weight_per_pcs` is missing/zero, `reject_pcs_eq` i
 4. Target/achievement should not silently assign unmapped rows to a fake target.
 5. Legacy v1-style machine aliases may resolve through exact entity code, entity alias, display name, line/report group, and known family aliases such as LONGSUNG/LONGSUN, HF/HENGFENG, TF/ILLIG, CP/CHUMPOWER, V-FINE/VFINE, POLY/POLYPRINT, NEWDO, and OMSO.
 
+## Master Data Mapping Center Contract
+
+P0.1 found live Business Central output in PostgreSQL but most rows were not eligible for target achievement because `production_outputs.entity_id` was null. Milestone 11 fixes this through reviewed master-data mappings, not silent auto-creation.
+
+Mapping priority:
+
+1. Active exact alias match for `source_system = 'business-central'` and source field/value from `machine_center_no`, `prod_line_no`, or `prod_line_description`.
+2. Active normalized alias match: trim, uppercase, collapse whitespace, and remove common separators for matching only.
+3. Exact `master_entities.entity_code` fallback.
+4. If no reviewed match exists, keep `entity_id = null`, classify as `UNMAPPED_ENTITY`, and show the source values as mapping candidates.
+
+Concepts:
+
+- Entity: canonical internal machine/line/reporting unit used by targets and dashboard achievement.
+- Alias: reviewed Business Central source value mapped to one entity.
+- Source field: the raw BC field that produced the alias, for example `machine_center_no`.
+- Raw BC value: original operational value from Business Central; it remains in `production_outputs` and is not overwritten by mapping.
+
+Alias commits must preview affected rows, update only unmapped output rows by default, write audit logs, and resolve related `UNMAPPED_ENTITY` data-quality issues where applicable. They must not overwrite existing mapped rows unless a future explicit remap workflow is approved.
+
+Target coverage after mapping:
+
+1. Rows still without `entity_id` report `UNMAPPED_ENTITY`.
+2. Rows with an entity but no approved active target report `NO_ACTIVE_TARGET`.
+3. Draft/rejected target periods report `TARGET_NOT_APPROVED`.
+4. Approved targets outside the output date report `OUTSIDE_EFFECTIVE_DATE`.
+5. Approved zero targets report `TARGET_ZERO`.
+6. Only covered entity/date rows can make achievement numeric.
+
+Conversion mapping:
+
+1. Reject rows with `reject_kg > 0` and missing/zero `gross_weight_per_pcs` are conversion gaps.
+2. Item/UOM conversion mappings store reviewed `gross_weight_per_pcs`.
+3. Applying a conversion recomputes `reject_pcs_eq` only for rows where conversion is missing and writes audit/data-quality resolution records.
+4. Missing conversion must remain visible; it must not be displayed as trustworthy zero reject PCS equivalent.
+
 ## Freshness Rule
 
 Freshness must be based on the latest successful sync run where:

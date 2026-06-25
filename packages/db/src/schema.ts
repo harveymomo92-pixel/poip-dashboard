@@ -96,11 +96,40 @@ export const masterEntityAliases = pgTable("master_entity_aliases", {
     .notNull()
     .references(() => masterEntities.id),
   alias: text("alias").notNull().unique(),
+  sourceSystem: text("source_system").notNull().default("business-central"),
+  sourceField: text("source_field").notNull().default("machine_center_no"),
+  aliasNormalized: text("alias_normalized").notNull(),
   source: text("source").notNull().default("manual"),
   confidence: numeric("confidence", { precision: 5, scale: 2 }),
+  matchConfidence: numeric("match_confidence", { precision: 5, scale: 2 }),
   isActive: boolean("is_active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt,
   createdAt
-});
+}, (table) => [
+  index("idx_master_alias_lookup").on(table.sourceSystem, table.sourceField, table.aliasNormalized),
+  index("idx_master_alias_entity").on(table.entityId, table.isActive)
+]);
+
+export const itemConversionMappings = pgTable(
+  "item_conversion_mappings",
+  {
+    id,
+    itemNo: text("item_no").notNull(),
+    uom: text("uom").notNull().default(""),
+    grossWeightPerPcs: numeric("gross_weight_per_pcs", { precision: 18, scale: 6 }).notNull(),
+    source: text("source").notNull().default("manual"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id),
+    updatedBy: uuid("updated_by").references(() => users.id),
+    createdAt,
+    updatedAt
+  },
+  (table) => [
+    index("idx_item_conversion_lookup").on(table.itemNo, table.uom, table.isActive)
+  ]
+);
 
 export const productionTargets = pgTable(
   "production_targets",
