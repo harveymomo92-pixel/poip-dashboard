@@ -85,6 +85,7 @@ interface DailyItemResumeRow {
   readonly operatorDetails: readonly Record<string, unknown>[];
   readonly shiftSummary: string;
   readonly workHours: number;
+  readonly workHoursSource: string;
   readonly dailyTarget: number | null;
   readonly targetSource: string;
   readonly targetReason: string;
@@ -103,6 +104,8 @@ interface DailyItemResumeRow {
   readonly achievementStatus: string;
   readonly grossWeight: number | null;
   readonly inputCount: number;
+  readonly externalDocumentSummary: string;
+  readonly externalDocumentDetails: readonly Record<string, unknown>[];
   readonly notes: readonly string[];
   readonly rejectDetails: readonly Record<string, unknown>[];
   readonly drilldown: Record<string, unknown>;
@@ -461,7 +464,7 @@ export function DashboardPageClient() {
             <EmptyState title="Tidak ada Entry_Type = Output untuk filter/periode ini." description="Ubah periode, mesin, item, atau pencarian tabel." />
           ) : (
             <>
-              <DataTable headers={["Tanggal", "Mesin", "Item", "Kategori", "No Dokumen", "Operator", "Jam Kerja", "Target Prorata Transaksi", "Output OK / Net Output", "UOM", "Koreksi Qty", "Reject kg", "Reject PCS Eq", "% Ach", "% Reject", "Gross Weight", "Input", "Catatan Operator", ""]}>
+              <DataTable headers={["Tanggal", "Mesin", "Item", "Kategori", "No Dokumen", "Shift", "Operator", "Jam Kerja", "Target Prorata Transaksi", "Output OK / Net Output", "UOM", "Koreksi Qty", "Reject kg", "Reject PCS Eq", "% Ach", "% Reject", "Gross Weight", "Input", "External Document", "Catatan Operator", ""]}>
                 {resume.rows.map((row) => (
                   <tr key={`${row.postingDate}-${row.machineLabel}-${row.itemNo}`}>
                     <td>{row.postingDate}</td>
@@ -469,8 +472,9 @@ export function DashboardPageClient() {
                     <td><strong>{row.itemNo}</strong><br /><span className="muted-cell">{row.itemDescription ?? "—"}</span></td>
                     <td>{row.itemCategoryCode ?? "—"}</td>
                     <td><DetailList summary={row.documentSummary} rows={row.documentDetails} /></td>
+                    <td>{row.shiftSummary}</td>
                     <td><DetailList summary={row.operatorSummary} rows={row.operatorDetails} /></td>
-                    <td>{formatNumber(row.workHours, 1)}</td>
+                    <td>{formatNumber(row.workHours, 1)}<br /><span className="muted-cell">{row.workHoursSource}</span></td>
                     <td><TargetDetail row={row} /></td>
                     <td><strong>{formatNumber(row.netOutputQty, 1)}</strong></td>
                     <td>{row.uom}</td>
@@ -481,6 +485,7 @@ export function DashboardPageClient() {
                     <td>{formatPct(row.rejectPct)}</td>
                     <td>{row.grossWeight === null ? "N/A" : formatNumber(row.grossWeight, 4)}</td>
                     <td>{row.inputCount}</td>
+                    <td><DetailList summary={row.externalDocumentSummary || "—"} rows={row.externalDocumentDetails} /></td>
                     <td>{row.notes.length ? row.notes.join(" | ") : "—"}</td>
                     <td><button className="table-icon-button" title="Copy grouped row reference" onClick={() => void copyOutputReference(row)}><Icons.copy /></button></td>
                   </tr>

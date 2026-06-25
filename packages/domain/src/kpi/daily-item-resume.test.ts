@@ -10,6 +10,7 @@ const base: DailyItemResumeSourceRow = {
   entityId: "11111111-1111-4111-8111-111111111111",
   entityCode: "ILLIG-1",
   entityName: "Illig 1",
+  machineDescription: null,
   machineCenterNo: "ILLIG1",
   itemNo: "FG-001",
   itemDescription: "Cup 240ml",
@@ -53,16 +54,36 @@ test("buildDailyItemResumeRows groups by date, resolved machine, and item", () =
   ]);
 });
 
-test("buildDailyItemResumeRows summarizes multiple documents, operators, and shifts", () => {
+test("buildDailyItemResumeRows parses operator, shift, and work hours from external document when available", () => {
   const rows = buildDailyItemResumeRows([
-    base,
-    { ...base, documentNo: "DOC-2", operatorName: "Operator B", shiftCode: "B", quantity: 50 }
+    { ...base, externalDocumentNo: "S1/8/RAHMAT", operatorName: "Fallback A", shiftCode: "Z", workHours: 4 },
+    { ...base, documentNo: "DOC-2", externalDocumentNo: "S2/12/ANDI", operatorName: "Fallback B", shiftCode: "Y", quantity: 50, workHours: 6 }
   ]);
 
   assert.equal(rows[0]?.documentCount, 2);
   assert.equal(rows[0]?.documentSummary, "DOC-1 | DOC-2");
-  assert.equal(rows[0]?.operatorSummary, "Operator A | Operator B");
-  assert.equal(rows[0]?.shiftSummary, "A | B");
+  assert.equal(rows[0]?.operatorSummary, "RAHMAT | ANDI");
+  assert.equal(rows[0]?.shiftSummary, "S1 | S2");
+  assert.equal(rows[0]?.workHours, 20);
+  assert.equal(rows[0]?.workHoursSource, "EXTERNAL_DOCUMENT");
+  assert.deepEqual(rows[0]?.externalDocumentDetails.map((detail) => detail.parsedOperator), ["RAHMAT", "ANDI"]);
+});
+
+test("buildDailyItemResumeRows uses machine description before machine center when unresolved", () => {
+  const rows = buildDailyItemResumeRows([
+    {
+      ...base,
+      entityId: null,
+      entityCode: null,
+      entityName: null,
+      machineDescription: "GILINGAN",
+      machineCenterNo: null,
+      dailyTarget: null
+    }
+  ]);
+
+  assert.equal(rows[0]?.machineLabel, "GILINGAN");
+  assert.equal(rows[0]?.achievementStatus, "TARGET_MISSING");
 });
 
 test("buildDailyItemResumeRows attaches reject by same date machine and document", () => {
@@ -131,6 +152,7 @@ test("buildDailyItemResumeRows calculates transaction prorata target and missing
 
   assert.equal(covered?.dailyTarget, 240);
   assert.equal(covered?.transactionProrataTarget, 120);
+  assert.equal(covered?.workHoursSource, "FALLBACK");
   assert.equal(covered?.achievementPct, 100 / 120 * 100);
   assert.equal(covered?.achievementStatus, "COVERED");
   assert.equal(missing?.dailyTarget, null);

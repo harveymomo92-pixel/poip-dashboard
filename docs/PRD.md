@@ -137,11 +137,12 @@ Production dashboard v2 must preserve the proven v1 operational behavior for dai
 - Scope: `source_system = 'business-central'` and `entry_type = 'Output'`.
 - Non-output entry types remain stored for future management panels, but are excluded from current production dashboard/resume metrics.
 - Grouping key: posting date, resolved machine/entity label, and item number.
-- Resolved machine label priority: mapped display name, mapped entity code, machine center, production line number, production line description, then `Unmapped`.
+- Resolved machine label priority: mapped display name, mapped entity code, Business Central `Machine Description`, `Machine Center No`, production line description, production line number, then `Unmapped`. `Machine Center No` is a fallback because it is often blank while `Machine Description` contains values such as `REPACKING` or `GILINGAN`.
+- When `External_Document_No` follows `SHIFT/HOURS/OPERATOR`, parse it into shift, work hours, and operator. Example: `S1/8/RAHMAT` means shift `S1`, `8` work hours, operator `RAHMAT`.
 - Output is net OK quantity. Positive Output adds production; negative Output is a correction/reversal and reduces net output. Do not filter OK output with `quantity > 0`.
 - Reject rows attach to OK groups by same date, same resolved machine/entity, and document number when available; otherwise by same date and machine. If no OK group exists, show a reject-only group.
 - Reject PCS equivalent must use matching OK document gross weight where available. Missing gross weight is an incomplete conversion, not valid zero.
-- Transaction prorata target is `dailyTarget * workHours / 24`. Missing target displays `N/A` with an explicit reason and must never be coerced to zero.
+- Transaction prorata target is `dailyTarget * workHours / 24`. Parsed External Document work hours take precedence; missing or invalid External Document falls back to existing work-hour behavior and must expose the source as `FALLBACK` or `UNKNOWN`. Missing target displays `N/A` with an explicit reason and must never be coerced to zero.
 - Per-item target matching differs from the aggregate dashboard target: aggregate achievement uses mapped active entity-days, while `Resume Harian per Item` includes every grouped Output row and therefore can expose unmapped rows as `N/A / UNMAPPED_ENTITY` even when aggregate target coverage is OK.
 - Resume target reasons are `TARGET_MATCHED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, `TARGET_BUCKET_MISSING`, and `TARGET_ZERO`.
 - V1-compatible bucket inference is used only when bucket-specific target metadata exists: printing `22 OZ`, printing other OZ, printing non-OZ, thermoforming gross weight `>= 0.012`, regular thermoforming, and bottle/preform family. Ambiguous or unknown buckets remain `N/A / TARGET_BUCKET_MISSING`.
@@ -850,12 +851,13 @@ Status:
 | Posting_Date | posting_date | date | Y | Asia/Jakarta business date |
 | Document_Date | document_date | date | N | nullable |
 | Document_No | document_no | text | Y | trim |
-| External_Document_No | external_document_no | text | N | trim |
+| External_Document_No | external_document_no | text | N | trim; parse `SHIFT/HOURS/OPERATOR` when present |
 | Entry_Type | entry_type | text | Y | normalize |
 | Item_No | item_no | text | Y | trim uppercase |
 | Description | item_description | text | N | trim |
 | Item_Category_Code | item_category_code | text | N | trim uppercase |
-| Machine_Center_No | machine_center_no | text | N | trim uppercase |
+| Machine_Description / Machine Description | machine_description | text | N | trim uppercase; primary entity source |
+| Machine_Center_No | machine_center_no | text | N | trim uppercase; fallback entity source |
 | Prod_Order_Line_No | prod_line_no | text | N | trim |
 | Prod_Line_Description | prod_line_description | text | N | trim |
 | Quantity | quantity | numeric | Y | decimal |
@@ -887,7 +889,7 @@ source_system + entry_no
 Jika `entry_no` kosong, fallback natural key:
 
 ```text
-posting_date + document_no + item_no + machine_center_no + quantity + entry_type
+posting_date + document_no + item_no + preferred machine source + quantity + entry_type
 ```
 
 ### 13.1.4 Data Quality Rules
@@ -1062,6 +1064,7 @@ create table production_outputs (
   item_no text not null,
   item_description text,
   item_category_code text,
+  machine_description text,
   machine_center_no text,
   entity_id uuid references master_entities(id),
   prod_line_no text,
@@ -1085,6 +1088,7 @@ create index idx_outputs_posting_date on production_outputs(posting_date);
 create index idx_outputs_entity_date on production_outputs(entity_id, posting_date);
 create index idx_outputs_item_date on production_outputs(item_no, posting_date);
 create index idx_outputs_document_no on production_outputs(document_no);
+create index idx_outputs_machine_description_date on production_outputs(machine_description, posting_date);
 create index idx_outputs_machine_date on production_outputs(machine_center_no, posting_date);
 create index idx_outputs_raw_payload_gin on production_outputs using gin(raw_payload);
 ```
@@ -4885,7 +4889,7 @@ Live Business Central ingestion and P0.1 reconciliation prove data can enter Pos
 8. Conversion commit that recomputes missing reject PCS equivalent only where conversion is missing.
 9. Data-quality integration for unmapped entity and missing gross-weight resolution.
 10. Audit logs for every entity, alias, mapping, and conversion write.
-11. Assisted mapping diagnostics by machine center, production line, description, combined context, item/product family, month, OK quantity, and row count.
+11. Assisted mapping diagnostics by preferred BC source field, machine description, machine center fallback, production line, combined context, item/product family, month, OK quantity, and row count.
 12. Reviewable CSV mapping plan generation with confidence, reason, target-exists flag, and default `action=REVIEW`.
 13. Batch application of only reviewed `action=COMMIT` rows with dry-run default and audit logging.
 
@@ -4893,16 +4897,18 @@ Live Business Central ingestion and P0.1 reconciliation prove data can enter Pos
 
 For each Business Central output row:
 
-1. Try an active exact alias match using `source_system = 'business-central'`, source field, and source value.
-2. Try an active normalized alias match using trim, uppercase, whitespace collapse, and safe separator removal.
-3. Try exact `master_entities.entity_code`.
-4. If no reviewed match exists, keep `entity_id = null` and classify as `UNMAPPED_ENTITY`.
+1. Prefer source fields in this order: `machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`.
+2. Try an active exact alias match using `source_system = 'business-central'`, source field, and source value.
+3. Try an active normalized alias match using trim, uppercase, whitespace collapse, and safe separator removal.
+4. Try exact `master_entities.entity_code`.
+5. If no reviewed match exists, keep `entity_id = null` and classify as `UNMAPPED_ENTITY`.
 
 The system must not silently create fake entities or auto-map low-confidence source values.
+Rows with `Machine Description = REPACKING` or `GILINGAN` and blank `Machine Center No` must appear as `machine_description` mapping candidates, not as a generic blank machine-center group.
 
 ### Milestone 11.2 - Assisted Business Central Mapping Coverage
 
-After the v1 import, active master entities and aliases can exist while most live BC rows remain unmapped because source values do not exactly match reviewed aliases. Examples include `NEWDO 1 REG`, `ILLIG1`, `HENGFENG 4 OZ`, `OMSO2 OZ`, and blank machine groups.
+After the v1 import, active master entities and aliases can exist while most live BC rows remain unmapped because source values do not exactly match reviewed aliases. Examples include `NEWDO 1 REG`, `ILLIG1`, `HENGFENG 4 OZ`, `OMSO2 OZ`, `REPACKING`, `GILINGAN`, and truly blank source groups.
 
 Candidate generation rules:
 
@@ -4917,6 +4923,8 @@ The review artifact is `.tmp/mapping-plan/business-central-mapping-plan.csv` and
 
 Batch apply must be dry-run by default, require `MAPPING_PLAN_COMMIT=true`, apply only `action=COMMIT`, create aliases if missing, update only unmapped `production_outputs`, resolve related data-quality issues, and write audit entries. Existing mapped rows are not overwritten.
 
+Mapping Preview must support empty/non-empty search, all/specific source fields, and selected source groups without PostgreSQL nullable-parameter errors. A known failure mode was `could not determine data type of parameter $3` when SQL skipped a placeholder; preview queries must either build dynamic filters or explicitly type nullable parameters.
+
 ### Commands
 
 ```bash
@@ -4925,8 +4933,8 @@ pnpm bc:target-coverage
 pnpm bc:mapping-candidates
 pnpm bc:mapping-plan
 pnpm bc:mapping-plan-apply
-SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
-SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
+SOURCE_FIELD=machine_description SOURCE_VALUE="REPACKING" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
+SOURCE_FIELD=machine_description SOURCE_VALUE="REPACKING" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
 ```
 
 `bc:mapping-apply` must be dry-run by default and require `APPLY_MAPPING_COMMIT=true` for mutation.

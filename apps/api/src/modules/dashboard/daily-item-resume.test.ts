@@ -26,6 +26,7 @@ function row(input: Partial<DailyItemResumeSourceRow> = {}): DailyItemResumeSour
     itemNo: input.itemNo ?? "FG-001",
     itemDescription: input.itemDescription ?? "Cup 12 oz",
     itemCategoryCode: input.itemCategoryCode ?? "THERMO",
+    machineDescription: input.machineDescription ?? null,
     machineCenterNo: input.machineCenterNo ?? "MC-1",
     prodLineNo: input.prodLineNo ?? null,
     prodLineDescription: input.prodLineDescription ?? null,
@@ -42,6 +43,20 @@ function row(input: Partial<DailyItemResumeSourceRow> = {}): DailyItemResumeSour
     rejectPcsEq: input.rejectPcsEq ?? null
   };
 }
+
+test("daily item resume parses operator, shift, and work hours from external document", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok-positive", quantity: 100, documentNo: "DOC-1", externalDocumentNo: "S1/8/RAHMAT" }),
+    row({ id: "ok-negative", quantity: -25, documentNo: "DOC-2", externalDocumentNo: "S2/12/ANDI" })
+  ], [], filters);
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0]?.operatorSummary, "RAHMAT | ANDI");
+  assert.equal(result.rows[0]?.shiftSummary, "S1 | S2");
+  assert.equal(result.rows[0]?.workHours, 20);
+  assert.equal(result.rows[0]?.workHoursSource, "EXTERNAL_DOCUMENT");
+  assert.deepEqual(result.rows[0]?.externalDocumentDetails.map((detail) => detail.parsedOperator), ["RAHMAT", "ANDI"]);
+});
 
 test("daily item resume groups positive and negative OK Output as net quantity without requiring quantity > 0", () => {
   const result = buildDailyItemResume([
@@ -70,6 +85,21 @@ test("daily item resume key uses posting date, resolved machine label, and item"
 
   assert.equal(result.rows.length, 3);
   assert.deepEqual(new Set(result.rows.map((item) => item.machineLabel)), new Set(["Illig 1"]));
+});
+
+test("daily item resume uses machine description label when no mapped entity exists", () => {
+  const result = buildDailyItemResume([
+    row({
+      entityId: null,
+      entityCode: null,
+      entityDisplayName: null,
+      machineDescription: "REPACKING",
+      machineCenterNo: null
+    })
+  ], [], filters);
+
+  assert.equal(result.rows[0]?.machineLabel, "REPACKING");
+  assert.equal(result.rows[0]?.targetReason, "UNMAPPED_ENTITY");
 });
 
 test("reject rows attach by same date, machine, and document with PCS equivalent from OK gross weight", () => {
@@ -103,7 +133,7 @@ test("reject rows fallback by same date and machine, and create reject-only grou
 test("target prorata uses daily target times work hours over 24 and pagination is server result shaped", () => {
   const result = buildDailyItemResume(
     [
-      row({ id: "a", itemNo: "FG-001", quantity: 100, plannedRuntimeHours: 12 }),
+      row({ id: "a", itemNo: "FG-001", quantity: 100, plannedRuntimeHours: 12, externalDocumentNo: "S1/8/RAHMAT" }),
       row({ id: "b", itemNo: "FG-002", quantity: 50, plannedRuntimeHours: 24 })
     ],
     [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 240 }],
@@ -113,8 +143,10 @@ test("target prorata uses daily target times work hours over 24 and pagination i
   assert.equal(result.pagination.totalRows, 2);
   assert.equal(result.pagination.pageSize, 1);
   assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0]?.transactionProrataTarget, 120);
-  assert.equal(result.rows[0]?.achievementPct, 100 / 120 * 100);
+  assert.equal(result.rows[0]?.workHours, 8);
+  assert.equal(result.rows[0]?.workHoursSource, "EXTERNAL_DOCUMENT");
+  assert.equal(result.rows[0]?.transactionProrataTarget, 80);
+  assert.equal(result.rows[0]?.achievementPct, 100 / 80 * 100);
   assert.equal(result.rows[0]?.targetReason, "TARGET_MATCHED");
   assert.equal(result.rows[0]?.targetSource, "ENTITY_DAILY_TARGET");
 });

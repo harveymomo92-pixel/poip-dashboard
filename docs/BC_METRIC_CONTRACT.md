@@ -20,10 +20,12 @@ All SQL, dashboard, sync, health, and reconciliation logic should use this canon
 | `Posting_Date` | `posting_date` / `postingDate` | Main operational date filter. |
 | `Document_Date` | `document_date` / `documentDate` | Secondary document date. |
 | `Document_No` | `document_no` / `documentNo` | Document/SPK reference when available. |
+| `External_Document_No` | `external_document_no` / `externalDocumentNo` | Optional operational code. When formatted as `SHIFT/HOURS/OPERATOR`, for example `S1/8/RAHMAT`, it supplies resume shift, work hours, and operator. |
 | `Entry_Type` | `entry_type` / `entryType` | Used with quantity/reject KG to normalize OK, reject, or other movement. |
 | `Item_No` / equivalent item number field | `item_no` / `itemNo` | Required for committed output rows. |
 | `Description` / equivalent description field | `item_description` / `itemDescription` | Optional item label. |
-| `Machine_Center_No` / equivalent work center field | `machine_center_no` / `machineCenterNo` | Must map to `master_entities` or `master_entity_aliases` for target matching. |
+| `Machine_Description` / `Machine Description` | `machine_description` / `machineDescription` | Primary Business Central entity/machine source. This is more reliable than `Machine_Center_No`, which is often blank for rows such as `REPACKING` or `GILINGAN`. |
+| `Machine_Center_No` / equivalent work center field | `machine_center_no` / `machineCenterNo` | Fallback entity/machine source. Existing aliases remain valid, but this field is not the primary grouping key. |
 | `Quantity` | `quantity` | Main quantity basis. Positive, zero, and negative quantities are preserved. Negative `Entry_Type = Output` OK rows are corrections/reversals and reduce net output. |
 | `Unit_of_Measure_Code` | `uom` | Required for interpretation and conversion review. |
 | `Gross_Weight` | `gross_weight_per_pcs` | Used to convert reject KG into reject PCS equivalent. |
@@ -78,7 +80,7 @@ transactionProrataTarget = dailyTarget * workHours / 24
 achievementPct = netOutputQty / transactionProrataTarget * 100
 ```
 
-When no reliable work-hours value exists, v2 uses the entity `planned_runtime_hours`; if that is absent it falls back to the current v2 default of 24 hours and marks the row with `WORK_HOURS_DEFAULT_24`.
+When the Business Central `External_Document_No` encodes `SHIFT/HOURS/OPERATOR`, v2 parses that value first for the resume table. Example: `S1/8/RAHMAT` means shift `S1`, work hours `8`, and operator `RAHMAT`. If parsing succeeds, `transactionProrataTarget = dailyTarget * parsedWorkHours / 24`. If parsing fails, v2 uses the existing fallback (`planned_runtime_hours`, then the current 24-hour default) and marks `workHoursSource = FALLBACK`; invalid external-document text is exposed in details and never invents shift/operator/work-hours values.
 
 ## Resume Harian per Item
 
@@ -97,7 +99,7 @@ Grouping key:
 2. resolved machine/entity display label
 3. `item_no`
 
-Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_center_no`, `prod_line_no`, `prod_line_description`, then `Unmapped`.
+Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`, then `Unmapped`.
 
 Each group reports positive output, correction output, net output, UOM consistency, document/operator/shift summaries, reject metrics, gross weight evidence, target status, and calculation drilldown metadata. Missing targets remain `dailyTarget = null`, `transactionProrataTarget = null`, `achievementPct = null`, and `achievementStatus = TARGET_MISSING`; the UI displays `N/A`.
 
@@ -145,10 +147,19 @@ P0.1 found live Business Central output in PostgreSQL but most rows were not eli
 
 Mapping priority:
 
-1. Active exact alias match for `source_system = 'business-central'` and source field/value from `machine_center_no`, `prod_line_no`, or `prod_line_description`.
+1. Active exact alias match for `source_system = 'business-central'` and source field/value from `machine_description`, `machine_center_no`, `prod_line_description`, or `prod_line_no`.
 2. Active normalized alias match: trim, uppercase, collapse whitespace, and remove common separators for matching only.
 3. Exact `master_entities.entity_code` fallback.
 4. If no reviewed match exists, keep `entity_id = null`, classify as `UNMAPPED_ENTITY`, and show the source values as mapping candidates.
+
+Preferred source grouping for new mapping candidates is:
+
+1. `machine_description`
+2. `machine_center_no`
+3. `prod_line_description`
+4. `prod_line_no`
+
+This prevents rows with `Machine Description = REPACKING` or `GILINGAN` and blank `Machine Center No` from collapsing into a generic blank/`Unmapped` group. If a row has no usable value in any of those fields, it is the only case treated as a truly blank source group.
 
 Concepts:
 
@@ -158,6 +169,8 @@ Concepts:
 - Raw BC value: original operational value from Business Central; it remains in `production_outputs` and is not overwritten by mapping.
 
 Alias commits must preview affected rows, update only unmapped output rows by default, write audit logs, and resolve related `UNMAPPED_ENTITY` data-quality issues where applicable. They must not overwrite existing mapped rows unless a future explicit remap workflow is approved.
+
+Mapping Preview uses bound SQL parameters and must not pass unused nullable parameters. A previous preview count query skipped `$3` and used `$4::boolean`, which let PostgreSQL report `could not determine data type of parameter $3`; selected-source previews now bind the remap flag as `$3::boolean`.
 
 Assisted mapping candidates are advisory only:
 

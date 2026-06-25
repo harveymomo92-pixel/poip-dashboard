@@ -30,9 +30,10 @@ import type {
 const SOURCE_SYSTEM = "business-central";
 
 const sourceColumns: Record<MasterSourceField, string> = {
+  machine_description: "machine_description",
   machine_center_no: "machine_center_no",
-  prod_line_no: "prod_line_no",
   prod_line_description: "prod_line_description",
+  prod_line_no: "prod_line_no",
   item_no: "item_no",
   uom: "uom"
 };
@@ -43,6 +44,29 @@ function columnFor(sourceField: MasterSourceField): string {
 
 function sqlNormalizeExpression(column: string): string {
   return `upper(regexp_replace(trim(coalesce(${column}, '')), '[^A-Za-z0-9]+', '', 'g'))`;
+}
+
+function preferredEntitySourceFieldSql(alias = "po"): string {
+  return `
+    case
+      when nullif(btrim(${alias}.machine_description), '') is not null then 'machine_description'
+      when nullif(btrim(${alias}.machine_center_no), '') is not null then 'machine_center_no'
+      when nullif(btrim(${alias}.prod_line_description), '') is not null then 'prod_line_description'
+      when nullif(btrim(${alias}.prod_line_no), '') is not null then 'prod_line_no'
+      else 'machine_description'
+    end
+  `;
+}
+
+function preferredEntitySourceValueSql(alias = "po"): string {
+  return `
+    coalesce(
+      nullif(btrim(${alias}.machine_description), ''),
+      nullif(btrim(${alias}.machine_center_no), ''),
+      nullif(btrim(${alias}.prod_line_description), ''),
+      nullif(btrim(${alias}.prod_line_no), '')
+    )
+  `;
 }
 
 function numberValue(value: string | number | null | undefined): number {
@@ -85,10 +109,15 @@ export class MasterRepository {
       ),
       this.database.pool.query<{ groups: string | number; rows: string | number }>(
         `
-          select count(distinct coalesce(machine_center_no, prod_line_no, prod_line_description, '(blank)')) as groups,
+          with preferred_sources as (
+            select ${preferredEntitySourceFieldSql("po")} as source_field,
+                   coalesce(${preferredEntitySourceValueSql("po")}, '') as source_value
+            from production_outputs po
+            where po.source_system = $1 and po.entity_id is null and po.normalized_output_type = 'OK' and po.quantity > 0
+          )
+          select count(distinct source_field || ':' || source_value) as groups,
                  count(*) as rows
-          from production_outputs
-          where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+          from preferred_sources
         `,
         [SOURCE_SYSTEM]
       ),
@@ -387,14 +416,14 @@ export class MasterRepository {
     readonly to?: string | undefined;
   }) {
     const params: unknown[] = [SOURCE_SYSTEM];
-    const dateClauses = ["source_system = $1", "entity_id is null", "normalized_output_type = 'OK'", "quantity > 0"];
+    const dateClauses = ["po.source_system = $1", "po.entity_id is null", "po.normalized_output_type = 'OK'", "po.quantity > 0"];
     if (filters.from) {
       params.push(filters.from);
-      dateClauses.push(`posting_date >= $${params.length}`);
+      dateClauses.push(`po.posting_date >= $${params.length}`);
     }
     if (filters.to) {
       params.push(filters.to);
-      dateClauses.push(`posting_date <= $${params.length}`);
+      dateClauses.push(`po.posting_date <= $${params.length}`);
     }
     const sourceFilterParams: unknown[] = [];
     const sourceClauses = ["1 = 1"];
@@ -409,14 +438,15 @@ export class MasterRepository {
     const allParams = [...params, ...sourceFilterParams];
     const baseSql = `
       with source_rows as (
-        select 'machine_center_no'::text as source_field, machine_center_no as source_value, posting_date, document_no, item_no, uom, quantity
-        from production_outputs where ${dateClauses.join(" and ")}
-        union all
-        select 'prod_line_no', prod_line_no, posting_date, document_no, item_no, uom, quantity
-        from production_outputs where ${dateClauses.join(" and ")}
-        union all
-        select 'prod_line_description', prod_line_description, posting_date, document_no, item_no, uom, quantity
-        from production_outputs where ${dateClauses.join(" and ")}
+        select ${preferredEntitySourceFieldSql("po")}::text as source_field,
+               ${preferredEntitySourceValueSql("po")} as source_value,
+               po.posting_date,
+               po.document_no,
+               po.item_no,
+               po.uom,
+               po.quantity
+        from production_outputs po
+        where ${dateClauses.join(" and ")}
       ),
       grouped as (
         select source_field, coalesce(source_value, '') as source_value,
@@ -489,9 +519,10 @@ export class MasterRepository {
       const result = await this.database.pool.query<{ affected: string | number }>(
         `
           with source_values as (
-            select id, source_system, 'machine_center_no'::text source_field, machine_center_no source_value, entity_id from production_outputs
-            union all select id, source_system, 'prod_line_no', prod_line_no, entity_id from production_outputs
+            select id, source_system, 'machine_description'::text source_field, machine_description source_value, entity_id from production_outputs
+            union all select id, source_system, 'machine_center_no', machine_center_no, entity_id from production_outputs
             union all select id, source_system, 'prod_line_description', prod_line_description, entity_id from production_outputs
+            union all select id, source_system, 'prod_line_no', prod_line_no, entity_id from production_outputs
           )
           select count(distinct sv.id) as affected
           from source_values sv
@@ -526,7 +557,7 @@ export class MasterRepository {
       }>(
         `
           select
-            count(*) filter (where po.entity_id is null or $4::boolean) as affected_rows,
+            count(*) filter (where po.entity_id is null or $3::boolean) as affected_rows,
             count(*) filter (where po.entity_id is not null) as already_mapped_rows,
             (
               select count(*)
@@ -545,7 +576,7 @@ export class MasterRepository {
           where po.source_system = $1
             and ${sqlNormalizeExpression(`po.${column}`)} = $2
         `,
-        [sourceSystem, normalized, sourceValue, input.remap ?? false]
+        [sourceSystem, normalized, input.remap ?? false]
       ),
       this.database.pool.query<{ entry_no: string | number | null }>(
         `
@@ -681,8 +712,9 @@ export class MasterRepository {
         select
           date_trunc('month', po.posting_date)::date::text as month,
           po.entity_id,
-          coalesce(me.display_name, po.machine_center_no, po.prod_line_no, po.prod_line_description, 'Unmapped') as entity_name,
-          coalesce(po.machine_center_no, po.prod_line_no, po.prod_line_description, 'Unmapped') as source_group,
+          ${preferredEntitySourceFieldSql("po")}::text as source_field,
+          coalesce(me.display_name, ${preferredEntitySourceValueSql("po")}, 'Unmapped') as entity_name,
+          coalesce(${preferredEntitySourceValueSql("po")}, 'Unmapped') as source_group,
           case
             when po.entity_id is null then 'UNMAPPED_ENTITY'
             when exists (
@@ -720,9 +752,9 @@ export class MasterRepository {
         where ${clauses.join(" and ")}
       ),
       grouped as (
-        select month, entity_id::text, entity_name, source_group, reason, count(*) as rows, coalesce(sum(quantity), 0) as output_ok_qty
+        select month, entity_id::text, entity_name, source_field, source_group, reason, count(*) as rows, coalesce(sum(quantity), 0) as output_ok_qty
         from coverage
-        group by month, entity_id, entity_name, source_group, reason
+        group by month, entity_id, entity_name, source_field, source_group, reason
       )
     `;
     const [countResult, rowsResult] = await Promise.all([
@@ -731,6 +763,7 @@ export class MasterRepository {
         month: string;
         entity_id: string | null;
         entity_name: string;
+        source_field: MasterSourceField;
         source_group: string;
         reason: TargetCoverageRowDto["reason"];
         rows: string | number;
@@ -745,6 +778,7 @@ export class MasterRepository {
         month: row.month,
         entityId: row.entity_id,
         entityName: row.entity_name,
+        sourceField: row.source_field,
         sourceGroup: row.source_group,
         reason: row.reason,
         rows: numberValue(row.rows),

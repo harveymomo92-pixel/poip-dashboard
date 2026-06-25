@@ -1,5 +1,14 @@
 import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
-import { createDuplicateEntryIssue, nextSyncCheckpoint, normalizeAliasKey, normalizeAliasDisplay, sourceAliasCandidates, type DataQualitySignal } from "@poip/domain";
+import {
+  createDuplicateEntryIssue,
+  entitySourceCandidates,
+  nextSyncCheckpoint,
+  normalizeAliasDisplay,
+  normalizeAliasKey,
+  preferredEntitySource,
+  sourceAliasCandidates,
+  type DataQualitySignal
+} from "@poip/domain";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDatabaseUrl } from "../../common/env.js";
 import type {
@@ -226,11 +235,12 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           if (previousHash && previousHash !== row.rowHash) issues.push(createDuplicateEntryIssue());
           seenHashByEntry.set(pendingEntryKey, row.rowHash);
         }
-        if (row.normalized.machineCenterNo && !entityId) {
+        const entitySource = preferredEntitySource(row.normalized);
+        if (entitySource && !entityId) {
           issues.push({
             code: "UNKNOWN_MACHINE",
             severity: "WARNING",
-            description: `Machine ${row.normalized.machineCenterNo} is not mapped to a master entity`
+            description: `${entitySource.sourceField} ${entitySource.sourceValue} is not mapped to a master entity`
           });
         }
         if (entityId && row.normalized.postingDate && !this.hasTarget(entityId, row.normalized.postingDate, context)) {
@@ -279,6 +289,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
               itemNo: row.normalized.itemNo,
               itemDescription: row.normalized.itemDescription,
               itemCategoryCode: row.normalized.itemCategoryCode,
+              machineDescription: row.normalized.machineDescription,
               machineCenterNo: row.normalized.machineCenterNo,
               entityId,
               prodLineNo: row.normalized.prodLineNo,
@@ -306,6 +317,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
                 itemNo: row.normalized.itemNo,
                 itemDescription: row.normalized.itemDescription,
                 itemCategoryCode: row.normalized.itemCategoryCode,
+                machineDescription: row.normalized.machineDescription,
                 machineCenterNo: row.normalized.machineCenterNo,
                 entityId,
                 prodLineNo: row.normalized.prodLineNo,
@@ -484,16 +496,18 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       const fieldNormalized = context.entityByAlias.get(fieldAliasKey(candidate.sourceField, candidate.normalizedValue));
       if (fieldNormalized) return fieldNormalized;
     }
-    const machine = row.normalized.machineCenterNo;
-    const exact = normalizeAliasDisplay(machine);
-    const normalized = normalizeAliasKey(machine);
-    return (
-      context.entityByCode.get(exact) ??
-      (normalized ? context.entityByCode.get(normalized) : null) ??
-      context.entityByAlias.get(exact) ??
-      (normalized ? context.entityByAlias.get(normalized) : null) ??
-      null
-    );
+    for (const candidate of entitySourceCandidates(row.normalized)) {
+      const exact = normalizeAliasDisplay(candidate.sourceValue);
+      const normalized = normalizeAliasKey(candidate.sourceValue);
+      const resolved =
+        context.entityByCode.get(exact) ??
+        (normalized ? context.entityByCode.get(normalized) : null) ??
+        context.entityByAlias.get(exact) ??
+        (normalized ? context.entityByAlias.get(normalized) : null) ??
+        null;
+      if (resolved) return resolved;
+    }
+    return null;
   }
 
   private hasTarget(entityId: string, postingDate: string, context: EntityLookup): boolean {
@@ -547,6 +561,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
               entryNo: candidate.row.normalized.entryNo?.toString() ?? null,
               postingDate: candidate.row.normalized.postingDate,
               itemNo: candidate.row.normalized.itemNo,
+              machineDescription: candidate.row.normalized.machineDescription,
               machineCenterNo: candidate.row.normalized.machineCenterNo
             }
           }

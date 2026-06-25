@@ -163,15 +163,19 @@ pnpm bc:daily-item-resume
 pnpm bc:target-coverage
 ```
 
-`pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
+`pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, preferred entity source usage, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
 
 `pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when gross-weight conversion is missing, and whether OK output exists without mapped entities.
 
-`pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, reject attachments, reject-only groups, conversion gaps, target gaps, target reason breakdown, and sample grouped rows. The reason breakdown prints row count, net output, top machines/entities, top items, and sample rows for `TARGET_MATCHED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, `TARGET_BUCKET_MISSING`, and `TARGET_ZERO`.
+`pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, parsed `External_Document_No` shift/work-hours/operator details, reject attachments, reject-only groups, conversion gaps, target gaps, target reason breakdown, and sample grouped rows. The reason breakdown prints row count, net output, top machines/entities, top items, and sample rows for `TARGET_MATCHED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, `TARGET_BUCKET_MISSING`, and `TARGET_ZERO`.
 
-`pnpm bc:target-coverage` groups net OK Output by month and entity/machine, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
+`pnpm bc:target-coverage` groups net OK Output by month and entity/preferred BC source, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: production dashboard scope is `source_system = 'business-central'` and `entry_type = 'Output'`; other entry types remain stored for future panels; negative Output quantity is a correction; main output is net output; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps. Aggregate target coverage can reconcile while per-item resume rows still show `N/A` because aggregate achievement uses mapped entity-days and the resume keeps unmapped groups visible for mapping work.
+
+Business Central entity source priority is `Machine Description` (`machine_description`) first, then `Machine Center No`, then `Production Line Description`, then `Production Line No`. `Machine Center No` is not reliable as the primary key because it is often blank while `Machine Description` contains operational values such as `REPACKING` or `GILINGAN`. Existing `machine_center_no` aliases remain valid fallback aliases.
+
+`External_Document_No` uses the `SHIFT/HOURS/OPERATOR` convention when available. Example: `S1/8/RAHMAT` parses as shift `S1`, work hours `8`, and operator `RAHMAT`. Parsed hours drive per-row prorata target as `dailyTarget * workHours / 24`; malformed or missing values use the current fallback and are exposed as unparsed details.
 
 ### Master data mapping operations
 
@@ -182,7 +186,7 @@ Safe review flow:
 1. Open `/master-data`.
 2. Review overview cards for active entities, aliases, unmapped rows, target gaps, and conversion gaps.
 3. In Alias Mapping Center, filter by source field or source value.
-4. Select an unmapped group such as a machine center or production line.
+4. Select an unmapped group such as a machine description, machine center, or production line.
 5. Choose an existing canonical entity, or create the entity first if it truly does not exist.
 6. Preview affected rows.
 7. Commit only after the affected row count and entity are correct.
@@ -190,10 +194,11 @@ Safe review flow:
 
 Mapping priority:
 
-1. Active exact alias for `business-central` + source field + source value.
-2. Active normalized alias after trimming, uppercasing, collapsing whitespace, and removing common separators.
-3. Exact `master_entities.entity_code`.
-4. Leave unmapped and classify as `UNMAPPED_ENTITY`.
+1. Preferred raw source group: `machine_description`, then `machine_center_no`, then `prod_line_description`, then `prod_line_no`.
+2. Active exact alias for `business-central` + source field + source value.
+3. Active normalized alias after trimming, uppercasing, collapsing whitespace, and removing common separators.
+4. Exact `master_entities.entity_code`.
+5. Leave unmapped and classify as `UNMAPPED_ENTITY`.
 
 Operational commands:
 
@@ -202,19 +207,21 @@ pnpm bc:mapping-candidates
 pnpm bc:mapping-plan
 pnpm bc:mapping-plan-apply
 
-SOURCE_FIELD=machine_center_no \
-SOURCE_VALUE="REPLACE_WITH_BC_MACHINE" \
+SOURCE_FIELD=machine_description \
+SOURCE_VALUE="REPACKING" \
 ENTITY_ID="00000000-0000-0000-0000-000000000000" \
 pnpm bc:mapping-apply
 
-SOURCE_FIELD=machine_center_no \
-SOURCE_VALUE="REPLACE_WITH_BC_MACHINE" \
+SOURCE_FIELD=machine_description \
+SOURCE_VALUE="REPACKING" \
 ENTITY_ID="00000000-0000-0000-0000-000000000000" \
 APPLY_MAPPING_COMMIT=true \
 pnpm bc:mapping-apply
 ```
 
-`pnpm bc:mapping-candidates` is read-only and shows current mapped/unmapped counts, coverage percentage, top unmapped groups by machine, production line, description, combined context, item family, month, row count, and OK quantity. Suggestions are scored as HIGH, MEDIUM, or LOW and show whether the suggested entity has an approved/active target.
+`pnpm bc:mapping-candidates` is read-only and shows current mapped/unmapped counts, coverage percentage, preferred source-field usage, top unmapped groups by machine description, machine center fallback, production line, combined context, item family, month, row count, and OK quantity. Suggestions are scored as HIGH, MEDIUM, or LOW and show whether the suggested entity has an approved/active target.
+
+Mapping Preview should work with empty/non-empty search, source-field filters, and selected source groups. The preview SQL explicitly types/binds nullable parameters; the historical PostgreSQL error `could not determine data type of parameter $3` came from a skipped `$3` placeholder and is covered by regression tests.
 
 `pnpm bc:mapping-plan` writes `.tmp/mapping-plan/business-central-mapping-plan.csv`. Every row defaults to `action=REVIEW`; the command never marks a row `COMMIT`. Review the source value, normalized value, row count, OK quantity, suggested entity, confidence, reason, and target flag before editing the CSV.
 

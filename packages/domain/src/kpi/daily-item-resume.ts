@@ -1,7 +1,9 @@
 import { isProductionEntryType } from "../constants/business-central.js";
+import { parseExternalDocument, type ParsedExternalDocument } from "../sync/external-document.js";
 
 export type ResumeRejectConversionStatus = "COMPLETE" | "INCOMPLETE";
 export type ResumeAchievementStatus = "COVERED" | "TARGET_MISSING" | "NO_OUTPUT" | "TARGET_ZERO";
+export type ResumeWorkHoursSource = "EXTERNAL_DOCUMENT" | "FALLBACK" | "UNKNOWN";
 
 export interface DailyItemResumeSourceRow {
   readonly sourceSystem?: string | null;
@@ -11,6 +13,7 @@ export interface DailyItemResumeSourceRow {
   readonly entityId?: string | null;
   readonly entityCode?: string | null;
   readonly entityName?: string | null;
+  readonly machineDescription?: string | null;
   readonly machineCenterNo?: string | null;
   readonly prodLineNo?: string | null;
   readonly prodLineDescription?: string | null;
@@ -44,6 +47,7 @@ export interface DailyItemResumeRow {
   readonly operatorDetails: readonly { readonly operatorName: string; readonly shiftCode: string; readonly documentNo: string; readonly quantity: number }[];
   readonly shiftSummary: string;
   readonly workHours: number;
+  readonly workHoursSource: ResumeWorkHoursSource;
   readonly dailyTarget: number | null;
   readonly transactionProrataTarget: number | null;
   readonly netOutputQty: number;
@@ -59,6 +63,16 @@ export interface DailyItemResumeRow {
   readonly grossWeight: number | null;
   readonly inputCount: number;
   readonly externalDocumentSummary: string;
+  readonly externalDocumentDetails: readonly {
+    readonly rawExternalDocument: string | null;
+    readonly parseStatus: ParsedExternalDocument["parseStatus"];
+    readonly parsedShift: string | null;
+    readonly parsedWorkHours: number | null;
+    readonly parsedOperator: string | null;
+    readonly documentNo: string;
+    readonly postingDate: string;
+    readonly quantity: number;
+  }[];
   readonly notes: readonly string[];
   readonly rejectDetails: readonly {
     readonly documentNo: string;
@@ -90,9 +104,10 @@ function normalized(value: string | null | undefined): string {
 function machineLabel(row: DailyItemResumeSourceRow): string {
   return clean(row.entityName)
     || clean(row.entityCode)
+    || clean(row.machineDescription)
     || clean(row.machineCenterNo)
-    || clean(row.prodLineNo)
     || clean(row.prodLineDescription)
+    || clean(row.prodLineNo)
     || "Unmapped";
 }
 
@@ -110,6 +125,45 @@ function uniqueSummary(values: readonly (string | null | undefined)[], fallback 
   return unique.length ? unique.join(" | ") : fallback;
 }
 
+function resolveOperatorName(row: DailyItemResumeSourceRow): string | null {
+  return parseExternalDocument(row.externalDocumentNo).operatorName ?? (clean(row.operatorName) || null);
+}
+
+function resolveShiftCode(row: DailyItemResumeSourceRow): string | null {
+  return parseExternalDocument(row.externalDocumentNo).shiftCode ?? (clean(row.shiftCode) || null);
+}
+
+function resolveGroupWorkHours(
+  rows: readonly DailyItemResumeSourceRow[],
+  fallbackWorkHours: number
+): { readonly workHours: number; readonly source: ResumeWorkHoursSource } {
+  const parsedHours = new Map<string, number>();
+  for (const row of rows) {
+    const parsed = parseExternalDocument(row.externalDocumentNo);
+    if (parsed.parseStatus !== "PARSED" || parsed.workHours === null) continue;
+    parsedHours.set([parsed.shiftCode, parsed.operatorName, parsed.workHours].join("|"), parsed.workHours);
+  }
+  if (parsedHours.size > 0) {
+    return {
+      workHours: [...parsedHours.values()].reduce((sum, value) => sum + value, 0),
+      source: "EXTERNAL_DOCUMENT"
+    };
+  }
+  const rowHours = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.workHours || row.workHours <= 0) continue;
+    rowHours.set([resolveShiftCode(row), resolveOperatorName(row), row.workHours].join("|"), row.workHours);
+  }
+  if (rowHours.size > 0) {
+    return {
+      workHours: [...rowHours.values()].reduce((sum, value) => sum + value, 0),
+      source: "FALLBACK"
+    };
+  }
+  if (fallbackWorkHours > 0) return { workHours: fallbackWorkHours, source: "FALLBACK" };
+  return { workHours: 0, source: "UNKNOWN" };
+}
+
 function chooseGroup(groups: readonly Group[], documentNo: string | null | undefined): Group | null {
   if (groups.length === 0) return null;
   const doc = normalized(documentNo);
@@ -122,11 +176,6 @@ function chooseGroup(groups: readonly Group[], documentNo: string | null | undef
     const qtyB = b.okRows.reduce((sum, row) => sum + row.quantity, 0);
     return b.okRows.length - a.okRows.length || qtyB - qtyA;
   })[0] ?? null;
-}
-
-function distinctWorkHours(rows: readonly DailyItemResumeSourceRow[], fallbackWorkHours: number): number {
-  const values = rows.flatMap((row) => (row.workHours && row.workHours > 0 ? [row.workHours] : []));
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : fallbackWorkHours;
 }
 
 function representativeGrossWeight(rows: readonly DailyItemResumeSourceRow[]): number | null {
@@ -226,7 +275,8 @@ export function buildDailyItemResumeRows(
         };
       });
       const totalForRejectRate = netOutputQty + rejectPcsEq;
-      const workHours = distinctWorkHours(group.okRows.length ? group.okRows : allRows, fallbackWorkHours);
+      const workHoursResolution = resolveGroupWorkHours(group.okRows.length ? group.okRows : allRows, fallbackWorkHours);
+      const workHours = workHoursResolution.workHours;
       const dailyTarget = anchor?.dailyTarget ?? null;
       const transactionProrataTarget = dailyTarget === null ? null : dailyTarget * (workHours / 24);
       const achievementPct = transactionProrataTarget && transactionProrataTarget > 0 ? (netOutputQty / transactionProrataTarget) * 100 : null;
@@ -250,14 +300,40 @@ export function buildDailyItemResumeRows(
         }];
       })).values()];
       const operatorDetails = [...new Map(allRows.map((row) => {
-        const key = `${clean(row.operatorName, "-")}|${clean(row.shiftCode, "-")}|${clean(row.documentNo, "-")}`;
+        const operatorName = resolveOperatorName(row);
+        const shiftCode = resolveShiftCode(row);
+        const key = `${clean(operatorName, "-")}|${clean(shiftCode, "-")}|${clean(row.documentNo, "-")}`;
         return [key, {
-          operatorName: clean(row.operatorName, "-"),
-          shiftCode: clean(row.shiftCode, "-"),
+          operatorName: clean(operatorName, "-"),
+          shiftCode: clean(shiftCode, "-"),
           documentNo: clean(row.documentNo, "-"),
           quantity: allRows
-            .filter((candidate) => `${clean(candidate.operatorName, "-")}|${clean(candidate.shiftCode, "-")}|${clean(candidate.documentNo, "-")}` === key)
+            .filter((candidate) => {
+              const candidateOperatorName = resolveOperatorName(candidate);
+              const candidateShiftCode = resolveShiftCode(candidate);
+              return `${clean(candidateOperatorName, "-")}|${clean(candidateShiftCode, "-")}|${clean(candidate.documentNo, "-")}` === key;
+            })
             .reduce((sum, candidate) => sum + candidate.quantity, 0)
+        }];
+      })).values()];
+      const externalDocumentDetails = [...new Map(allRows.map((row) => {
+        const parsed = parseExternalDocument(row.externalDocumentNo);
+        const key = [
+          row.externalDocumentNo ?? "",
+          clean(row.documentNo, "-"),
+          parsed.shiftCode ?? "",
+          parsed.operatorName ?? "",
+          parsed.workHours ?? ""
+        ].join("|");
+        return [key, {
+          rawExternalDocument: row.externalDocumentNo ?? null,
+          parseStatus: parsed.parseStatus,
+          parsedShift: parsed.shiftCode,
+          parsedWorkHours: parsed.workHours,
+          parsedOperator: parsed.operatorName,
+          documentNo: clean(row.documentNo, "-"),
+          postingDate: row.postingDate,
+          quantity: row.quantity
         }];
       })).values()];
 
@@ -272,10 +348,11 @@ export function buildDailyItemResumeRows(
         documentSummary: uniqueSummary(allRows.map((row) => row.documentNo)),
         documentCount: documentDetails.length,
         documentDetails,
-        operatorSummary: uniqueSummary(allRows.map((row) => row.operatorName)),
+        operatorSummary: uniqueSummary(allRows.map((row) => resolveOperatorName(row))),
         operatorDetails,
-        shiftSummary: uniqueSummary(allRows.map((row) => row.shiftCode)),
+        shiftSummary: uniqueSummary(allRows.map((row) => resolveShiftCode(row))),
         workHours,
+        workHoursSource: workHoursResolution.source,
         dailyTarget,
         transactionProrataTarget,
         netOutputQty,
@@ -291,10 +368,15 @@ export function buildDailyItemResumeRows(
         grossWeight,
         inputCount: allRows.length,
         externalDocumentSummary: uniqueSummary(allRows.map((row) => row.externalDocumentNo)),
+        externalDocumentDetails,
         notes: [
           ...(correctionOutputQty < 0 ? ["Contains negative Output correction"] : []),
           ...(incompleteRejectConversion ? ["Reject conversion incomplete"] : []),
-          ...(achievementStatus === "TARGET_MISSING" ? ["Target missing"] : [])
+          ...(achievementStatus === "TARGET_MISSING" ? ["Target missing"] : []),
+          ...(allRows.some((row) => {
+            const parsed = parseExternalDocument(row.externalDocumentNo);
+            return parsed.rawExternalDocument && parsed.parseStatus === "UNPARSED";
+          }) ? ["External document unparsed"] : [])
         ],
         rejectDetails
       };

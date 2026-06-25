@@ -218,6 +218,7 @@ export const productionOutputs = pgTable(
     itemNo: text("item_no").notNull(),
     itemDescription: text("item_description"),
     itemCategoryCode: text("item_category_code"),
+    machineDescription: text("machine_description"),
     machineCenterNo: text("machine_center_no"),
     entityId: uuid("entity_id").references(() => masterEntities.id),
     prodLineNo: text("prod_line_no"),
@@ -241,6 +242,7 @@ export const productionOutputs = pgTable(
     index("idx_outputs_entity_date").on(table.entityId, table.postingDate),
     index("idx_outputs_item_date").on(table.itemNo, table.postingDate),
     index("idx_outputs_document_no").on(table.documentNo),
+    index("idx_outputs_machine_description_date").on(table.machineDescription, table.postingDate),
     index("idx_outputs_machine_date").on(table.machineCenterNo, table.postingDate),
     index("idx_outputs_raw_payload_gin").using("gin", table.rawPayload)
   ]

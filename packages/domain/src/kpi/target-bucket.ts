@@ -15,6 +15,7 @@ export interface ResumeTargetBucketInput {
   readonly entityCode?: string | null;
   readonly entityDisplayName?: string | null;
   readonly machineLabel?: string | null;
+  readonly machineDescription?: string | null;
   readonly machineCenterNo?: string | null;
   readonly prodLineNo?: string | null;
   readonly prodLineDescription?: string | null;
@@ -62,6 +63,7 @@ export function inferResumeTargetBucket(input: ResumeTargetBucketInput): ResumeT
     input.entityCode,
     input.entityDisplayName,
     input.machineLabel,
+    input.machineDescription,
     input.machineCenterNo,
     input.prodLineNo,
     input.prodLineDescription

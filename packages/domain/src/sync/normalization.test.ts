@@ -13,6 +13,7 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
     Document_No: "  prod-1 ",
     Entry_Type: " output ",
     Item_No: " fg-001 ",
+    Machine_Description: " repacking ",
     Machine_Center_No: " mc-01 ",
     Quantity: "12.5",
     Unit_of_Measure_Code: " pcs ",
@@ -23,6 +24,7 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
   assert.equal(result.canCommit, true);
   assert.equal(result.normalized.entryNo, 42n);
   assert.equal(result.normalized.itemNo, "FG-001");
+  assert.equal(result.normalized.machineDescription, "REPACKING");
   assert.equal(result.normalized.machineCenterNo, "MC-01");
   assert.equal(result.normalized.normalizedOutputType, "OK");
 });
@@ -79,10 +81,11 @@ test("createOutputFallbackNaturalKey is stable and normalized", () => {
       postingDate: "2026-06-22",
       documentNo: " prod-1 ",
       itemNo: "fg-001",
+      machineDescription: "repacking",
       machineCenterNo: "mc-01",
       quantity: 10,
       entryType: "output"
     }),
-    "2026-06-22|PROD-1|FG-001|MC-01|10.0000|OUTPUT"
+    "2026-06-22|PROD-1|FG-001|REPACKING|10.0000|OUTPUT"
   );
 });

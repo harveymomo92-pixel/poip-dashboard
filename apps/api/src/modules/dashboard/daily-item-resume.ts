@@ -1,4 +1,4 @@
-import { inferResumeTargetBucket, type ResumeTargetBucket } from "@poip/domain";
+import { inferResumeTargetBucket, parseExternalDocument, type ParsedExternalDocument, type ResumeTargetBucket } from "@poip/domain";
 
 export type DailyItemResumeSort = "postingDate.desc" | "postingDate.asc" | "netOutputQty.desc" | "netOutputQty.asc";
 
@@ -12,6 +12,7 @@ export type DailyItemResumeTargetReason =
   | "TARGET_MATCHED";
 
 export type DailyItemResumeTargetSource = "NONE" | "ENTITY_DAILY_TARGET" | "BUCKET_DAILY_TARGET";
+export type DailyItemResumeWorkHoursSource = "EXTERNAL_DOCUMENT" | "FALLBACK" | "UNKNOWN";
 
 export const DAILY_ITEM_RESUME_TARGET_REASONS: readonly DailyItemResumeTargetReason[] = [
   "TARGET_MATCHED",
@@ -45,6 +46,7 @@ export interface DailyItemResumeSourceRow {
   readonly itemNo: string;
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
+  readonly machineDescription: string | null;
   readonly machineCenterNo: string | null;
   readonly prodLineNo: string | null;
   readonly prodLineDescription: string | null;
@@ -86,6 +88,7 @@ export interface DailyItemResumeRow {
   readonly operatorDetails: readonly Record<string, unknown>[];
   readonly shiftSummary: string;
   readonly workHours: number;
+  readonly workHoursSource: DailyItemResumeWorkHoursSource;
   readonly dailyTarget: number | null;
   readonly targetSource: DailyItemResumeTargetSource;
   readonly targetReason: DailyItemResumeTargetReason;
@@ -106,6 +109,7 @@ export interface DailyItemResumeRow {
   readonly grossWeight: number | null;
   readonly inputCount: number;
   readonly externalDocumentSummary: string;
+  readonly externalDocumentDetails: readonly Record<string, unknown>[];
   readonly notes: readonly string[];
   readonly rejectDetails: readonly Record<string, unknown>[];
   readonly drilldown: Record<string, unknown>;
@@ -174,13 +178,54 @@ function unique(values: readonly (string | null | undefined)[]): string[] {
   return result;
 }
 
+function resolveOperatorName(row: DailyItemResumeSourceRow): string | null {
+  const parsed = parseExternalDocument(row.externalDocumentNo).operatorName;
+  return parsed ?? (compact(row.operatorName) || null);
+}
+
+function resolveShiftCode(row: DailyItemResumeSourceRow): string | null {
+  const parsed = parseExternalDocument(row.externalDocumentNo).shiftCode;
+  return parsed ?? (compact(row.shiftCode) || null);
+}
+
+function resolveRowWorkHours(row: DailyItemResumeSourceRow): number | null {
+  const parsed = parseExternalDocument(row.externalDocumentNo).workHours;
+  return parsed ?? (row.plannedRuntimeHours && row.plannedRuntimeHours > 0 ? row.plannedRuntimeHours : null);
+}
+
+function parsedExternalDocuments(rows: readonly DailyItemResumeSourceRow[]): ParsedExternalDocument[] {
+  return rows.map((row) => parseExternalDocument(row.externalDocumentNo));
+}
+
+function resolveGroupWorkHours(
+  rows: readonly DailyItemResumeSourceRow[],
+  fallbackWorkHours: number
+): { readonly workHours: number; readonly source: DailyItemResumeWorkHoursSource } {
+  const parsedHours = new Map<string, number>();
+  for (const row of rows) {
+    const parsed = parseExternalDocument(row.externalDocumentNo);
+    if (parsed.parseStatus !== "PARSED" || parsed.workHours === null) continue;
+    const key = [parsed.shiftCode, parsed.operatorName, parsed.workHours].join("|");
+    parsedHours.set(key, parsed.workHours);
+  }
+  if (parsedHours.size > 0) {
+    return {
+      workHours: [...parsedHours.values()].reduce((total, value) => total + value, 0),
+      source: "EXTERNAL_DOCUMENT"
+    };
+  }
+  if (fallbackWorkHours > 0) return { workHours: fallbackWorkHours, source: "FALLBACK" };
+  return { workHours: 0, source: "UNKNOWN" };
+}
+
 export function resolveMachineLabel(row: DailyItemResumeSourceRow): string {
   return (
     compact(row.entityDisplayName) ||
     compact(row.entityCode) ||
+    compact(row.machineDescription) ||
     compact(row.machineCenterNo) ||
-    compact(row.prodLineNo) ||
     compact(row.prodLineDescription) ||
+    compact(row.prodLineNo) ||
     "Unmapped"
   );
 }
@@ -230,6 +275,7 @@ interface TargetResolutionInput {
   readonly entityCode: string | null;
   readonly entityDisplayName: string | null;
   readonly machineLabel: string;
+  readonly machineDescription: string | null;
   readonly machineCenterNo: string | null;
   readonly prodLineNo: string | null;
   readonly prodLineDescription: string | null;
@@ -273,6 +319,7 @@ function resolveDailyItemResumeTarget(
     entityCode: input.entityCode,
     entityDisplayName: input.entityDisplayName,
     machineLabel: input.machineLabel,
+    machineDescription: input.machineDescription,
     machineCenterNo: input.machineCenterNo,
     prodLineNo: input.prodLineNo,
     prodLineDescription: input.prodLineDescription,
@@ -493,17 +540,19 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
   const netOutputQty = group.okRows.reduce((total, row) => total + row.quantity, 0);
   const documents = unique(allRows.map((row) => row.documentNo));
   const externalDocuments = unique(allRows.map((row) => row.externalDocumentNo));
-  const operators = unique(allRows.map((row) => row.operatorName));
-  const shifts = unique(allRows.map((row) => row.shiftCode));
+  const operators = unique(allRows.map((row) => resolveOperatorName(row)));
+  const shifts = unique(allRows.map((row) => resolveShiftCode(row)));
   const uoms = unique(group.okRows.map((row) => row.uom));
   const uom = uoms.length === 0 ? "N/A" : uoms.length === 1 ? uoms[0] ?? "N/A" : "MIXED";
-  const workHours = group.plannedRuntimeHours && group.plannedRuntimeHours > 0 ? group.plannedRuntimeHours : 24;
+  const workHoursResolution = resolveGroupWorkHours(group.okRows.length ? group.okRows : allRows, group.plannedRuntimeHours && group.plannedRuntimeHours > 0 ? group.plannedRuntimeHours : 24);
+  const workHours = workHoursResolution.workHours;
   const grossWeight = group.okRows.map((row) => row.grossWeightPerPcs).find((value) => value !== null && value > 0) ?? null;
   const targetResolution = resolveDailyItemResumeTarget({
     entityId: group.entityId,
     entityCode: group.entityCode,
     entityDisplayName: anchor?.entityDisplayName ?? null,
     machineLabel: group.machineLabel,
+    machineDescription: anchor?.machineDescription ?? null,
     machineCenterNo: anchor?.machineCenterNo ?? null,
     prodLineNo: anchor?.prodLineNo ?? null,
     prodLineDescription: anchor?.prodLineDescription ?? null,
@@ -537,6 +586,7 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     targetReason: targetResolution.targetReason,
     dailyTarget,
     workHours,
+    workHoursSource: workHoursResolution.source,
     transactionProrataTarget,
     netOutputQty,
     achievementPct,
@@ -569,8 +619,11 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
       grossWeight: docGrossWeight ?? null,
       rejectPcsEq: pcsEq,
       conversionStatus: pcsEq === null ? "INCOMPLETE" : "COMPLETE",
-      operatorName: row.operatorName,
-      shiftCode: row.shiftCode
+      rawExternalDocument: row.externalDocumentNo,
+      parsedExternalDocument: parseExternalDocument(row.externalDocumentNo),
+      operatorName: resolveOperatorName(row),
+      shiftCode: resolveShiftCode(row),
+      workHours: resolveRowWorkHours(row)
     };
   });
   const rejectConversionStatus =
@@ -589,18 +642,41 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     };
   });
   const operatorDetails = operators.map((operatorName) => {
-    const rows = allRows.filter((row) => compact(row.operatorName) === operatorName);
+    const rows = allRows.filter((row) => compact(resolveOperatorName(row)) === operatorName);
     return {
       operatorName,
-      shiftSummary: summarize(unique(rows.map((row) => row.shiftCode)), "N/A"),
+      shiftSummary: summarize(unique(rows.map((row) => resolveShiftCode(row))), "N/A"),
+      workHours: resolveGroupWorkHours(rows, 0).workHours || null,
+      rawExternalDocuments: unique(rows.map((row) => row.externalDocumentNo)),
       outputQty: rows.filter(isOkOutput).reduce((total, row) => total + row.quantity, 0),
       rows: rows.length
     };
   });
+  const externalDocumentDetails = [...new Map(allRows.map((row) => {
+    const parsed = parseExternalDocument(row.externalDocumentNo);
+    const key = [
+      row.externalDocumentNo ?? "",
+      row.documentNo ?? "",
+      parsed.shiftCode ?? "",
+      parsed.operatorName ?? "",
+      parsed.workHours ?? ""
+    ].join("|");
+    return [key, {
+      rawExternalDocument: row.externalDocumentNo,
+      parseStatus: parsed.parseStatus,
+      parsedShift: parsed.shiftCode,
+      parsedWorkHours: parsed.workHours,
+      parsedOperator: parsed.operatorName,
+      documentNo: row.documentNo,
+      postingDate: row.postingDate,
+      quantity: row.quantity
+    }];
+  })).values()];
   const notes: string[] = [];
   if (targetResolution.targetReason !== "TARGET_MATCHED") notes.push(targetResolution.targetReason);
   if (conversionGaps > 0) notes.push("REJECT_CONVERSION_INCOMPLETE");
-  if (!group.plannedRuntimeHours || group.plannedRuntimeHours <= 0) notes.push("WORK_HOURS_DEFAULT_24");
+  if (workHoursResolution.source !== "EXTERNAL_DOCUMENT" && (!group.plannedRuntimeHours || group.plannedRuntimeHours <= 0) && workHours === 24) notes.push("WORK_HOURS_DEFAULT_24");
+  if (parsedExternalDocuments(allRows).some((parsed) => parsed.rawExternalDocument && parsed.parseStatus === "UNPARSED")) notes.push("EXTERNAL_DOCUMENT_UNPARSED");
   if (correctionOutputQty < 0) notes.push("HAS_NEGATIVE_OUTPUT_CORRECTION");
 
   return {
@@ -618,6 +694,7 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     operatorDetails,
     shiftSummary: summarize(shifts),
     workHours,
+    workHoursSource: workHoursResolution.source,
     dailyTarget,
     targetSource: targetResolution.targetSource,
     targetReason: targetResolution.targetReason,
@@ -638,6 +715,7 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     grossWeight,
     inputCount: allRows.length,
     externalDocumentSummary: summarize(externalDocuments),
+    externalDocumentDetails,
     notes,
     rejectDetails,
     drilldown: {

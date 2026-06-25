@@ -21,7 +21,7 @@ import {
 } from "../../components/ui";
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../lib/api";
 
-type SourceField = "machine_center_no" | "prod_line_no" | "prod_line_description" | "item_no" | "uom";
+type SourceField = "machine_description" | "machine_center_no" | "prod_line_description" | "prod_line_no" | "item_no" | "uom";
 type MappingConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 interface Overview {
@@ -92,6 +92,7 @@ interface MappingPreview {
 interface CoverageRow {
   readonly month: string;
   readonly entityName: string;
+  readonly sourceField: SourceField;
   readonly sourceGroup: string;
   readonly reason: string;
   readonly rows: number;
@@ -107,9 +108,10 @@ interface ConversionGap {
 }
 
 const sourceFieldOptions: readonly { readonly value: SourceField; readonly label: string }[] = [
-  { value: "machine_center_no", label: "Machine center" },
-  { value: "prod_line_no", label: "Prod line no" },
-  { value: "prod_line_description", label: "Prod line description" }
+  { value: "machine_description", label: "Machine description" },
+  { value: "machine_center_no", label: "Machine center no" },
+  { value: "prod_line_description", label: "Prod line description" },
+  { value: "prod_line_no", label: "Prod line no" }
 ];
 
 const confidenceOptions: readonly { readonly value: MappingConfidence; readonly label: string }[] = [
@@ -124,6 +126,10 @@ function formatNumber(value: number, digits = 0) {
 
 function formatPct(value: number | null | undefined) {
   return value === null || value === undefined ? "N/A" : `${formatNumber(value, 2)}%`;
+}
+
+function sourceFieldLabel(value: SourceField) {
+  return sourceFieldOptions.find((option) => option.value === value)?.label ?? value.replaceAll("_", " ");
 }
 
 function query(params: Record<string, string | number | undefined>) {
@@ -366,7 +372,7 @@ export function MasterDataPageClient() {
                 <DataTable headers={["Source", "Rows", "OK qty", "Range", "Candidate", "Action"]}>
                   {visibleUnmapped.map((group) => (
                     <tr className={selectedGroup?.sourceField === group.sourceField && selectedGroup.sourceValue === group.sourceValue ? "selected-row" : ""} key={`${group.sourceField}:${group.sourceValue}`}>
-                      <td><strong>{group.sourceValue || "(blank)"}</strong><small>{group.sourceField.replaceAll("_", " ")} · {group.normalizedValue || "needs context"}</small></td>
+                      <td><strong>{group.sourceValue || "(blank)"}</strong><small>{sourceFieldLabel(group.sourceField)} · {group.normalizedValue || "needs context"}</small></td>
                       <td>{formatNumber(group.rowCount)}</td>
                       <td>{formatNumber(group.outputOkQty, 1)}</td>
                       <td>{group.firstPostingDate ?? "—"} → {group.lastPostingDate ?? "—"}<small>{group.sampleDocumentNos.slice(0, 2).join(", ")}</small></td>
@@ -385,7 +391,7 @@ export function MasterDataPageClient() {
             {selectedGroup ? (
               <>
                 <dl className="detail-facts">
-                  <div><dt>Source field</dt><dd>{selectedGroup.sourceField}</dd></div>
+                  <div><dt>Source field</dt><dd>{sourceFieldLabel(selectedGroup.sourceField)}</dd></div>
                   <div><dt>Rows</dt><dd>{formatNumber(selectedGroup.rowCount)}</dd></div>
                   <div><dt>OK quantity</dt><dd>{formatNumber(selectedGroup.outputOkQty, 1)}</dd></div>
                   <div><dt>Confidence</dt><dd>{selectedGroup.candidates[0]?.confidence ?? "LOW"}</dd></div>
@@ -442,7 +448,7 @@ export function MasterDataPageClient() {
         <section>
           <SectionHeader title="Target Coverage" description="Positive OK output grouped by month and reason. Mapping changes should move rows from UNMAPPED_ENTITY to target-specific reasons or COVERED." />
           {coverage && coverage.rows.length > 0 ? <DataTable headers={["Month", "Entity/source", "Reason", "Rows", "OK qty"]}>
-            {coverage.rows.map((row, index) => <tr key={`${row.month}:${row.sourceGroup}:${row.reason}:${index}`}><td>{row.month}</td><td><strong>{row.entityName}</strong><small>{row.sourceGroup}</small></td><td><StatusBadge status={row.reason} /></td><td>{formatNumber(row.rows)}</td><td>{formatNumber(row.outputOkQty, 1)}</td></tr>)}
+            {coverage.rows.map((row, index) => <tr key={`${row.month}:${row.sourceGroup}:${row.reason}:${index}`}><td>{row.month}</td><td><strong>{row.entityName}</strong><small>{sourceFieldLabel(row.sourceField)} · {row.sourceGroup}</small></td><td><StatusBadge status={row.reason} /></td><td>{formatNumber(row.rows)}</td><td>{formatNumber(row.outputOkQty, 1)}</td></tr>)}
           </DataTable> : <EmptyState title="No coverage rows" description="No OK output exists for the selected coverage scope." />}
         </section>
 

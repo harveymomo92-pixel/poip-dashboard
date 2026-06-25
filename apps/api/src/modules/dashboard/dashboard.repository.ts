@@ -65,7 +65,16 @@ function dateText(value: unknown): string {
 }
 
 function machineLabelSql(outputAlias = "po", entityAlias = "me"): string {
-  return `coalesce(${entityAlias}.display_name, ${entityAlias}.entity_code, ${outputAlias}.machine_center_no, ${outputAlias}.prod_line_no, ${outputAlias}.prod_line_description, 'Unmapped')`;
+  return `coalesce(${entityAlias}.display_name, ${entityAlias}.entity_code, nullif(btrim(${outputAlias}.machine_description), ''), nullif(btrim(${outputAlias}.machine_center_no), ''), nullif(btrim(${outputAlias}.prod_line_description), ''), nullif(btrim(${outputAlias}.prod_line_no), ''), 'Unmapped')`;
+}
+
+function rawMachineSourceFilterSql(outputAlias = "po", paramIndex: number): string {
+  return `(
+    upper(coalesce(${outputAlias}.machine_description, '')) = $${paramIndex}
+    or upper(coalesce(${outputAlias}.machine_center_no, '')) = $${paramIndex}
+    or upper(coalesce(${outputAlias}.prod_line_description, '')) = $${paramIndex}
+    or upper(coalesce(${outputAlias}.prod_line_no, '')) = $${paramIndex}
+  )`;
 }
 
 function buildWhere(filters: DashboardFilters): SqlParts {
@@ -88,7 +97,7 @@ function buildWhere(filters: DashboardFilters): SqlParts {
   }
   if (filters.machineCenterNo) {
     params.push(filters.machineCenterNo);
-    clauses.push(`po.machine_center_no = $${params.length}`);
+    clauses.push(rawMachineSourceFilterSql("po", params.length));
   }
   if (filters.itemNo) {
     params.push(filters.itemNo);
@@ -305,12 +314,12 @@ export class DashboardReadRepository {
     const where = buildWhere(input.filters);
     const groupExpressions = {
       machine: {
-        key: "coalesce(po.machine_center_no, 'UNMAPPED')",
-        label: "coalesce(po.machine_center_no, 'Unmapped')"
+        key: "coalesce(nullif(btrim(po.machine_description), ''), nullif(btrim(po.machine_center_no), ''), nullif(btrim(po.prod_line_description), ''), nullif(btrim(po.prod_line_no), ''), 'UNMAPPED')",
+        label: "coalesce(nullif(btrim(po.machine_description), ''), nullif(btrim(po.machine_center_no), ''), nullif(btrim(po.prod_line_description), ''), nullif(btrim(po.prod_line_no), ''), 'Unmapped')"
       },
       entity: {
         key: "coalesce(po.entity_id::text, 'UNMAPPED')",
-        label: "coalesce(me.display_name, po.machine_center_no, 'Unmapped')"
+        label: "coalesce(me.display_name, po.machine_description, po.machine_center_no, po.prod_line_description, po.prod_line_no, 'Unmapped')"
       },
       item: {
         key: "po.item_no",
@@ -383,6 +392,7 @@ export class DashboardReadRepository {
       item_no: string;
       item_description: string | null;
       machine_center_no: string | null;
+      machine_description: string | null;
       entity_id: string | null;
       entity_name: string | null;
       shift_code: string | null;
@@ -402,6 +412,7 @@ export class DashboardReadRepository {
           po.normalized_output_type,
           po.item_no,
           po.item_description,
+          po.machine_description,
           po.machine_center_no,
           po.entity_id,
           me.display_name as entity_name,
@@ -574,6 +585,7 @@ export class DashboardReadRepository {
         item_no: string;
         item_description: string | null;
         item_category_code: string | null;
+        machine_description: string | null;
         machine_center_no: string | null;
         prod_line_no: string | null;
         prod_line_description: string | null;
@@ -599,6 +611,7 @@ export class DashboardReadRepository {
             po.item_no,
             po.item_description,
             po.item_category_code,
+            po.machine_description,
             po.machine_center_no,
             po.prod_line_no,
             po.prod_line_description,
@@ -637,6 +650,7 @@ export class DashboardReadRepository {
       itemNo: row.item_no,
       itemDescription: row.item_description,
       itemCategoryCode: row.item_category_code,
+      machineDescription: row.machine_description,
       machineCenterNo: row.machine_center_no,
       prodLineNo: row.prod_line_no,
       prodLineDescription: row.prod_line_description,
@@ -694,6 +708,7 @@ export class DashboardReadRepository {
           po.normalized_output_type,
           po.item_no,
           po.item_description,
+          po.machine_description,
           po.machine_center_no,
           po.entity_id,
           me.display_name as entity_name,
@@ -981,6 +996,7 @@ export class DashboardReadRepository {
     readonly normalized_output_type: string;
     readonly item_no: string;
     readonly item_description: string | null;
+    readonly machine_description: string | null;
     readonly machine_center_no: string | null;
     readonly entity_id: string | null;
     readonly entity_name: string | null;
@@ -1001,6 +1017,7 @@ export class DashboardReadRepository {
       itemNo: row.item_no,
       itemDescription: row.item_description,
       machineCenterNo: row.machine_center_no,
+      machineDescription: row.machine_description,
       entityId: row.entity_id,
       entityName: row.entity_name,
       shiftCode: row.shift_code,

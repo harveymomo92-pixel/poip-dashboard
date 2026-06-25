@@ -40,6 +40,16 @@ test("inferResumeTargetBucket maps thermoforming by gross weight threshold", () 
   assert.equal(heavy.bucket, "target_thermoforming_gw_gt_12");
 });
 
+test("inferResumeTargetBucket reads machine description signals", () => {
+  const result = inferResumeTargetBucket({
+    machineDescription: "HENGFENG 4 OZ",
+    itemDescription: "CUP 12 OZ"
+  });
+
+  assert.equal(result.reason, "INFERRED");
+  assert.equal(result.bucket, "target_thermoforming");
+});
+
 test("inferResumeTargetBucket maps bottle and preform family", () => {
   const result = inferResumeTargetBucket({
     machineCenterNo: "BORCH 1 PREFORM 19 GR",

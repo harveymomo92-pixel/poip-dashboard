@@ -32,6 +32,7 @@ export interface NormalizedODataOutputRow {
   readonly itemNo: string | null;
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
+  readonly machineDescription: string | null;
   readonly machineCenterNo: string | null;
   readonly prodLineNo: string | null;
   readonly prodLineDescription: string | null;
@@ -115,6 +116,7 @@ export function createOutputFallbackNaturalKey(row: {
   readonly postingDate: string | null;
   readonly documentNo: string | null;
   readonly itemNo: string | null;
+  readonly machineDescription?: string | null;
   readonly machineCenterNo: string | null;
   readonly quantity: number;
   readonly entryType: string | null;
@@ -123,7 +125,7 @@ export function createOutputFallbackNaturalKey(row: {
     row.postingDate ?? "missing-date",
     row.documentNo ?? "missing-document",
     row.itemNo ?? "missing-item",
-    row.machineCenterNo ?? "missing-machine",
+    row.machineDescription ?? row.machineCenterNo ?? "missing-machine",
     row.quantity.toFixed(4),
     row.entryType ?? "missing-entry-type"
   ]
@@ -152,6 +154,10 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
   const entryType = cleanString(readField(row, "Entry_Type", "EntryType", "entry_type"), true);
   const machineCenterNo = cleanString(
     readField(row, "Machine_Center_No", "MachineCenterNo", "machine_center_no"),
+    true
+  );
+  const machineDescription = cleanString(
+    readField(row, "Machine_Description", "MachineDescription", "Machine Description", "machine_description"),
     true
   );
   const documentNo = cleanString(readField(row, "Document_No", "DocumentNo", "document_no"));
@@ -235,6 +241,7 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
       readField(row, "Item_Category_Code", "ItemCategoryCode", "item_category_code"),
       true
     ),
+    machineDescription,
     machineCenterNo,
     prodLineNo: cleanString(
       readField(row, "Prod_Order_Line_No", "ProdOrderLineNo", "prod_line_no")

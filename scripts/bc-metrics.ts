@@ -59,9 +59,10 @@ interface SqlParts {
 }
 
 const sourceFieldColumns: Record<MasterSourceField, string> = {
+  machine_description: "machine_description",
   machine_center_no: "machine_center_no",
-  prod_line_no: "prod_line_no",
   prod_line_description: "prod_line_description",
+  prod_line_no: "prod_line_no",
   item_no: "item_no",
   uom: "uom"
 };
@@ -144,13 +145,36 @@ function sourceFieldColumn(sourceField: MasterSourceField): string {
 function requireSourceField(): MasterSourceField {
   const value = process.env.SOURCE_FIELD?.trim();
   if (!value || !isMasterSourceField(value)) {
-    throw new Error("SOURCE_FIELD must be one of machine_center_no, prod_line_no, prod_line_description, item_no, uom");
+    throw new Error("SOURCE_FIELD must be one of machine_description, machine_center_no, prod_line_description, prod_line_no, item_no, uom");
   }
   return value;
 }
 
 function sqlNormalizeExpression(column: string): string {
   return `upper(regexp_replace(trim(coalesce(${column}, '')), '[^A-Za-z0-9]+', '', 'g'))`;
+}
+
+function preferredEntitySourceFieldSql(alias = "po"): string {
+  return `
+    case
+      when nullif(btrim(${alias}.machine_description), '') is not null then 'machine_description'
+      when nullif(btrim(${alias}.machine_center_no), '') is not null then 'machine_center_no'
+      when nullif(btrim(${alias}.prod_line_description), '') is not null then 'prod_line_description'
+      when nullif(btrim(${alias}.prod_line_no), '') is not null then 'prod_line_no'
+      else 'blank'
+    end
+  `;
+}
+
+function preferredEntitySourceValueSql(alias = "po"): string {
+  return `
+    coalesce(
+      nullif(btrim(${alias}.machine_description), ''),
+      nullif(btrim(${alias}.machine_center_no), ''),
+      nullif(btrim(${alias}.prod_line_description), ''),
+      nullif(btrim(${alias}.prod_line_no), '')
+    )
+  `;
 }
 
 function outputEntryTypePredicate(alias?: string): string {
@@ -292,17 +316,12 @@ async function fetchUnmappedSourceGroups(
   }>(
     `
       with source_rows as (
-        select 'machine_center_no'::text as source_field, machine_center_no as source_value, posting_date, quantity
-        from production_outputs
-        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
-        union all
-        select 'prod_line_no', prod_line_no, posting_date, quantity
-        from production_outputs
-        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
-        union all
-        select 'prod_line_description', prod_line_description, posting_date, quantity
-        from production_outputs
-        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
+        select ${preferredEntitySourceFieldSql("po")}::text as source_field,
+               ${preferredEntitySourceValueSql("po")} as source_value,
+               po.posting_date,
+               po.quantity
+        from production_outputs po
+        where po.source_system = $1 and ${outputEntryTypePredicate("po")} and po.entity_id is null and po.normalized_output_type = 'OK'
       )
       select source_field,
              coalesce(source_value, '') as source_value,
@@ -312,6 +331,7 @@ async function fetchUnmappedSourceGroups(
              min(posting_date)::text as first_posting_date,
              max(posting_date)::text as last_posting_date
       from source_rows
+      where source_field <> 'blank'
       group by source_field, coalesce(source_value, '')
       order by ok_qty desc, rows desc
       limit $2
@@ -376,6 +396,26 @@ function printCoverageSummary(summary: MappingCoverageSummary) {
   );
   console.log(
     `OK rows: total=${formatNumber(summary.okRows, 0)}; mapped=${formatNumber(summary.mappedOkRows, 0)}; unmapped=${formatNumber(summary.unmappedOkRows, 0)}; unmapped_ok_qty=${formatNumber(summary.unmappedOkQty, 2)}`
+  );
+}
+
+async function printEntitySourceUsage(pool: DatabasePool, title = "Entity source usage") {
+  await printRows(
+    title,
+    pool.query(
+      `
+        select ${preferredEntitySourceFieldSql("po")} as source_field,
+               count(*) as rows,
+               count(*) filter (where po.entity_id is null) as unmapped_rows,
+               coalesce(sum(po.quantity) filter (where po.normalized_output_type = 'OK'), 0) as ok_qty
+        from production_outputs po
+        where po.source_system = $1
+          and ${outputEntryTypePredicate("po")}
+        group by 1
+        order by rows desc, source_field asc
+      `,
+      [SOURCE_SYSTEM]
+    )
   );
 }
 
@@ -450,14 +490,15 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
     )
   );
   await printRows(
-    "Top unmapped machine/entity output",
+    "Top unmapped preferred source output",
     pool.query(
-      `select coalesce(machine_center_no, '(blank)') as machine_center_no,
+      `select ${preferredEntitySourceFieldSql("po")} as source_field,
+              coalesce(${preferredEntitySourceValueSql("po")}, '(blank)') as source_value,
               count(*) as rows,
-              coalesce(sum(case when normalized_output_type = 'OK' then quantity else 0 end), 0) as ok_qty
-       from production_outputs
-       where source_system = $1 and entity_id is null
-       group by 1
+              coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as ok_qty
+       from production_outputs po
+       where po.source_system = $1 and po.entity_id is null
+       group by 1, 2
        order by ok_qty desc, rows desc
        limit 15`,
       [SOURCE_SYSTEM]
@@ -492,6 +533,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       [SOURCE_SYSTEM]
     )
   );
+  await printEntitySourceUsage(pool);
   await printRows(
     "Top items by OK quantity",
     pool.query(
@@ -701,6 +743,7 @@ async function runDailyItemResume(pool: DatabasePool) {
       item_no: string;
       item_description: string | null;
       item_category_code: string | null;
+      machine_description: string | null;
       machine_center_no: string | null;
       prod_line_no: string | null;
       prod_line_description: string | null;
@@ -726,6 +769,7 @@ async function runDailyItemResume(pool: DatabasePool) {
           po.item_no,
           po.item_description,
           po.item_category_code,
+          po.machine_description,
           po.machine_center_no,
           po.prod_line_no,
           po.prod_line_description,
@@ -783,6 +827,7 @@ async function runDailyItemResume(pool: DatabasePool) {
     itemNo: row.item_no,
     itemDescription: row.item_description,
     itemCategoryCode: row.item_category_code,
+    machineDescription: row.machine_description,
     machineCenterNo: row.machine_center_no,
     prodLineNo: row.prod_line_no,
     prodLineDescription: row.prod_line_description,
@@ -833,6 +878,7 @@ async function runDailyItemResume(pool: DatabasePool) {
   console.log(`Conversion gaps: ${totals.conversionGaps}`);
   console.log(`Target missing count: ${totals.targetMissingCount}`);
   console.log(`Target non-matched count: ${totals.targetNonMatchedCount}`);
+  await printEntitySourceUsage(pool);
   printDailyItemResumeTargetBreakdown(allRows);
   console.log("Sample grouped rows:");
   for (const row of resume.rows.slice(0, 5)) {
@@ -842,6 +888,7 @@ async function runDailyItemResume(pool: DatabasePool) {
 
 async function runTargetCoverage(pool: ReturnType<typeof createDatabase>["pool"]) {
   console.log("Business Central target coverage");
+  await printEntitySourceUsage(pool);
   await printRows("Coverage by entity/machine/month", targetCoverageSummary(pool));
 }
 
@@ -856,6 +903,7 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
     activeEntityCandidates(pool)
   ]);
   printCoverageSummary(coverage);
+  await printEntitySourceUsage(pool);
 
   const groups = await fetchUnmappedSourceGroups(pool, limit, entities);
   if (groups.length === 0) {
@@ -876,7 +924,23 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
   }
 
   await printRows(
-    "Top unmapped by machine_center_no",
+    "Top unmapped by machine_description",
+    pool.query(
+      `
+        select coalesce(machine_description, '(blank)') as machine_description,
+               count(*) as rows,
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
+        from production_outputs
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
+        group by 1
+        order by ok_qty desc, rows desc
+        limit $2
+      `,
+      [SOURCE_SYSTEM, limit]
+    )
+  );
+  await printRows(
+    "Top unmapped by machine_center_no fallback",
     pool.query(
       `
         select coalesce(machine_center_no, '(blank)') as machine_center_no,
@@ -924,17 +988,20 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
     )
   );
   await printRows(
-    "Top unmapped by machine/prod-line/description",
+    "Top unmapped by preferred source/machine/prod-line",
     pool.query(
       `
-        select coalesce(machine_center_no, '(blank)') as machine_center_no,
+        select ${preferredEntitySourceFieldSql("po")} as source_field,
+               coalesce(${preferredEntitySourceValueSql("po")}, '(blank)') as source_value,
+               coalesce(machine_description, '(blank)') as machine_description,
+               coalesce(machine_center_no, '(blank)') as machine_center_no,
                coalesce(prod_line_no, '(blank)') as prod_line_no,
                coalesce(prod_line_description, '(blank)') as prod_line_description,
                count(*) as rows,
                coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
-        from production_outputs
-        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
-        group by 1, 2, 3
+        from production_outputs po
+        where po.source_system = $1 and ${outputEntryTypePredicate("po")} and po.entity_id is null
+        group by 1, 2, 3, 4, 5, 6
         order by ok_qty desc, rows desc
         limit $2
       `,
@@ -992,6 +1059,7 @@ async function runMappingPlan(pool: DatabasePool) {
     activeEntityCandidates(pool)
   ]);
   printCoverageSummary(coverage);
+  await printEntitySourceUsage(pool);
 
   const groups = await fetchUnmappedSourceGroups(pool, limit, entities);
   const rows = buildMappingPlanRows(groups.map((group) => ({
@@ -1435,7 +1503,8 @@ function targetCoverageSummary(pool: ReturnType<typeof createDatabase>["pool"]) 
           date_trunc('month', po.posting_date)::date::text as month,
           po.posting_date,
           po.entity_id,
-          po.machine_center_no,
+          ${preferredEntitySourceFieldSql("po")} as source_field,
+          ${preferredEntitySourceValueSql("po")} as source_value,
           po.quantity,
           case
             when po.entity_id is null then 'UNMAPPED_ENTITY'
@@ -1480,13 +1549,14 @@ function targetCoverageSummary(pool: ReturnType<typeof createDatabase>["pool"]) 
       )
       select
         output_rows.month,
-        coalesce(me.display_name, output_rows.machine_center_no, 'Unmapped') as entity_or_machine,
+        output_rows.source_field,
+        coalesce(me.display_name, output_rows.source_value, 'Unmapped') as entity_or_machine,
         output_rows.coverage_status,
         count(*) as rows,
         coalesce(sum(output_rows.quantity), 0) as ok_qty
       from output_rows
       left join master_entities me on me.id = output_rows.entity_id
-      group by output_rows.month, coalesce(me.display_name, output_rows.machine_center_no, 'Unmapped'), output_rows.coverage_status
+      group by output_rows.month, output_rows.source_field, coalesce(me.display_name, output_rows.source_value, 'Unmapped'), output_rows.coverage_status
       order by output_rows.month desc, output_rows.coverage_status desc, ok_qty desc
       limit 50
     `,
