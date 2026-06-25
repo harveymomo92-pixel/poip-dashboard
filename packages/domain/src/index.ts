@@ -6,6 +6,8 @@ export * from "./downtime/status.js";
 export * from "./imports/downtime-import.js";
 export * from "./kpi/output.js";
 export * from "./kpi/dashboard.js";
+export * from "./master-data/alias.js";
+export * from "./master-data/v1-import.js";
 export * from "./parser-contract/index.js";
 export * from "./permissions/index.js";
 export * from "./sync/index.js";

@@ -4891,6 +4891,31 @@ SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="0
 
 `bc:mapping-apply` must be dry-run by default and require `APPLY_MAPPING_COMMIT=true` for mutation.
 
+### Milestone 11.1 — V1 Master Data Import
+
+The v2 Mapping Center may be seeded from the local v1 export in `.tmp/v1-inspection/` when live BC rows are loaded but active entities and aliases are still empty.
+
+Required behavior:
+
+1. Use only local v1 export files; do not require SSH during import.
+2. Parse v1 master entity/target rows, machine evidence, and item gross-weight evidence.
+3. Canonicalize v1 rows marked `Alias Nama Sistem` or `Duplikasi Nama Sistem` into reviewed aliases instead of fake duplicate entities.
+4. Import only unambiguous aliases. If one source value maps to multiple product/target buckets, leave it unmapped and report a conflict.
+5. Dry-run by default and require `V1_MASTER_IMPORT_COMMIT=true` for mutation.
+6. Do not overwrite existing manual v2 master data unless `V1_IMPORT_ALLOW_UPDATE=true`.
+7. Write audit entries in commit mode.
+
+Commands:
+
+```bash
+pnpm v1:master-profile
+pnpm v1:master-import
+pnpm v1:master-reconcile
+V1_MASTER_IMPORT_COMMIT=true pnpm v1:master-import
+```
+
+Full operating plan: `docs/V1_MASTER_DATA_MIGRATION_PLAN.md`.
+
 ### Definition of Done
 
 1. `/master-data` exists and uses the production design system.

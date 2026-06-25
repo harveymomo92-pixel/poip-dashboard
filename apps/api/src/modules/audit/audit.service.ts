@@ -34,7 +34,11 @@ const entityLabels: Readonly<Record<string, string>> = {
   wa_parser_run: "parser WhatsApp",
   data_quality_issue: "isu kualitas data",
   sync_run: "sinkronisasi",
-  user: "user"
+  user: "user",
+  master_entity: "master entity",
+  master_entity_alias: "alias entity",
+  production_output_mapping: "mapping output produksi",
+  item_conversion_mapping: "mapping konversi item"
 };
 
 const actionLabels: Readonly<Record<string, string>> = {
@@ -59,6 +63,10 @@ const actionLabels: Readonly<Record<string, string>> = {
   open: "membuka kembali",
   run: "menjalankan",
   resync_range: "menjalankan sinkronisasi ulang rentang",
+  entity: "mengubah master entity",
+  alias: "mengubah alias",
+  mapping: "menerapkan mapping",
+  conversion: "mengubah konversi",
   login: "masuk sebagai",
   logout: "keluar dari sesi"
 };

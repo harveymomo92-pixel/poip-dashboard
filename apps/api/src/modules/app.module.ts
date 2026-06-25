@@ -11,6 +11,7 @@ import { DatabaseModule } from "./database/database.module.js";
 import { DowntimeModule } from "./downtime/downtime.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { ImportsModule } from "./imports/imports.module.js";
+import { MasterModule } from "./master/master.module.js";
 import { OutputsModule } from "./outputs/outputs.module.js";
 import { WaParserModule } from "./parser/wa-parser.module.js";
 import { SyncModule } from "./sync/sync.module.js";
@@ -27,6 +28,7 @@ import { UsersModule } from "./users/users.module.js";
     OutputsModule,
     SyncModule,
     TargetsModule,
+    MasterModule,
     DowntimeModule,
     ImportsModule,
     WaParserModule,

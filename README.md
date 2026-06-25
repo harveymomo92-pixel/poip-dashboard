@@ -101,6 +101,16 @@ pnpm bc:mapping-candidates
 
 Dashboard calculations use canonical `source_system = 'business-central'`. Missing approved targets produce `N/A` achievement rather than a misleading zero target, and unmapped machines/entities remain visible until master entities/aliases are loaded.
 
+To preview the v1 master-data import from the local `.tmp/v1-inspection/` export:
+
+```bash
+pnpm v1:master-profile
+pnpm v1:master-import
+pnpm v1:master-reconcile
+```
+
+The import command is a dry-run unless `V1_MASTER_IMPORT_COMMIT=true` is set. It imports real v1 entities, reviewed aliases, approved targets, and stable item gross-weight mappings; ambiguous machine/product mappings stay in the conflict list for manual review. See [V1 migration plan](docs/V1_MASTER_DATA_MIGRATION_PLAN.md).
+
 Map Business Central machine/line values only after review:
 
 ```bash

@@ -82,7 +82,7 @@ If `reject_kg > 0` and `gross_weight_per_pcs` is missing/zero, `reject_pcs_eq` i
 2. Unmapped output must remain visible.
 3. Unmapped rows should create data quality issues or be counted in profile output.
 4. Target/achievement should not silently assign unmapped rows to a fake target.
-5. Legacy v1-style machine aliases may resolve through exact entity code, entity alias, display name, line/report group, and known family aliases such as LONGSUNG/LONGSUN, HF/HENGFENG, TF/ILLIG, CP/CHUMPOWER, V-FINE/VFINE, POLY/POLYPRINT, NEWDO, and OMSO.
+5. Legacy v1-style machine aliases must be represented as explicit reviewed aliases. Broad family fallback such as `HF -> HENGFENG` or `TF -> ILLIG` is not safe once multiple product/target buckets exist.
 
 ## Master Data Mapping Center Contract
 
@@ -118,6 +118,18 @@ Conversion mapping:
 1. Reject rows with `reject_kg > 0` and missing/zero `gross_weight_per_pcs` are conversion gaps.
 2. Item/UOM conversion mappings store reviewed `gross_weight_per_pcs`.
 3. Applying a conversion recomputes `reject_pcs_eq` only for rows where conversion is missing and writes audit/data-quality resolution records.
+
+## V1 Master Import Contract
+
+Milestone 11.1 imports real v1 master data through dry-run-first scripts:
+
+```bash
+pnpm v1:master-profile
+pnpm v1:master-import
+pnpm v1:master-reconcile
+```
+
+`pnpm v1:master-import` mutates only when `V1_MASTER_IMPORT_COMMIT=true`. It imports canonicalized v1 entities, unambiguous source aliases, approved production targets, and stable item gross-weight conversions. It does not create fake entities and does not auto-map source values that v1 evidence shows are ambiguous across product or target buckets.
 4. Missing conversion must remain visible; it must not be displayed as trustworthy zero reject PCS equivalent.
 
 ## Freshness Rule

@@ -213,6 +213,30 @@ pnpm bc:mapping-apply
 
 Do not map low-confidence source values just to make achievement numeric. If a source group is operationally ambiguous, leave it unmapped and ask PPIC/production owners to confirm the canonical entity.
 
+### V1 master-data import
+
+Milestone 11.1 can seed real v1 master entities, aliases, approved targets, and stable item gross-weight mappings from the local export in `.tmp/v1-inspection/`. It does not read SSH or secrets.
+
+Dry-run and reconcile first:
+
+```bash
+pnpm v1:master-profile
+pnpm v1:master-import
+pnpm v1:master-reconcile
+```
+
+Commit only after the dry-run counts and conflict list are reviewed:
+
+```bash
+V1_MASTER_IMPORT_COMMIT=true pnpm v1:master-import
+```
+
+The importer is idempotent. It does not overwrite existing manual v2 rows unless `V1_IMPORT_ALLOW_UPDATE=true` is also set. In commit mode it writes a system audit row, imports only stable item/UOM gross-weight mappings, and updates only unmapped matching `production_outputs.entity_id` rows by default. Ambiguous v1 machine aliases remain unmapped.
+
+Rollback should prefer a PostgreSQL backup restore. A targeted rollback must use the audit row and imported alias source `v1-master-import` to unmap outputs, remove imported conversion mappings, remove imported targets/aliases, and delete master entities only after confirming no references remain.
+
+Full details: `docs/V1_MASTER_DATA_MIGRATION_PLAN.md`.
+
 ### Conversion gap operations
 
 Use `/master-data` → Conversion Gap View when reject PCS equivalent is incomplete.
