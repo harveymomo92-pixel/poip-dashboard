@@ -141,7 +141,10 @@ Production dashboard v2 must preserve the proven v1 operational behavior for dai
 - Output is net OK quantity. Positive Output adds production; negative Output is a correction/reversal and reduces net output. Do not filter OK output with `quantity > 0`.
 - Reject rows attach to OK groups by same date, same resolved machine/entity, and document number when available; otherwise by same date and machine. If no OK group exists, show a reject-only group.
 - Reject PCS equivalent must use matching OK document gross weight where available. Missing gross weight is an incomplete conversion, not valid zero.
-- Transaction prorata target is `dailyTarget * workHours / 24`. Missing target displays `N/A / TARGET_MISSING`.
+- Transaction prorata target is `dailyTarget * workHours / 24`. Missing target displays `N/A` with an explicit reason and must never be coerced to zero.
+- Per-item target matching differs from the aggregate dashboard target: aggregate achievement uses mapped active entity-days, while `Resume Harian per Item` includes every grouped Output row and therefore can expose unmapped rows as `N/A / UNMAPPED_ENTITY` even when aggregate target coverage is OK.
+- Resume target reasons are `TARGET_MATCHED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, `TARGET_BUCKET_MISSING`, and `TARGET_ZERO`.
+- V1-compatible bucket inference is used only when bucket-specific target metadata exists: printing `22 OZ`, printing other OZ, printing non-OZ, thermoforming gross weight `>= 0.012`, regular thermoforming, and bottle/preform family. Ambiguous or unknown buckets remain `N/A / TARGET_BUCKET_MISSING`.
 - Validation commands include `pnpm bc:daily-item-resume`, `pnpm bc:reconcile`, `pnpm bc:target-coverage`, and `pnpm bc:mapping-candidates`.
 
 ### 3.3 Technical Goals
@@ -4875,8 +4878,9 @@ Live Business Central ingestion and P0.1 reconciliation prove data can enter Pos
    - `NO_ACTIVE_TARGET`
    - `TARGET_NOT_APPROVED`
    - `OUTSIDE_EFFECTIVE_DATE`
+   - `TARGET_BUCKET_MISSING`
    - `TARGET_ZERO`
-   - `COVERED`
+   - `TARGET_MATCHED` / `COVERED`
 7. Conversion Gap View for missing item/UOM gross-weight mappings.
 8. Conversion commit that recomputes missing reject PCS equivalent only where conversion is missing.
 9. Data-quality integration for unmapped entity and missing gross-weight resolution.

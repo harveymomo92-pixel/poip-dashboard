@@ -5,6 +5,9 @@ import { buildDashboardKpiSummary } from "../packages/domain/src/kpi/dashboard.j
 import { createDatabase } from "../packages/db/src/client.js";
 import {
   buildDailyItemResume,
+  DAILY_ITEM_RESUME_TARGET_REASONS,
+  summarizeDailyItemResumeTargetReasons,
+  type DailyItemResumeRow,
   type DailyItemResumeFilters,
   type DailyItemResumeSourceRow,
   type DailyItemResumeTarget
@@ -638,6 +641,47 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   }
 }
 
+function topResumeValues(
+  rows: readonly DailyItemResumeRow[],
+  pickLabel: (row: DailyItemResumeRow) => string,
+  limit = 3
+): string {
+  const grouped = new Map<string, { rows: number; netOutput: number }>();
+  for (const row of rows) {
+    const label = pickLabel(row) || "N/A";
+    const current = grouped.get(label) ?? { rows: 0, netOutput: 0 };
+    current.rows += 1;
+    current.netOutput += row.netOutputQty;
+    grouped.set(label, current);
+  }
+  const values = [...grouped.entries()]
+    .sort((left, right) => right[1].rows - left[1].rows || Math.abs(right[1].netOutput) - Math.abs(left[1].netOutput) || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([label, value]) => `${label} (${value.rows} rows, net=${formatNumber(value.netOutput, 2)})`);
+  return values.length ? values.join(" | ") : "none";
+}
+
+function sampleResumeRows(rows: readonly DailyItemResumeRow[], limit = 3): string {
+  const samples = rows.slice(0, limit).map((row) => (
+    `${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 2)}; bucket=${row.targetBucketLabel ?? row.targetBucket ?? "N/A"}; target=${row.dailyTarget ?? "N/A"}`
+  ));
+  return samples.length ? samples.join(" | ") : "none";
+}
+
+function printDailyItemResumeTargetBreakdown(rows: readonly DailyItemResumeRow[]) {
+  console.log("");
+  console.log("Target reason breakdown:");
+  const summaries = summarizeDailyItemResumeTargetReasons(rows);
+  for (const reason of DAILY_ITEM_RESUME_TARGET_REASONS) {
+    const summary = summaries.find((item) => item.reason === reason);
+    const reasonRows = rows.filter((row) => row.targetReason === reason);
+    console.log(`- ${reason}: rows=${summary?.rowCount ?? 0}; net_output=${formatNumber(summary?.netOutputQty ?? 0, 4)}`);
+    console.log(`  top_machines=${topResumeValues(reasonRows, (row) => row.machineLabel)}`);
+    console.log(`  top_items=${topResumeValues(reasonRows, (row) => row.itemNo)}`);
+    console.log(`  samples=${sampleResumeRows(reasonRows)}`);
+  }
+}
+
 async function runDailyItemResume(pool: DatabasePool) {
   const baseFilters = buildFilters();
   const filters: DailyItemResumeFilters = {
@@ -719,16 +763,15 @@ async function runDailyItemResume(pool: DatabasePool) {
       effective_from: string;
       effective_to: string | null;
       daily_target_qty: string | number;
+      status: string | null;
     }>(
       `
-        select entity_id, effective_from::text, effective_to::text, daily_target_qty
+        select entity_id, effective_from::text, effective_to::text, daily_target_qty, status
         from production_targets
-        where effective_from <= $1
-          and (effective_to is null or effective_to >= $2)
-          and status in ('APPROVED', 'ACTIVE')
-          ${baseFilters.entityId ? "and entity_id = $3" : ""}
+        ${baseFilters.entityId ? "where entity_id = $1" : ""}
+        order by entity_id, effective_from desc
       `,
-      baseFilters.entityId ? [baseFilters.to, baseFilters.from, baseFilters.entityId] : [baseFilters.to, baseFilters.from]
+      baseFilters.entityId ? [baseFilters.entityId] : []
     )
   ]);
   const sourceRows: DailyItemResumeSourceRow[] = rowsResult.rows.map((row) => ({
@@ -759,7 +802,8 @@ async function runDailyItemResume(pool: DatabasePool) {
     entityId: row.entity_id,
     effectiveFrom: dateText(row.effective_from),
     effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
-    dailyTargetQty: numberValue(row.daily_target_qty)
+    dailyTargetQty: numberValue(row.daily_target_qty),
+    status: row.status
   }));
   const resume = buildDailyItemResume(sourceRows, targets, filters);
   const allRows = buildDailyItemResume(sourceRows, targets, { ...filters, pageSize: Math.max(1, sourceRows.length) }).rows;
@@ -771,9 +815,10 @@ async function runDailyItemResume(pool: DatabasePool) {
       rejectAttachedCount: acc.rejectAttachedCount + row.rejectDetails.length,
       rejectOnlyGroupCount: acc.rejectOnlyGroupCount + (row.netOutputQty === 0 && row.rejectDetails.length > 0 ? 1 : 0),
       conversionGaps: acc.conversionGaps + row.rejectDetails.filter((detail) => detail.conversionStatus === "INCOMPLETE").length,
-      targetMissingCount: acc.targetMissingCount + (row.achievementStatus === "TARGET_MISSING" ? 1 : 0)
+      targetMissingCount: acc.targetMissingCount + (row.dailyTarget === null ? 1 : 0),
+      targetNonMatchedCount: acc.targetNonMatchedCount + (row.targetReason === "TARGET_MATCHED" ? 0 : 1)
     }),
-    { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, conversionGaps: 0, targetMissingCount: 0 }
+    { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, conversionGaps: 0, targetMissingCount: 0, targetNonMatchedCount: 0 }
   );
 
   console.log("Business Central daily item resume");
@@ -787,9 +832,11 @@ async function runDailyItemResume(pool: DatabasePool) {
   console.log(`Reject-only group count: ${totals.rejectOnlyGroupCount}`);
   console.log(`Conversion gaps: ${totals.conversionGaps}`);
   console.log(`Target missing count: ${totals.targetMissingCount}`);
+  console.log(`Target non-matched count: ${totals.targetNonMatchedCount}`);
+  printDailyItemResumeTargetBreakdown(allRows);
   console.log("Sample grouped rows:");
   for (const row of resume.rows.slice(0, 5)) {
-    console.log(`- ${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; status=${row.achievementStatus}`);
+    console.log(`- ${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; reason=${row.targetReason}; achievement=${formatPct(row.achievementPct)}; status=${row.achievementStatus}`);
   }
 }
 

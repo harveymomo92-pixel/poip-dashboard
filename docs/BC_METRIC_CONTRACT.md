@@ -51,6 +51,18 @@ This rule must be validated with `pnpm bc:reconcile`.
 4. Achievement is numeric only when target exists and target is greater than zero.
 5. A period with OK output but no mapped active entity-days reports reason `TARGET_MISSING`; the operator must load entity mappings and approved targets.
 
+Aggregate dashboard achievement and `Resume Harian per Item` target matching answer different questions. The aggregate KPI prorates approved targets over mapped active entity-days. The per-item resume keeps every grouped Output row visible, including unmapped groups, so it can still show `N/A` rows even when the aggregate target total reconciles.
+
+Daily item resume target resolution returns an explicit reason per row:
+
+- `TARGET_MATCHED`: resolved entity has an approved/active effective target and, when bucket metadata is present, the inferred bucket matches.
+- `UNMAPPED_ENTITY`: no `master_entities` mapping is attached to the output group.
+- `NO_ACTIVE_TARGET`: the entity has no usable production target.
+- `TARGET_NOT_APPROVED`: a target covers the posting date but is not `APPROVED` or `ACTIVE`.
+- `OUTSIDE_EFFECTIVE_DATE`: approved/active targets exist, but none cover the posting date.
+- `TARGET_BUCKET_MISSING`: bucket-specific targets are available but the row has no reliable or unambiguous bucket match.
+- `TARGET_ZERO`: a matching target exists with zero quantity; achievement remains `N/A`.
+
 ## Achievement Rule
 
 ```text
@@ -88,6 +100,15 @@ Grouping key:
 Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_center_no`, `prod_line_no`, `prod_line_description`, then `Unmapped`.
 
 Each group reports positive output, correction output, net output, UOM consistency, document/operator/shift summaries, reject metrics, gross weight evidence, target status, and calculation drilldown metadata. Missing targets remain `dailyTarget = null`, `transactionProrataTarget = null`, `achievementPct = null`, and `achievementStatus = TARGET_MISSING`; the UI displays `N/A`.
+
+Target matching uses the resolved `entity_id`, posting date, and approved/active target status. If the target model has no bucket-specific metadata, the entity-level target is used safely. If bucket metadata is available, the row must infer exactly one compatible bucket; ambiguous rows stay `N/A / TARGET_BUCKET_MISSING` rather than borrowing a target.
+
+V1-compatible target bucket inference is conservative:
+
+1. Printing rows infer from printing machine/category signals. Item descriptions with `22 OZ` map to `target_printing_22_oz`; other OZ printing items map to `target_printing_oz_lt_20`; printing items without OZ map to `target_printing_non_oz`.
+2. Thermoforming rows infer from thermoforming machine/category signals. `gross_weight_per_pcs >= 0.012` maps to `target_thermoforming_gw_gt_12`; lower or missing gross weight uses the v1 default `target_thermoforming` bucket.
+3. Bottle/preform rows infer from injection/blowing/preform/bottle family signals and map to `target_botol_preform`.
+4. Conflicting family signals are ambiguous. Unknown family signals return `TARGET_BUCKET_MISSING` when a bucket-specific target would be required.
 
 ## Reject Rule
 

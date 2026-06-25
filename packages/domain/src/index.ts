@@ -8,6 +8,7 @@ export * from "./imports/downtime-import.js";
 export * from "./kpi/output.js";
 export * from "./kpi/dashboard.js";
 export * from "./kpi/daily-item-resume.js";
+export * from "./kpi/target-bucket.js";
 export * from "./master-data/alias.js";
 export * from "./master-data/mapping-candidates.js";
 export * from "./master-data/v1-import.js";

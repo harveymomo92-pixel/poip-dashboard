@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDailyItemResume, type DailyItemResumeFilters, type DailyItemResumeSourceRow } from "./daily-item-resume.js";
+import {
+  buildDailyItemResume,
+  summarizeDailyItemResumeTargetReasons,
+  type DailyItemResumeFilters,
+  type DailyItemResumeSourceRow
+} from "./daily-item-resume.js";
 
 const filters: DailyItemResumeFilters = {
   from: "2026-06-01",
@@ -24,15 +29,15 @@ function row(input: Partial<DailyItemResumeSourceRow> = {}): DailyItemResumeSour
     machineCenterNo: input.machineCenterNo ?? "MC-1",
     prodLineNo: input.prodLineNo ?? null,
     prodLineDescription: input.prodLineDescription ?? null,
-    entityId: input.entityId ?? "entity-1",
-    entityCode: input.entityCode ?? "E1",
-    entityDisplayName: input.entityDisplayName ?? "Illig 1",
+    entityId: "entityId" in input ? input.entityId ?? null : "entity-1",
+    entityCode: "entityCode" in input ? input.entityCode ?? null : "E1",
+    entityDisplayName: "entityDisplayName" in input ? input.entityDisplayName ?? null : "Illig 1",
     plannedRuntimeHours: input.plannedRuntimeHours ?? 12,
     shiftCode: input.shiftCode ?? "A",
     operatorName: input.operatorName ?? "Adi",
     quantity: input.quantity ?? 100,
     uom: input.uom ?? "PCS",
-    grossWeightPerPcs: input.grossWeightPerPcs ?? 0.02,
+    grossWeightPerPcs: "grossWeightPerPcs" in input ? input.grossWeightPerPcs ?? null : 0.02,
     rejectKg: input.rejectKg ?? 0,
     rejectPcsEq: input.rejectPcsEq ?? null
   };
@@ -53,6 +58,7 @@ test("daily item resume groups positive and negative OK Output as net quantity w
   assert.match(result.rows[0]?.operatorSummary ?? "", /Budi/);
   assert.equal(result.rows[0]?.achievementStatus, "TARGET_MISSING");
   assert.equal(result.rows[0]?.dailyTarget, null);
+  assert.equal(result.rows[0]?.targetReason, "NO_ACTIVE_TARGET");
 });
 
 test("daily item resume key uses posting date, resolved machine label, and item", () => {
@@ -109,4 +115,116 @@ test("target prorata uses daily target times work hours over 24 and pagination i
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0]?.transactionProrataTarget, 120);
   assert.equal(result.rows[0]?.achievementPct, 100 / 120 * 100);
+  assert.equal(result.rows[0]?.targetReason, "TARGET_MATCHED");
+  assert.equal(result.rows[0]?.targetSource, "ENTITY_DAILY_TARGET");
+});
+
+test("target reason is UNMAPPED_ENTITY when no entity is resolved", () => {
+  const result = buildDailyItemResume([
+    row({ entityId: null, entityCode: null, entityDisplayName: null, machineCenterNo: "UNMAPPED" })
+  ], [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 240, status: "APPROVED" }], filters);
+
+  assert.equal(result.rows[0]?.dailyTarget, null);
+  assert.equal(result.rows[0]?.transactionProrataTarget, null);
+  assert.equal(result.rows[0]?.achievementPct, null);
+  assert.equal(result.rows[0]?.targetReason, "UNMAPPED_ENTITY");
+});
+
+test("target reason distinguishes no active target, not approved, outside effective date, and zero target", () => {
+  const noTarget = buildDailyItemResume([row()], [], filters).rows[0];
+  const notApproved = buildDailyItemResume(
+    [row()],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 240, status: "DRAFT" }],
+    filters
+  ).rows[0];
+  const outsideDate = buildDailyItemResume(
+    [row()],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: "2026-01-31", dailyTargetQty: 240, status: "APPROVED" }],
+    filters
+  ).rows[0];
+  const zeroTarget = buildDailyItemResume(
+    [row()],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 0, status: "APPROVED" }],
+    filters
+  ).rows[0];
+
+  assert.equal(noTarget?.targetReason, "NO_ACTIVE_TARGET");
+  assert.equal(noTarget?.dailyTarget, null);
+  assert.equal(notApproved?.targetReason, "TARGET_NOT_APPROVED");
+  assert.equal(outsideDate?.targetReason, "OUTSIDE_EFFECTIVE_DATE");
+  assert.equal(zeroTarget?.targetReason, "TARGET_ZERO");
+  assert.equal(zeroTarget?.dailyTarget, 0);
+  assert.equal(zeroTarget?.achievementPct, null);
+  assert.equal(zeroTarget?.achievementStatus, "TARGET_ZERO");
+});
+
+test("negative OK Output corrections reduce target achievement", () => {
+  const result = buildDailyItemResume(
+    [
+      row({ id: "positive", quantity: 100, plannedRuntimeHours: 24 }),
+      row({ id: "negative", quantity: -20, plannedRuntimeHours: 24, documentNo: "DOC-2" })
+    ],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 240, status: "APPROVED" }],
+    filters
+  );
+
+  assert.equal(result.rows[0]?.netOutputQty, 80);
+  assert.equal(result.rows[0]?.achievementPct, 80 / 240 * 100);
+});
+
+test("bucket-aware targets match inferred printing buckets", () => {
+  const printing22 = buildDailyItemResume(
+    [row({ entityCode: "OMSO2", entityDisplayName: "OMSO 2", machineCenterNo: "OMSO-2-OZ", itemCategoryCode: "JADI-PRINTING", itemDescription: "CUP 22 OZ KOPI", grossWeightPerPcs: 0.012 })],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 360, status: "APPROVED", targetBucket: "target_printing_22_oz" }],
+    filters
+  ).rows[0];
+  const printingNonOz = buildDailyItemResume(
+    [row({ entityCode: "POLY1", entityDisplayName: "Polyprint 1", machineCenterNo: "POLYPRINT-1", itemCategoryCode: "JADI-PRINTING", itemDescription: "CUP SABLON LOGO" })],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 648, status: "APPROVED", targetBucket: "target_printing_non_oz" }],
+    filters
+  ).rows[0];
+
+  assert.equal(printing22?.targetReason, "TARGET_MATCHED");
+  assert.equal(printing22?.targetSource, "BUCKET_DAILY_TARGET");
+  assert.equal(printing22?.targetBucket, "target_printing_22_oz");
+  assert.equal(printingNonOz?.targetReason, "TARGET_MATCHED");
+  assert.equal(printingNonOz?.targetBucket, "target_printing_non_oz");
+});
+
+test("bucket-aware targets do not fake-match missing or ambiguous buckets", () => {
+  const missing = buildDailyItemResume(
+    [row({ machineCenterNo: "MC-UNKNOWN", itemCategoryCode: "JADI", itemDescription: "Finished good" })],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 360, status: "APPROVED", targetBucket: "target_printing_22_oz" }],
+    filters
+  ).rows[0];
+  const ambiguous = buildDailyItemResume(
+    [row({ machineCenterNo: "OMSO PRINT", itemCategoryCode: "JADI-PRINTING", itemDescription: "THERMO PREFORM CUP 22 OZ" })],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 360, status: "APPROVED", targetBucket: "target_printing_22_oz" }],
+    filters
+  ).rows[0];
+
+  assert.equal(missing?.dailyTarget, null);
+  assert.equal(missing?.targetReason, "TARGET_BUCKET_MISSING");
+  assert.equal(ambiguous?.dailyTarget, null);
+  assert.equal(ambiguous?.targetReason, "TARGET_BUCKET_MISSING");
+});
+
+test("target reason summary reports count and net output for diagnostics", () => {
+  const resume = buildDailyItemResume(
+    [
+      row({ id: "matched", quantity: 100 }),
+      row({ id: "unmapped", entityId: null, entityCode: null, entityDisplayName: null, machineCenterNo: "UNMAPPED", quantity: 25, itemNo: "FG-002" })
+    ],
+    [{ entityId: "entity-1", effectiveFrom: "2026-01-01", effectiveTo: null, dailyTargetQty: 240, status: "APPROVED" }],
+    filters
+  );
+  const summary = summarizeDailyItemResumeTargetReasons(resume.rows);
+
+  assert.deepEqual(
+    summary.filter((item) => item.rowCount > 0).map((item) => [item.reason, item.rowCount, item.netOutputQty]),
+    [
+      ["TARGET_MATCHED", 1, 100],
+      ["UNMAPPED_ENTITY", 1, 25]
+    ]
+  );
 });

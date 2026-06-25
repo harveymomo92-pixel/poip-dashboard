@@ -85,6 +85,12 @@ interface DailyItemResumeRow {
   readonly operatorDetails: readonly Record<string, unknown>[];
   readonly shiftSummary: string;
   readonly workHours: number;
+  readonly dailyTarget: number | null;
+  readonly targetSource: string;
+  readonly targetReason: string;
+  readonly targetBucket: string | null;
+  readonly targetBucketLabel: string | null;
+  readonly targetDetails: Record<string, unknown>;
   readonly transactionProrataTarget: number | null;
   readonly netOutputQty: number;
   readonly correctionOutputQty: number;
@@ -163,6 +169,13 @@ function DetailList({ summary, rows }: Readonly<{ summary: string; rows: readonl
       </div>
     </details>
   );
+}
+
+function TargetDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
+  const summary = row.dailyTarget === null
+    ? `N/A / ${row.targetReason}`
+    : `${formatNumber(row.transactionProrataTarget ?? 0, 1)} / ${row.targetReason}`;
+  return <DetailList summary={summary} rows={[row.targetDetails]} />;
 }
 
 function buildQuery(filters: Filters, page = 1) {
@@ -458,13 +471,13 @@ export function DashboardPageClient() {
                     <td><DetailList summary={row.documentSummary} rows={row.documentDetails} /></td>
                     <td><DetailList summary={row.operatorSummary} rows={row.operatorDetails} /></td>
                     <td>{formatNumber(row.workHours, 1)}</td>
-                    <td>{row.transactionProrataTarget === null ? "N/A" : formatNumber(row.transactionProrataTarget, 1)}</td>
+                    <td><TargetDetail row={row} /></td>
                     <td><strong>{formatNumber(row.netOutputQty, 1)}</strong></td>
                     <td>{row.uom}</td>
                     <td className={row.correctionOutputQty < 0 ? "negative-number" : ""}>{formatNumber(row.correctionOutputQty, 1)}</td>
                     <td><DetailList summary={`${formatNumber(row.rejectKg, 2)} kg`} rows={row.rejectDetails} /></td>
                     <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>
-                    <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /></td>
+                    <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /> {row.targetReason !== "TARGET_MATCHED" ? <StatusBadge status={row.targetReason} /> : null}</td>
                     <td>{formatPct(row.rejectPct)}</td>
                     <td>{row.grossWeight === null ? "N/A" : formatNumber(row.grossWeight, 4)}</td>
                     <td>{row.inputCount}</td>

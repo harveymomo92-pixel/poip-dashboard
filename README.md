@@ -102,7 +102,9 @@ pnpm bc:mapping-plan
 pnpm bc:mapping-plan-apply
 ```
 
-Dashboard calculations use canonical `source_system = 'business-central'` and production scope `entry_type = 'Output'`. Other Business Central entry types remain stored for future management panels, but `/overview` shows the v1-style `Resume Harian per Item`: grouped by posting date, resolved machine/entity label, and item. Output is net quantity, so negative Output corrections reduce production instead of being hidden. Missing approved targets produce `N/A / TARGET_MISSING`, not a misleading zero target.
+Dashboard calculations use canonical `source_system = 'business-central'` and production scope `entry_type = 'Output'`. Other Business Central entry types remain stored for future management panels, but `/overview` shows the v1-style `Resume Harian per Item`: grouped by posting date, resolved machine/entity label, and item. Output is net quantity, so negative Output corrections reduce production instead of being hidden. Missing approved targets produce `N/A` with an explicit reason, never a misleading zero target. Aggregate achievement can reconcile while some resume rows remain `N/A` because aggregate target coverage uses mapped entity-days and the resume keeps unmapped groups visible for mapping review.
+
+Per-item resume target matching uses resolved entity, target effective date, approved/active status, and bucket metadata when the target model provides it. V1-compatible bucket inference covers printing `22 OZ`, printing other OZ, printing non-OZ, thermoforming gross-weight threshold `>= 0.012`, regular thermoforming, and bottle/preform family. Ambiguous or unknown bucket cases stay `N/A / TARGET_BUCKET_MISSING` instead of borrowing a target.
 
 To preview the v1 master-data import from the local `.tmp/v1-inspection/` export:
 

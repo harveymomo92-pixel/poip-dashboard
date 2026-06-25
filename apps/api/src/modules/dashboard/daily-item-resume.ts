@@ -1,4 +1,27 @@
+import { inferResumeTargetBucket, type ResumeTargetBucket } from "@poip/domain";
+
 export type DailyItemResumeSort = "postingDate.desc" | "postingDate.asc" | "netOutputQty.desc" | "netOutputQty.asc";
+
+export type DailyItemResumeTargetReason =
+  | "UNMAPPED_ENTITY"
+  | "NO_ACTIVE_TARGET"
+  | "TARGET_NOT_APPROVED"
+  | "OUTSIDE_EFFECTIVE_DATE"
+  | "TARGET_BUCKET_MISSING"
+  | "TARGET_ZERO"
+  | "TARGET_MATCHED";
+
+export type DailyItemResumeTargetSource = "NONE" | "ENTITY_DAILY_TARGET" | "BUCKET_DAILY_TARGET";
+
+export const DAILY_ITEM_RESUME_TARGET_REASONS: readonly DailyItemResumeTargetReason[] = [
+  "TARGET_MATCHED",
+  "UNMAPPED_ENTITY",
+  "NO_ACTIVE_TARGET",
+  "TARGET_NOT_APPROVED",
+  "OUTSIDE_EFFECTIVE_DATE",
+  "TARGET_BUCKET_MISSING",
+  "TARGET_ZERO"
+];
 
 export interface DailyItemResumeFilters {
   readonly from: string;
@@ -43,6 +66,9 @@ export interface DailyItemResumeTarget {
   readonly effectiveFrom: string;
   readonly effectiveTo: string | null;
   readonly dailyTargetQty: number;
+  readonly status?: string | null;
+  readonly targetBucket?: ResumeTargetBucket | null;
+  readonly targetSource?: string | null;
 }
 
 export interface DailyItemResumeRow {
@@ -61,6 +87,11 @@ export interface DailyItemResumeRow {
   readonly shiftSummary: string;
   readonly workHours: number;
   readonly dailyTarget: number | null;
+  readonly targetSource: DailyItemResumeTargetSource;
+  readonly targetReason: DailyItemResumeTargetReason;
+  readonly targetBucket: ResumeTargetBucket | null;
+  readonly targetBucketLabel: string | null;
+  readonly targetDetails: Record<string, unknown>;
   readonly transactionProrataTarget: number | null;
   readonly netOutputQty: number;
   readonly positiveOutputQty: number;
@@ -71,7 +102,7 @@ export interface DailyItemResumeRow {
   readonly rejectConversionStatus: "COMPLETE" | "INCOMPLETE" | "NOT_APPLICABLE";
   readonly rejectPct: number | null;
   readonly achievementPct: number | null;
-  readonly achievementStatus: "TARGET_MISSING" | "NO_OUTPUT" | "BELOW_TARGET" | "ON_TARGET" | "ABOVE_TARGET";
+  readonly achievementStatus: "TARGET_MISSING" | "TARGET_ZERO" | "NO_OUTPUT" | "BELOW_TARGET" | "ON_TARGET" | "ABOVE_TARGET";
   readonly grossWeight: number | null;
   readonly inputCount: number;
   readonly externalDocumentSummary: string;
@@ -102,6 +133,25 @@ export interface DailyItemResumeResult {
     readonly totalRows: number;
     readonly totalPages: number;
   };
+}
+
+export interface DailyItemResumeTargetReasonSummary {
+  readonly reason: DailyItemResumeTargetReason;
+  readonly rowCount: number;
+  readonly netOutputQty: number;
+}
+
+export function summarizeDailyItemResumeTargetReasons(
+  rows: readonly DailyItemResumeRow[]
+): readonly DailyItemResumeTargetReasonSummary[] {
+  return DAILY_ITEM_RESUME_TARGET_REASONS.map((reason) => {
+    const reasonRows = rows.filter((row) => row.targetReason === reason);
+    return {
+      reason,
+      rowCount: reasonRows.length,
+      netOutputQty: reasonRows.reduce((total, row) => total + row.netOutputQty, 0)
+    };
+  });
 }
 
 export function normalizeDailyItemResumeValue(value: string | null | undefined): string {
@@ -175,16 +225,241 @@ function chooseFallbackGroup(groups: readonly GroupState[]): GroupState | null {
   })[0] ?? null;
 }
 
-function targetForDate(targets: readonly DailyItemResumeTarget[], entityId: string | null, postingDate: string) {
-  if (!entityId) return null;
-  return [...targets]
-    .filter((target) => {
-      if (target.entityId !== entityId) return false;
-      if (target.effectiveFrom > postingDate) return false;
-      if (target.effectiveTo && target.effectiveTo < postingDate) return false;
-      return true;
-    })
-    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
+interface TargetResolutionInput {
+  readonly entityId: string | null;
+  readonly entityCode: string | null;
+  readonly entityDisplayName: string | null;
+  readonly machineLabel: string;
+  readonly machineCenterNo: string | null;
+  readonly prodLineNo: string | null;
+  readonly prodLineDescription: string | null;
+  readonly itemNo: string;
+  readonly itemDescription: string | null;
+  readonly itemCategoryCode: string | null;
+  readonly grossWeightPerPcs: number | null;
+  readonly postingDate: string;
+}
+
+interface TargetResolution {
+  readonly target: DailyItemResumeTarget | null;
+  readonly dailyTarget: number | null;
+  readonly targetSource: DailyItemResumeTargetSource;
+  readonly targetReason: DailyItemResumeTargetReason;
+  readonly targetBucket: ResumeTargetBucket | null;
+  readonly targetBucketLabel: string | null;
+  readonly details: Record<string, unknown>;
+}
+
+function isApprovedTarget(target: DailyItemResumeTarget): boolean {
+  const status = normalizeDailyItemResumeValue(target.status);
+  return !status || status === "APPROVED" || status === "ACTIVE";
+}
+
+function isEffectiveOn(target: DailyItemResumeTarget, postingDate: string): boolean {
+  if (target.effectiveFrom > postingDate) return false;
+  if (target.effectiveTo && target.effectiveTo < postingDate) return false;
+  return true;
+}
+
+function sortTargets(targets: readonly DailyItemResumeTarget[]): DailyItemResumeTarget[] {
+  return [...targets].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom) || b.dailyTargetQty - a.dailyTargetQty);
+}
+
+function resolveDailyItemResumeTarget(
+  input: TargetResolutionInput,
+  targets: readonly DailyItemResumeTarget[]
+): TargetResolution {
+  const bucket = inferResumeTargetBucket({
+    entityCode: input.entityCode,
+    entityDisplayName: input.entityDisplayName,
+    machineLabel: input.machineLabel,
+    machineCenterNo: input.machineCenterNo,
+    prodLineNo: input.prodLineNo,
+    prodLineDescription: input.prodLineDescription,
+    itemNo: input.itemNo,
+    itemDescription: input.itemDescription,
+    itemCategoryCode: input.itemCategoryCode,
+    grossWeightPerPcs: input.grossWeightPerPcs
+  });
+  const baseDetails = {
+    targetBucket: bucket.bucket,
+    targetBucketLabel: bucket.bucketLabel,
+    targetBucketReason: bucket.reason,
+    targetBucketCandidates: bucket.candidates,
+    targetBucketEvidence: bucket.evidence
+  };
+
+  if (!input.entityId) {
+    return {
+      target: null,
+      dailyTarget: null,
+      targetSource: "NONE",
+      targetReason: "UNMAPPED_ENTITY",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: {
+        ...baseDetails,
+        message: "No resolved master entity is attached to this production output group."
+      }
+    };
+  }
+
+  const entityTargets = targets.filter((target) => target.entityId === input.entityId);
+  if (entityTargets.length === 0) {
+    return {
+      target: null,
+      dailyTarget: null,
+      targetSource: "NONE",
+      targetReason: "NO_ACTIVE_TARGET",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: {
+        ...baseDetails,
+        entityId: input.entityId,
+        candidateTargetCount: 0,
+        message: "No production target exists for this resolved entity."
+      }
+    };
+  }
+
+  const effectiveTargets = entityTargets.filter((target) => isEffectiveOn(target, input.postingDate));
+  const approvedEffectiveTargets = effectiveTargets.filter(isApprovedTarget);
+  if (effectiveTargets.length > 0 && approvedEffectiveTargets.length === 0) {
+    return {
+      target: null,
+      dailyTarget: null,
+      targetSource: "NONE",
+      targetReason: "TARGET_NOT_APPROVED",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: {
+        ...baseDetails,
+        entityId: input.entityId,
+        candidateTargetCount: entityTargets.length,
+        effectiveTargetCount: effectiveTargets.length,
+        statuses: [...new Set(effectiveTargets.map((target) => normalizeDailyItemResumeValue(target.status) || "APPROVED"))],
+        message: "A target exists for this date, but it is not APPROVED or ACTIVE."
+      }
+    };
+  }
+
+  if (approvedEffectiveTargets.length === 0) {
+    const approvedTargets = entityTargets.filter(isApprovedTarget);
+    return {
+      target: null,
+      dailyTarget: null,
+      targetSource: "NONE",
+      targetReason: approvedTargets.length > 0 ? "OUTSIDE_EFFECTIVE_DATE" : "NO_ACTIVE_TARGET",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: {
+        ...baseDetails,
+        entityId: input.entityId,
+        candidateTargetCount: entityTargets.length,
+        approvedTargetCount: approvedTargets.length,
+        postingDate: input.postingDate,
+        effectiveRanges: approvedTargets.map((target) => ({
+          from: target.effectiveFrom,
+          to: target.effectiveTo
+        })),
+        message: approvedTargets.length > 0
+          ? "Approved/active targets exist, but none cover this posting date."
+          : "Targets exist for this entity, but none are APPROVED or ACTIVE."
+      }
+    };
+  }
+
+  const bucketAwareTargets = approvedEffectiveTargets.filter((target) => target.targetBucket);
+  let matchableTargets = approvedEffectiveTargets;
+  let targetSource: DailyItemResumeTargetSource = "ENTITY_DAILY_TARGET";
+  if (bucketAwareTargets.length > 0) {
+    if (bucket.reason !== "INFERRED" || !bucket.bucket) {
+      return {
+        target: null,
+        dailyTarget: null,
+        targetSource: "NONE",
+        targetReason: "TARGET_BUCKET_MISSING",
+        targetBucket: bucket.bucket,
+        targetBucketLabel: bucket.bucketLabel,
+        details: {
+          ...baseDetails,
+          entityId: input.entityId,
+          candidateTargetCount: entityTargets.length,
+          approvedEffectiveTargetCount: approvedEffectiveTargets.length,
+          message: "Bucket-specific targets are available, but this row has no reliable target bucket."
+        }
+      };
+    }
+    matchableTargets = bucketAwareTargets.filter((target) => target.targetBucket === bucket.bucket);
+    targetSource = "BUCKET_DAILY_TARGET";
+    if (matchableTargets.length === 0) {
+      return {
+        target: null,
+        dailyTarget: null,
+        targetSource: "NONE",
+        targetReason: "TARGET_BUCKET_MISSING",
+        targetBucket: bucket.bucket,
+        targetBucketLabel: bucket.bucketLabel,
+        details: {
+          ...baseDetails,
+          entityId: input.entityId,
+          candidateTargetCount: entityTargets.length,
+          approvedEffectiveTargetCount: approvedEffectiveTargets.length,
+          availableTargetBuckets: [...new Set(bucketAwareTargets.map((target) => target.targetBucket))],
+          message: "No approved effective target matches the inferred bucket."
+        }
+      };
+    }
+  }
+
+  const target = sortTargets(matchableTargets)[0] ?? null;
+  if (!target) {
+    return {
+      target: null,
+      dailyTarget: null,
+      targetSource: "NONE",
+      targetReason: "NO_ACTIVE_TARGET",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: baseDetails
+    };
+  }
+
+  if (target.dailyTargetQty <= 0) {
+    return {
+      target,
+      dailyTarget: target.dailyTargetQty,
+      targetSource,
+      targetReason: "TARGET_ZERO",
+      targetBucket: bucket.bucket,
+      targetBucketLabel: bucket.bucketLabel,
+      details: {
+        ...baseDetails,
+        entityId: input.entityId,
+        effectiveFrom: target.effectiveFrom,
+        effectiveTo: target.effectiveTo,
+        dailyTarget: target.dailyTargetQty,
+        message: "The matched target is zero, so achievement is not calculated."
+      }
+    };
+  }
+
+  return {
+    target,
+    dailyTarget: target.dailyTargetQty,
+    targetSource,
+    targetReason: "TARGET_MATCHED",
+    targetBucket: bucket.bucket,
+    targetBucketLabel: bucket.bucketLabel,
+    details: {
+      ...baseDetails,
+      entityId: input.entityId,
+      effectiveFrom: target.effectiveFrom,
+      effectiveTo: target.effectiveTo,
+      dailyTarget: target.dailyTargetQty,
+      message: "Approved effective target matched."
+    }
+  };
 }
 
 function summarize(values: readonly string[], fallback = "N/A"): string {
@@ -212,6 +487,7 @@ function matchesSearch(row: DailyItemResumeRow, search: string | undefined): boo
 
 function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[]): DailyItemResumeRow {
   const allRows = [...group.okRows, ...group.rejectRows];
+  const anchor = group.okRows[0] ?? group.rejectRows[0] ?? null;
   const positiveOutputQty = group.okRows.reduce((total, row) => total + (row.quantity > 0 ? row.quantity : 0), 0);
   const correctionOutputQty = group.okRows.reduce((total, row) => total + (row.quantity < 0 ? row.quantity : 0), 0);
   const netOutputQty = group.okRows.reduce((total, row) => total + row.quantity, 0);
@@ -222,14 +498,51 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
   const uoms = unique(group.okRows.map((row) => row.uom));
   const uom = uoms.length === 0 ? "N/A" : uoms.length === 1 ? uoms[0] ?? "N/A" : "MIXED";
   const workHours = group.plannedRuntimeHours && group.plannedRuntimeHours > 0 ? group.plannedRuntimeHours : 24;
-  const target = targetForDate(targets, group.entityId, group.postingDate);
-  const dailyTarget = target?.dailyTargetQty ?? null;
+  const grossWeight = group.okRows.map((row) => row.grossWeightPerPcs).find((value) => value !== null && value > 0) ?? null;
+  const targetResolution = resolveDailyItemResumeTarget({
+    entityId: group.entityId,
+    entityCode: group.entityCode,
+    entityDisplayName: anchor?.entityDisplayName ?? null,
+    machineLabel: group.machineLabel,
+    machineCenterNo: anchor?.machineCenterNo ?? null,
+    prodLineNo: anchor?.prodLineNo ?? null,
+    prodLineDescription: anchor?.prodLineDescription ?? null,
+    itemNo: group.itemNo,
+    itemDescription: group.itemDescription,
+    itemCategoryCode: group.itemCategoryCode,
+    grossWeightPerPcs: grossWeight,
+    postingDate: group.postingDate
+  }, targets);
+  const dailyTarget = targetResolution.dailyTarget;
   const transactionProrataTarget = dailyTarget === null ? null : dailyTarget * (workHours / 24);
   const achievementPct =
     transactionProrataTarget && transactionProrataTarget > 0 ? (netOutputQty / transactionProrataTarget) * 100 : null;
   const achievementStatus =
-    dailyTarget === null ? "TARGET_MISSING" : netOutputQty === 0 ? "NO_OUTPUT" : achievementPct === null ? "TARGET_MISSING" : achievementPct >= 100 ? "ABOVE_TARGET" : achievementPct >= 95 ? "ON_TARGET" : "BELOW_TARGET";
-  const grossWeight = group.okRows.map((row) => row.grossWeightPerPcs).find((value) => value !== null && value > 0) ?? null;
+    dailyTarget === null
+      ? "TARGET_MISSING"
+      : targetResolution.targetReason === "TARGET_ZERO"
+        ? "TARGET_ZERO"
+        : netOutputQty === 0
+          ? "NO_OUTPUT"
+          : achievementPct === null
+            ? "TARGET_MISSING"
+            : achievementPct >= 100
+              ? "ABOVE_TARGET"
+              : achievementPct >= 95
+                ? "ON_TARGET"
+                : "BELOW_TARGET";
+  const targetDetails = {
+    ...targetResolution.details,
+    targetSource: targetResolution.targetSource,
+    targetReason: targetResolution.targetReason,
+    dailyTarget,
+    workHours,
+    transactionProrataTarget,
+    netOutputQty,
+    achievementPct,
+    transactionProrataFormula: dailyTarget === null ? "N/A" : "dailyTarget * workHours / 24",
+    achievementFormula: transactionProrataTarget && transactionProrataTarget > 0 ? "netOutputQty / transactionProrataTarget * 100" : "N/A"
+  };
   const okGrossByDocument = new Map<string, number>();
   for (const row of group.okRows) {
     const doc = compact(row.documentNo);
@@ -285,7 +598,7 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     };
   });
   const notes: string[] = [];
-  if (dailyTarget === null) notes.push("TARGET_MISSING");
+  if (targetResolution.targetReason !== "TARGET_MATCHED") notes.push(targetResolution.targetReason);
   if (conversionGaps > 0) notes.push("REJECT_CONVERSION_INCOMPLETE");
   if (!group.plannedRuntimeHours || group.plannedRuntimeHours <= 0) notes.push("WORK_HOURS_DEFAULT_24");
   if (correctionOutputQty < 0) notes.push("HAS_NEGATIVE_OUTPUT_CORRECTION");
@@ -306,6 +619,11 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     shiftSummary: summarize(shifts),
     workHours,
     dailyTarget,
+    targetSource: targetResolution.targetSource,
+    targetReason: targetResolution.targetReason,
+    targetBucket: targetResolution.targetBucket,
+    targetBucketLabel: targetResolution.targetBucketLabel,
+    targetDetails,
     transactionProrataTarget,
     netOutputQty,
     positiveOutputQty,
@@ -325,8 +643,13 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     drilldown: {
       groupKey: group.key,
       grouping: "postingDate + resolved machine/entity label + itemNo",
-      targetFormula: dailyTarget === null ? "TARGET_MISSING" : "dailyTarget * workHours / 24",
+      targetReason: targetResolution.targetReason,
+      targetSource: targetResolution.targetSource,
+      targetBucket: targetResolution.targetBucket,
+      targetBucketLabel: targetResolution.targetBucketLabel,
+      targetFormula: dailyTarget === null ? targetResolution.targetReason : "dailyTarget * workHours / 24",
       achievementFormula: transactionProrataTarget ? "netOutputQty / transactionProrataTarget * 100" : "N/A",
+      targetDetails,
       rejectFormula: "rejectKg / matching OK document grossWeightPerPcs"
     }
   };

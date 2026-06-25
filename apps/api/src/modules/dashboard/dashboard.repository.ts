@@ -49,6 +49,7 @@ interface TargetRow {
   readonly daily_target_qty: string | number;
   readonly min_achievement_pct: string | number;
   readonly max_achievement_pct: string | number;
+  readonly status?: string | null;
 }
 
 function numberValue(value: string | number | null | undefined): number {
@@ -904,7 +905,8 @@ export class DashboardReadRepository {
           pt.effective_to::text,
           pt.daily_target_qty,
           pt.min_achievement_pct,
-          pt.max_achievement_pct
+          pt.max_achievement_pct,
+          pt.status
         from production_targets pt
         where ${clauses.join(" and ")}
       `,
@@ -914,12 +916,39 @@ export class DashboardReadRepository {
   }
 
   private async queryDailyItemResumeTargets(filters: DashboardFilters): Promise<readonly DailyItemResumeTarget[]> {
-    const rows = await this.queryTargets(filters);
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (filters.entityId) {
+      params.push(filters.entityId);
+      clauses.push(`pt.entity_id = $${params.length}`);
+    }
+    const result = await this.database.pool.query<{
+      entity_id: string;
+      effective_from: string;
+      effective_to: string | null;
+      daily_target_qty: string | number;
+      status: string | null;
+    }>(
+      `
+        select
+          pt.entity_id,
+          pt.effective_from::text,
+          pt.effective_to::text,
+          pt.daily_target_qty,
+          pt.status
+        from production_targets pt
+        ${clauses.length ? `where ${clauses.join(" and ")}` : ""}
+        order by pt.entity_id, pt.effective_from desc
+      `,
+      params
+    );
+    const rows = result.rows;
     return rows.map((row) => ({
       entityId: row.entity_id,
       effectiveFrom: dateText(row.effective_from),
       effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
-      dailyTargetQty: numberValue(row.daily_target_qty)
+      dailyTargetQty: numberValue(row.daily_target_qty),
+      status: row.status
     }));
   }
 
