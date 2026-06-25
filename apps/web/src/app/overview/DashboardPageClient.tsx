@@ -72,20 +72,38 @@ interface BreakdownRow {
   readonly rowCount: number;
 }
 
-interface OutputRow {
-  readonly id: string;
-  readonly entryNo: string | null;
+interface DailyItemResumeRow {
   readonly postingDate: string;
+  readonly machineLabel: string;
   readonly itemNo: string;
-  readonly machineCenterNo: string | null;
-  readonly shiftCode: string | null;
-  readonly normalizedOutputType: string;
-  readonly quantity: number;
+  readonly itemDescription: string | null;
+  readonly itemCategoryCode: string | null;
+  readonly documentSummary: string;
+  readonly documentCount: number;
+  readonly documentDetails: readonly Record<string, unknown>[];
+  readonly operatorSummary: string;
+  readonly operatorDetails: readonly Record<string, unknown>[];
+  readonly shiftSummary: string;
+  readonly workHours: number;
+  readonly transactionProrataTarget: number | null;
+  readonly netOutputQty: number;
+  readonly correctionOutputQty: number;
+  readonly uom: string;
   readonly rejectKg: number;
+  readonly rejectPcsEq: number | null;
+  readonly rejectConversionStatus: string;
+  readonly rejectPct: number | null;
+  readonly achievementPct: number | null;
+  readonly achievementStatus: string;
+  readonly grossWeight: number | null;
+  readonly inputCount: number;
+  readonly notes: readonly string[];
+  readonly rejectDetails: readonly Record<string, unknown>[];
+  readonly drilldown: Record<string, unknown>;
 }
 
-interface OutputList {
-  readonly rows: readonly OutputRow[];
+interface DailyItemResumeList {
+  readonly rows: readonly DailyItemResumeRow[];
   readonly pagination: {
     readonly page: number;
     readonly pageSize: number;
@@ -133,16 +151,37 @@ const formatPct = (value: number | null) => value === null ? "N/A" : `${formatNu
 const formatDateTime = (value: string | null) =>
   value ? new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Belum pernah sync";
 
+function DetailList({ summary, rows }: Readonly<{ summary: string; rows: readonly Record<string, unknown>[] }>) {
+  if (rows.length === 0) return <span>{summary}</span>;
+  return (
+    <details className="resume-detail">
+      <summary>{summary}</summary>
+      <div>
+        {rows.map((row, index) => (
+          <pre key={index}>{Object.entries(row).map(([key, value]) => `${key}: ${String(value ?? "N/A")}`).join("\n")}</pre>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function buildQuery(filters: Filters, page = 1) {
   const params = new URLSearchParams({
     from: filters.from,
     to: filters.to,
     page: String(page),
-    pageSize: "10"
+    pageSize: "20"
   });
   if (filters.machineCenterNo.trim()) params.set("machineCenterNo", filters.machineCenterNo.trim());
   if (filters.itemNo.trim()) params.set("itemNo", filters.itemNo.trim());
   if (filters.shiftCode.trim()) params.set("shiftCode", filters.shiftCode.trim());
+  return params.toString();
+}
+
+function buildResumeQuery(filters: Filters, page: number, search: string) {
+  const params = new URLSearchParams(buildQuery(filters, page));
+  if (filters.machineCenterNo.trim()) params.set("machine", filters.machineCenterNo.trim());
+  if (search.trim()) params.set("search", search.trim());
   return params.toString();
 }
 
@@ -152,14 +191,16 @@ export function DashboardPageClient() {
   const [draftFilters, setDraftFilters] = useState<Filters>(defaultFilters);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [page, setPage] = useState(1);
+  const [resumeSearch, setResumeSearch] = useState("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [trends, setTrends] = useState<readonly TrendRow[]>([]);
   const [breakdowns, setBreakdowns] = useState<readonly BreakdownRow[]>([]);
-  const [outputs, setOutputs] = useState<OutputList | null>(null);
+  const [resume, setResume] = useState<DailyItemResumeList | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const query = useMemo(() => buildQuery(filters, page), [filters, page]);
+  const resumeQuery = useMemo(() => buildResumeQuery(filters, page, resumeSearch), [filters, page, resumeSearch]);
   const maxTrendValue = useMemo(
     () => Math.max(1, ...trends.flatMap((trend) => [trend.outputOkQty, trend.prorataTarget])),
     [trends]
@@ -195,27 +236,27 @@ export function DashboardPageClient() {
         fetch(`${API_BASE_URL}/dashboard/summary?${query}`, { credentials: "include" }),
         fetch(`${API_BASE_URL}/dashboard/trends?${query}`, { credentials: "include" }),
         fetch(`${API_BASE_URL}/dashboard/breakdowns?${query}&groupBy=machine`, { credentials: "include" }),
-        fetch(`${API_BASE_URL}/outputs?${query}`, { credentials: "include" })
+        fetch(`${API_BASE_URL}/dashboard/daily-item-resume?${resumeQuery}`, { credentials: "include" })
       ]);
       const [summaryPayload, trendPayload, breakdownPayload, outputsPayload] = await Promise.all([
         summaryResponse.json() as Promise<ApiResult<DashboardSummary>>,
         trendsResponse.json() as Promise<ApiResult<readonly TrendRow[]>>,
         breakdownResponse.json() as Promise<ApiResult<readonly BreakdownRow[]>>,
-        outputsResponse.json() as Promise<ApiResult<OutputList>>
+        outputsResponse.json() as Promise<ApiResult<DailyItemResumeList>>
       ]);
 
       if (!summaryPayload.ok) setError(`${summaryPayload.error.message} Coba muat ulang dashboard.`);
       else setSummary(summaryPayload.data);
       if (trendPayload.ok) setTrends(trendPayload.data);
       if (breakdownPayload.ok) setBreakdowns(breakdownPayload.data);
-      if (outputsPayload.ok) setOutputs(outputsPayload.data);
+      if (outputsPayload.ok) setResume(outputsPayload.data);
     } catch {
       setError("Dashboard tidak dapat dijangkau. Periksa koneksi lalu coba lagi.");
     } finally {
       setLoading(false);
       setLoaded(true);
     }
-  }, [query]);
+  }, [query, resumeQuery]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -233,8 +274,8 @@ export function DashboardPageClient() {
     window.localStorage.removeItem("poip.overview.filters");
   }
 
-  async function copyOutputReference(row: OutputRow) {
-    const reference = row.entryNo ?? row.id;
+  async function copyOutputReference(row: DailyItemResumeRow) {
+    const reference = `${row.postingDate} ${row.machineLabel} ${row.itemNo}`;
     try {
       await navigator.clipboard.writeText(reference);
       toast(`Referensi output ${reference} disalin.`);
@@ -386,27 +427,53 @@ export function DashboardPageClient() {
         </section>
 
         <section className="table-card">
-          <SectionHeader title="Latest production outputs" description="Source transactions behind the KPI summary." actions={outputs ? <SourceBadge>{outputs.pagination.totalRows} rows</SourceBadge> : null} />
-          {!outputs || outputs.rows.length === 0 ? (
-            <EmptyState title="Tidak ada output terbaru" description="Tidak ada transaksi output yang sesuai dengan filter saat ini." />
+          <SectionHeader
+            title="Resume Harian per Item"
+            description="Entry_Type = Output · grouped by tanggal, mesin, dan item"
+            actions={resume ? <SourceBadge>{resume.pagination.totalRows} groups</SourceBadge> : null}
+          />
+          <div className="table-local-filter">
+            <Field label="Cari resume">
+              <input
+                placeholder="Item, dokumen, operator, mesin"
+                value={resumeSearch}
+                onChange={(event) => {
+                  setPage(1);
+                  setResumeSearch(event.target.value);
+                }}
+              />
+            </Field>
+          </div>
+          {!resume || resume.rows.length === 0 ? (
+            <EmptyState title="Tidak ada Entry_Type = Output untuk filter/periode ini." description="Ubah periode, mesin, item, atau pencarian tabel." />
           ) : (
             <>
-              <DataTable headers={["Date", "Entry", "Item", "Machine", "Shift", "Status", "Qty", "Reject", ""]}>
-                {outputs.rows.map((row) => (
-                  <tr key={row.id}>
+              <DataTable headers={["Tanggal", "Mesin", "Item", "Kategori", "No Dokumen", "Operator", "Jam Kerja", "Target Prorata Transaksi", "Output OK / Net Output", "UOM", "Koreksi Qty", "Reject kg", "Reject PCS Eq", "% Ach", "% Reject", "Gross Weight", "Input", "Catatan Operator", ""]}>
+                {resume.rows.map((row) => (
+                  <tr key={`${row.postingDate}-${row.machineLabel}-${row.itemNo}`}>
                     <td>{row.postingDate}</td>
-                    <td>{row.entryNo ?? "—"}</td>
-                    <td><strong>{row.itemNo}</strong></td>
-                    <td>{row.machineCenterNo ?? "—"}</td>
-                    <td>{row.shiftCode ?? "—"}</td>
-                    <td><StatusBadge status={row.normalizedOutputType === "OK" ? "HEALTHY" : "WARNING"} label={row.normalizedOutputType} /></td>
-                    <td><strong>{formatNumber(row.quantity, 1)}</strong></td>
-                    <td>{formatNumber(row.rejectKg, 2)} kg</td>
-                    <td><button className="table-icon-button" title="Copy source reference" onClick={() => void copyOutputReference(row)}><Icons.copy /></button></td>
+                    <td>{row.machineLabel}</td>
+                    <td><strong>{row.itemNo}</strong><br /><span className="muted-cell">{row.itemDescription ?? "—"}</span></td>
+                    <td>{row.itemCategoryCode ?? "—"}</td>
+                    <td><DetailList summary={row.documentSummary} rows={row.documentDetails} /></td>
+                    <td><DetailList summary={row.operatorSummary} rows={row.operatorDetails} /></td>
+                    <td>{formatNumber(row.workHours, 1)}</td>
+                    <td>{row.transactionProrataTarget === null ? "N/A" : formatNumber(row.transactionProrataTarget, 1)}</td>
+                    <td><strong>{formatNumber(row.netOutputQty, 1)}</strong></td>
+                    <td>{row.uom}</td>
+                    <td className={row.correctionOutputQty < 0 ? "negative-number" : ""}>{formatNumber(row.correctionOutputQty, 1)}</td>
+                    <td><DetailList summary={`${formatNumber(row.rejectKg, 2)} kg`} rows={row.rejectDetails} /></td>
+                    <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>
+                    <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /></td>
+                    <td>{formatPct(row.rejectPct)}</td>
+                    <td>{row.grossWeight === null ? "N/A" : formatNumber(row.grossWeight, 4)}</td>
+                    <td>{row.inputCount}</td>
+                    <td>{row.notes.length ? row.notes.join(" | ") : "—"}</td>
+                    <td><button className="table-icon-button" title="Copy grouped row reference" onClick={() => void copyOutputReference(row)}><Icons.copy /></button></td>
                   </tr>
                 ))}
               </DataTable>
-              <Pagination page={outputs.pagination.page} totalPages={outputs.pagination.totalPages} onPrevious={() => setPage((value) => value - 1)} onNext={() => setPage((value) => value + 1)} />
+              <Pagination page={resume.pagination.page} totalPages={resume.pagination.totalPages} onPrevious={() => setPage((value) => value - 1)} onNext={() => setPage((value) => value + 1)} />
             </>
           )}
         </section>

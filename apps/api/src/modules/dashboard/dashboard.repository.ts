@@ -1,8 +1,18 @@
 import type { DashboardKpiSummary } from "@poip/domain";
-import { buildDashboardKpiSummary } from "@poip/domain";
+import {
+  PRODUCTION_ENTRY_TYPE,
+  buildDashboardKpiSummary
+} from "@poip/domain";
 import type { DatabaseConnection } from "../database/database.module.js";
+import {
+  buildDailyItemResume,
+  dailyItemResumeGroupKey,
+  type DailyItemResumeSourceRow,
+  type DailyItemResumeTarget
+} from "./daily-item-resume.js";
 import type {
   BreakdownRow,
+  DailyItemResumeFilters,
   DashboardFilters,
   DashboardSummaryDto,
   DataQualitySummaryDto,
@@ -53,9 +63,23 @@ function dateText(value: unknown): string {
   return String(value).slice(0, 10);
 }
 
+function machineLabelSql(outputAlias = "po", entityAlias = "me"): string {
+  return `coalesce(${entityAlias}.display_name, ${entityAlias}.entity_code, ${outputAlias}.machine_center_no, ${outputAlias}.prod_line_no, ${outputAlias}.prod_line_description, 'Unmapped')`;
+}
+
 function buildWhere(filters: DashboardFilters): SqlParts {
-  const clauses = ["po.source_system = $1", "po.posting_date >= $2", "po.posting_date <= $3"];
-  const params: unknown[] = [filters.sourceSystem, filters.from, filters.to];
+  const clauses = [
+    "po.source_system = $1",
+    "upper(coalesce(po.entry_type, '')) = $2",
+    "po.posting_date >= $3",
+    "po.posting_date <= $4"
+  ];
+  const params: unknown[] = [
+    filters.sourceSystem,
+    PRODUCTION_ENTRY_TYPE.toUpperCase(),
+    filters.from,
+    filters.to
+  ];
 
   if (filters.entityId) {
     params.push(filters.entityId);
@@ -78,6 +102,29 @@ function buildWhere(filters: DashboardFilters): SqlParts {
     where: clauses.join(" and "),
     params
   };
+}
+
+function buildDailyItemResumeWhere(filters: DailyItemResumeFilters): SqlParts {
+  const base = buildWhere(filters);
+  const clauses = [base.where];
+  const params = [...base.params];
+  if (filters.machine) {
+    params.push(`%${filters.machine.toUpperCase()}%`);
+    clauses.push(`upper(${machineLabelSql()}) like $${params.length}`);
+  }
+  return { where: clauses.join(" and "), params };
+}
+
+function groupSearchSql(paramIndex: number): string {
+  return `searchable_text like $${paramIndex}`;
+}
+
+function dailyItemResumeSortSql(sort: DailyItemResumeFilters["sort"]): string {
+  const stableSort = "machine_label asc, item_no asc, reject_only asc";
+  if (sort === "postingDate.asc") return `posting_date asc, ${stableSort}`;
+  if (sort === "netOutputQty.desc") return `net_output_qty desc, posting_date desc, ${stableSort}`;
+  if (sort === "netOutputQty.asc") return `net_output_qty asc, posting_date desc, ${stableSort}`;
+  return `posting_date desc, ${stableSort}`;
 }
 
 function buildDowntimeWhere(filters: DashboardFilters): SqlParts {
@@ -216,7 +263,7 @@ export class DashboardReadRepository {
       `
         select
           po.posting_date::text,
-          coalesce(sum(case when po.normalized_output_type = 'OK' and po.quantity > 0 then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent
         from production_outputs po
@@ -286,7 +333,7 @@ export class DashboardReadRepository {
         select
           ${group.key} as key,
           ${group.label} as label,
-          coalesce(sum(case when po.normalized_output_type = 'OK' and po.quantity > 0 then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
           count(*) as row_count
@@ -375,6 +422,256 @@ export class DashboardReadRepository {
 
     return {
       rows: result.rows.map((row) => this.serializeOutput(row)),
+      pagination: {
+        page: filters.page,
+        pageSize: filters.pageSize,
+        totalRows,
+        totalPages: Math.ceil(totalRows / filters.pageSize)
+      }
+    };
+  }
+
+  async listDailyItemResume(filters: DailyItemResumeFilters) {
+    const where = buildDailyItemResumeWhere(filters);
+    const groupParams = [...where.params];
+    const searchClause = filters.search
+      ? (() => {
+          groupParams.push(`%${filters.search.toLowerCase()}%`);
+          return `where ${groupSearchSql(groupParams.length)}`;
+        })()
+      : "";
+    const groupedSql = `
+      with base as (
+        select
+          po.id,
+          po.posting_date::date as posting_date,
+          po.document_no,
+          po.external_document_no,
+          po.normalized_output_type,
+          po.item_no,
+          po.item_description,
+          po.item_category_code,
+          po.shift_code,
+          po.operator_name,
+          po.quantity,
+          po.reject_kg,
+          ${machineLabelSql()} as machine_label
+        from production_outputs po
+        left join master_entities me on me.id = po.entity_id
+        where ${where.where}
+      ),
+      ok_groups as (
+        select
+          posting_date,
+          machine_label,
+          item_no,
+          false as reject_only,
+          coalesce(sum(quantity), 0) as net_output_qty,
+          lower(concat_ws(' ',
+            posting_date::text,
+            machine_label,
+            item_no,
+            string_agg(distinct coalesce(item_description, ''), ' '),
+            string_agg(distinct coalesce(document_no, ''), ' '),
+            string_agg(distinct coalesce(external_document_no, ''), ' '),
+            string_agg(distinct coalesce(operator_name, ''), ' '),
+            string_agg(distinct coalesce(shift_code, ''), ' ')
+          )) as searchable_text
+        from base
+        where normalized_output_type = 'OK'
+        group by posting_date, machine_label, item_no
+      ),
+      reject_only_groups as (
+        select
+          b.posting_date,
+          b.machine_label,
+          b.item_no,
+          true as reject_only,
+          0::numeric as net_output_qty,
+          lower(concat_ws(' ',
+            b.posting_date::text,
+            b.machine_label,
+            b.item_no,
+            string_agg(distinct coalesce(b.item_description, ''), ' '),
+            string_agg(distinct coalesce(b.document_no, ''), ' '),
+            string_agg(distinct coalesce(b.external_document_no, ''), ' '),
+            string_agg(distinct coalesce(b.operator_name, ''), ' '),
+            string_agg(distinct coalesce(b.shift_code, ''), ' ')
+          )) as searchable_text
+        from base b
+        where (b.normalized_output_type = 'REJECT' or b.reject_kg > 0)
+          and not exists (
+            select 1
+            from base ok
+            where ok.posting_date = b.posting_date
+              and ok.machine_label = b.machine_label
+              and ok.normalized_output_type = 'OK'
+          )
+        group by b.posting_date, b.machine_label, b.item_no
+      ),
+      grouped as (
+        select * from ok_groups
+        union all
+        select * from reject_only_groups
+      )
+    `;
+    const offset = (filters.page - 1) * filters.pageSize;
+    const [countResult, groupResult] = await Promise.all([
+      this.database.pool.query<{ total: string | number }>(
+        `${groupedSql} select count(*) as total from grouped ${searchClause}`,
+        groupParams
+      ),
+      this.database.pool.query<{
+        posting_date: string;
+        machine_label: string;
+        item_no: string;
+        reject_only: boolean;
+        net_output_qty: string | number;
+      }>(
+        `${groupedSql}
+         select posting_date::text, machine_label, item_no, reject_only, net_output_qty
+         from grouped
+         ${searchClause}
+         order by ${dailyItemResumeSortSql(filters.sort)}
+         limit $${groupParams.length + 1}
+         offset $${groupParams.length + 2}`,
+        [...groupParams, filters.pageSize, offset]
+      )
+    ]);
+    const totalRows = numberValue(countResult.rows[0]?.total);
+    if (groupResult.rows.length === 0) {
+      return {
+        rows: [],
+        pagination: {
+          page: filters.page,
+          pageSize: filters.pageSize,
+          totalRows,
+          totalPages: Math.ceil(totalRows / filters.pageSize)
+        }
+      };
+    }
+
+    const sourceWhere = buildDailyItemResumeWhere(filters);
+    const dateMachinePairs = [
+      ...new Map(groupResult.rows.map((row) => [`${dateText(row.posting_date)}|${row.machine_label}`, {
+        postingDate: dateText(row.posting_date),
+        machineLabel: row.machine_label
+      }])).values()
+    ];
+    const sourceParams = [...sourceWhere.params];
+    const pairValuesSql = dateMachinePairs.map((pair) => {
+      sourceParams.push(pair.postingDate, pair.machineLabel);
+      return `($${sourceParams.length - 1}::date, $${sourceParams.length}::text)`;
+    }).join(", ");
+    const [rowsResult, targetsResult] = await Promise.all([
+      this.database.pool.query<{
+        id: string;
+        posting_date: string;
+        document_no: string | null;
+        external_document_no: string | null;
+        normalized_output_type: string;
+        item_no: string;
+        item_description: string | null;
+        item_category_code: string | null;
+        machine_center_no: string | null;
+        prod_line_no: string | null;
+        prod_line_description: string | null;
+        entity_id: string | null;
+        entity_code: string | null;
+        entity_display_name: string | null;
+        planned_runtime_hours: string | number | null;
+        shift_code: string | null;
+        operator_name: string | null;
+        quantity: string | number;
+        uom: string | null;
+        gross_weight_per_pcs: string | number | null;
+        reject_kg: string | number;
+        reject_pcs_eq: string | number | null;
+      }>(
+        `
+          select
+            po.id,
+            po.posting_date::text,
+            po.document_no,
+            po.external_document_no,
+            po.normalized_output_type,
+            po.item_no,
+            po.item_description,
+            po.item_category_code,
+            po.machine_center_no,
+            po.prod_line_no,
+            po.prod_line_description,
+            po.entity_id,
+            me.entity_code,
+            me.display_name as entity_display_name,
+            me.planned_runtime_hours,
+            po.shift_code,
+            po.operator_name,
+            po.quantity,
+            po.uom,
+            po.gross_weight_per_pcs,
+            po.reject_kg,
+            po.reject_pcs_eq
+          from production_outputs po
+          left join master_entities me on me.id = po.entity_id
+          where ${sourceWhere.where}
+            and exists (
+              select 1
+              from (values ${pairValuesSql}) as selected(posting_date, machine_label)
+              where selected.posting_date = po.posting_date
+                and selected.machine_label = ${machineLabelSql()}
+            )
+          order by po.posting_date desc, po.id asc
+        `,
+        sourceParams
+      ),
+      this.queryDailyItemResumeTargets(filters)
+    ]);
+    const sourceRows: DailyItemResumeSourceRow[] = rowsResult.rows.map((row) => ({
+      id: row.id,
+      postingDate: dateText(row.posting_date),
+      documentNo: row.document_no,
+      externalDocumentNo: row.external_document_no,
+      normalizedOutputType: row.normalized_output_type,
+      itemNo: row.item_no,
+      itemDescription: row.item_description,
+      itemCategoryCode: row.item_category_code,
+      machineCenterNo: row.machine_center_no,
+      prodLineNo: row.prod_line_no,
+      prodLineDescription: row.prod_line_description,
+      entityId: row.entity_id,
+      entityCode: row.entity_code,
+      entityDisplayName: row.entity_display_name,
+      plannedRuntimeHours: row.planned_runtime_hours === null ? null : numberValue(row.planned_runtime_hours),
+      shiftCode: row.shift_code,
+      operatorName: row.operator_name,
+      quantity: numberValue(row.quantity),
+      uom: row.uom,
+      grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
+      rejectKg: numberValue(row.reject_kg),
+      rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
+    }));
+    const selectedKeys = groupResult.rows.map((row) => dailyItemResumeGroupKey({
+      postingDate: dateText(row.posting_date),
+      machineLabel: row.machine_label,
+      itemNo: row.item_no,
+      rejectOnly: row.reject_only
+    }));
+    const selectedKeySet = new Set(selectedKeys);
+    const { search: _search, ...filtersWithoutSearch } = filters;
+    const builtRows = buildDailyItemResume(sourceRows, targetsResult, {
+      ...filtersWithoutSearch,
+      page: 1,
+      pageSize: Math.max(sourceRows.length + selectedKeys.length, 1)
+    }).rows;
+    const byKey = new Map(builtRows.map((row) => [String(row.drilldown.groupKey), row]));
+    const rows = selectedKeys.flatMap((key) => {
+      const row = byKey.get(key);
+      if (!row || !selectedKeySet.has(key)) return [];
+      return [row];
+    });
+    return {
+      rows,
       pagination: {
         page: filters.page,
         pageSize: filters.pageSize,
@@ -550,11 +847,11 @@ export class DashboardReadRepository {
     const result = await this.database.pool.query<AggregateRow>(
       `
         select
-          coalesce(sum(case when po.normalized_output_type = 'OK' and po.quantity > 0 then po.quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(case when po.normalized_output_type = 'OK' then po.quantity else 0 end), 0) as output_ok_qty,
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
           count(*) filter (where po.reject_kg > 0 and po.reject_pcs_eq is null) as incomplete_reject_conversion_count,
-          count(distinct po.posting_date) filter (where po.normalized_output_type = 'OK' and po.quantity > 0) as active_days,
+          count(distinct po.posting_date) filter (where po.normalized_output_type = 'OK') as active_days,
           count(*) as row_count
         from production_outputs po
         where ${where.where}
@@ -581,7 +878,6 @@ export class DashboardReadRepository {
         where ${where.where}
           and po.entity_id is not null
           and po.normalized_output_type = 'OK'
-          and po.quantity > 0
         group by po.entity_id, po.posting_date
       `,
       where.params
@@ -615,6 +911,16 @@ export class DashboardReadRepository {
       params
     );
     return result.rows;
+  }
+
+  private async queryDailyItemResumeTargets(filters: DashboardFilters): Promise<readonly DailyItemResumeTarget[]> {
+    const rows = await this.queryTargets(filters);
+    return rows.map((row) => ({
+      entityId: row.entity_id,
+      effectiveFrom: dateText(row.effective_from),
+      effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
+      dailyTargetQty: numberValue(row.daily_target_qty)
+    }));
   }
 
   private async queryLatestSuccessfulSync(sourceSystem: string): Promise<Date | null> {

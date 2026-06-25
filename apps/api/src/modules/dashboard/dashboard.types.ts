@@ -15,6 +15,14 @@ export interface OutputListFilters extends DashboardFilters {
   readonly sortDir: "asc" | "desc";
 }
 
+export interface DailyItemResumeFilters extends DashboardFilters {
+  readonly machine?: string;
+  readonly search?: string;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly sort: "postingDate.desc" | "postingDate.asc" | "netOutputQty.desc" | "netOutputQty.asc";
+}
+
 export interface OutputRowDto {
   readonly id: string;
   readonly sourceSystem: string;

@@ -1,9 +1,9 @@
 import { Controller, Get, Inject, Query } from "@nestjs/common";
 import { RequirePermissions } from "../../common/permissions.decorator.js";
 import { parseQuery } from "../../common/validation.js";
-import { breakdownQuerySchema, dashboardQuerySchema } from "./dashboard.query.js";
+import { breakdownQuerySchema, dailyItemResumeQuerySchema, dashboardQuerySchema } from "./dashboard.query.js";
 import { DashboardService } from "./dashboard.service.js";
-import type { DashboardFilters } from "./dashboard.types.js";
+import type { DailyItemResumeFilters, DashboardFilters } from "./dashboard.types.js";
 
 @Controller("dashboard")
 @RequirePermissions("dashboard.view")
@@ -33,5 +33,11 @@ export class DashboardController {
       groupBy: input.groupBy,
       limit: input.limit
     });
+  }
+
+  @Get("daily-item-resume")
+  getDailyItemResume(@Query() query: Record<string, unknown>) {
+    const filters = parseQuery(dailyItemResumeQuerySchema, query) as DailyItemResumeFilters;
+    return this.dashboardService.getDailyItemResume(filters);
   }
 }

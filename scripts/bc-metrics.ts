@@ -4,6 +4,12 @@ import { fileURLToPath } from "node:url";
 import { buildDashboardKpiSummary } from "../packages/domain/src/kpi/dashboard.js";
 import { createDatabase } from "../packages/db/src/client.js";
 import {
+  buildDailyItemResume,
+  type DailyItemResumeFilters,
+  type DailyItemResumeSourceRow,
+  type DailyItemResumeTarget
+} from "../apps/api/src/modules/dashboard/daily-item-resume.js";
+import {
   isMasterSourceField,
   normalizeAliasDisplay,
   normalizeAliasKey,
@@ -29,6 +35,7 @@ type Command =
   | "profile"
   | "reconcile"
   | "target-coverage"
+  | "daily-item-resume"
   | "mapping-candidates"
   | "mapping-apply"
   | "mapping-plan"
@@ -143,6 +150,11 @@ function sqlNormalizeExpression(column: string): string {
   return `upper(regexp_replace(trim(coalesce(${column}, '')), '[^A-Za-z0-9]+', '', 'g'))`;
 }
 
+function outputEntryTypePredicate(alias?: string): string {
+  const column = alias ? `${alias}.entry_type` : "entry_type";
+  return `upper(coalesce(${column}, '')) = 'OUTPUT'`;
+}
+
 function buildFilters(): Filters {
   const fallback = { from: jakartaDate(-6), to: jakartaDate() };
   const from = validateDate(process.env.RECONCILE_FROM?.trim() || fallback.from, "RECONCILE_FROM");
@@ -161,7 +173,7 @@ function buildFilters(): Filters {
 }
 
 function outputWhere(filters: Filters): SqlParts {
-  const clauses = ["source_system = $1", "posting_date >= $2", "posting_date <= $3"];
+  const clauses = ["source_system = $1", outputEntryTypePredicate(), "posting_date >= $2", "posting_date <= $3"];
   const params: unknown[] = [SOURCE_SYSTEM, filters.from, filters.to];
   if (filters.entityId) {
     params.push(filters.entityId);
@@ -189,12 +201,13 @@ async function mappingCoverageSummary(pool: DatabasePool): Promise<MappingCovera
         count(*) as total_rows,
         count(*) filter (where entity_id is not null) as mapped_rows,
         count(*) filter (where entity_id is null) as unmapped_rows,
-        count(*) filter (where normalized_output_type = 'OK' and quantity > 0) as ok_rows,
-        count(*) filter (where entity_id is not null and normalized_output_type = 'OK' and quantity > 0) as mapped_ok_rows,
-        count(*) filter (where entity_id is null and normalized_output_type = 'OK' and quantity > 0) as unmapped_ok_rows,
-        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK' and quantity > 0), 0) as unmapped_ok_qty
+        count(*) filter (where normalized_output_type = 'OK') as ok_rows,
+        count(*) filter (where entity_id is not null and normalized_output_type = 'OK') as mapped_ok_rows,
+        count(*) filter (where entity_id is null and normalized_output_type = 'OK') as unmapped_ok_rows,
+        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK'), 0) as unmapped_ok_qty
       from production_outputs
       where source_system = $1
+        and ${outputEntryTypePredicate()}
     `,
     [SOURCE_SYSTEM]
   );
@@ -278,15 +291,15 @@ async function fetchUnmappedSourceGroups(
       with source_rows as (
         select 'machine_center_no'::text as source_field, machine_center_no as source_value, posting_date, quantity
         from production_outputs
-        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
         union all
         select 'prod_line_no', prod_line_no, posting_date, quantity
         from production_outputs
-        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
         union all
         select 'prod_line_description', prod_line_description, posting_date, quantity
         from production_outputs
-        where source_system = $1 and entity_id is null and normalized_output_type = 'OK' and quantity > 0
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null and normalized_output_type = 'OK'
       )
       select source_field,
              coalesce(source_value, '') as source_value,
@@ -327,11 +340,10 @@ async function previewMappingPlanRow(pool: DatabasePool, row: Pick<MappingPlanRo
       select
         count(*) filter (where po.entity_id is null) as affected_rows,
         count(*) filter (where po.entity_id is not null) as already_mapped_rows,
-        coalesce(sum(po.quantity) filter (where po.entity_id is null and po.normalized_output_type = 'OK' and po.quantity > 0), 0) as ok_qty,
+        coalesce(sum(po.quantity) filter (where po.entity_id is null and po.normalized_output_type = 'OK'), 0) as ok_qty,
         count(*) filter (
           where po.entity_id is null
             and po.normalized_output_type = 'OK'
-            and po.quantity > 0
             and exists (
               select 1
               from production_targets pt
@@ -381,7 +393,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       count(*) as total_rows,
       min(posting_date)::text as min_posting_date,
       max(posting_date)::text as max_posting_date,
-      count(*) filter (where normalized_output_type = 'OK' and quantity > 0) as ok_rows,
+      count(*) filter (where normalized_output_type = 'OK') as ok_rows,
       count(*) filter (where reject_kg > 0) as reject_rows,
       count(*) filter (where entity_id is null) as unmapped_rows,
       count(*) filter (where reject_kg > 0 and reject_pcs_eq is null) as conversion_gaps
@@ -439,7 +451,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
     pool.query(
       `select coalesce(machine_center_no, '(blank)') as machine_center_no,
               count(*) as rows,
-              coalesce(sum(case when normalized_output_type = 'OK' and quantity > 0 then quantity else 0 end), 0) as ok_qty
+              coalesce(sum(case when normalized_output_type = 'OK' then quantity else 0 end), 0) as ok_qty
        from production_outputs
        where source_system = $1 and entity_id is null
        group by 1
@@ -457,7 +469,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
               coalesce(sum(po.quantity), 0) as ok_qty
        from production_outputs po
        inner join master_entities me on me.id = po.entity_id
-       where po.source_system = $1 and po.normalized_output_type = 'OK' and po.quantity > 0
+       where po.source_system = $1 and po.normalized_output_type = 'OK'
        group by me.entity_code, me.display_name
        order by ok_qty desc, rows desc
        limit 15`,
@@ -485,7 +497,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
               count(*) as rows,
               coalesce(sum(quantity), 0) as ok_qty
        from production_outputs
-       where source_system = $1 and normalized_output_type = 'OK' and quantity > 0
+       where source_system = $1 and normalized_output_type = 'OK'
        group by item_no
        order by ok_qty desc
        limit 15`,
@@ -517,14 +529,14 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
     }>(
       `
         select
-          coalesce(sum(case when normalized_output_type = 'OK' and quantity > 0 then quantity else 0 end), 0) as output_ok_qty,
-          coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as raw_ok_qty,
+          coalesce(sum(case when normalized_output_type = 'OK' then quantity else 0 end), 0) as output_ok_qty,
+          coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as raw_ok_qty,
           coalesce(sum(case when reject_kg > 0 then reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when reject_pcs_eq > 0 then reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
           count(*) filter (where reject_kg > 0 and reject_pcs_eq is null) as incomplete_reject_conversion_count,
-          count(distinct posting_date) filter (where normalized_output_type = 'OK' and quantity > 0) as active_days,
+          count(distinct posting_date) filter (where normalized_output_type = 'OK') as active_days,
           count(*) as raw_rows,
-          count(*) filter (where not (normalized_output_type = 'OK' and quantity > 0)) as excluded_rows
+          count(*) filter (where normalized_output_type <> 'OK') as excluded_rows
         from production_outputs
         where ${where.where}
       `,
@@ -537,7 +549,6 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
         where ${where.where}
           and entity_id is not null
           and normalized_output_type = 'OK'
-          and quantity > 0
         group by entity_id, posting_date
       `,
       where.params
@@ -627,6 +638,161 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   }
 }
 
+async function runDailyItemResume(pool: DatabasePool) {
+  const baseFilters = buildFilters();
+  const filters: DailyItemResumeFilters = {
+    ...baseFilters,
+    sourceSystem: SOURCE_SYSTEM,
+    page: 1,
+    pageSize: 20,
+    sort: "postingDate.desc"
+  };
+  const [rowsResult, targetsResult] = await Promise.all([
+    pool.query<{
+      id: string;
+      posting_date: string;
+      document_no: string | null;
+      external_document_no: string | null;
+      normalized_output_type: string;
+      item_no: string;
+      item_description: string | null;
+      item_category_code: string | null;
+      machine_center_no: string | null;
+      prod_line_no: string | null;
+      prod_line_description: string | null;
+      entity_id: string | null;
+      entity_code: string | null;
+      entity_display_name: string | null;
+      planned_runtime_hours: string | number | null;
+      shift_code: string | null;
+      operator_name: string | null;
+      quantity: string | number;
+      uom: string | null;
+      gross_weight_per_pcs: string | number | null;
+      reject_kg: string | number;
+      reject_pcs_eq: string | number | null;
+    }>(
+      `
+        select
+          po.id,
+          po.posting_date::text,
+          po.document_no,
+          po.external_document_no,
+          po.normalized_output_type,
+          po.item_no,
+          po.item_description,
+          po.item_category_code,
+          po.machine_center_no,
+          po.prod_line_no,
+          po.prod_line_description,
+          po.entity_id,
+          me.entity_code,
+          me.display_name as entity_display_name,
+          me.planned_runtime_hours,
+          po.shift_code,
+          po.operator_name,
+          po.quantity,
+          po.uom,
+          po.gross_weight_per_pcs,
+          po.reject_kg,
+          po.reject_pcs_eq
+        from production_outputs po
+        left join master_entities me on me.id = po.entity_id
+        where po.source_system = $1
+          and ${outputEntryTypePredicate("po")}
+          and po.posting_date >= $2
+          and po.posting_date <= $3
+          ${baseFilters.entityId ? "and po.entity_id = $4" : ""}
+          ${baseFilters.itemNo ? `and po.item_no = $${baseFilters.entityId ? 5 : 4}` : ""}
+        order by po.posting_date desc, po.id asc
+      `,
+      [
+        SOURCE_SYSTEM,
+        baseFilters.from,
+        baseFilters.to,
+        ...(baseFilters.entityId ? [baseFilters.entityId] : []),
+        ...(baseFilters.itemNo ? [baseFilters.itemNo] : [])
+      ]
+    ),
+    pool.query<{
+      entity_id: string;
+      effective_from: string;
+      effective_to: string | null;
+      daily_target_qty: string | number;
+    }>(
+      `
+        select entity_id, effective_from::text, effective_to::text, daily_target_qty
+        from production_targets
+        where effective_from <= $1
+          and (effective_to is null or effective_to >= $2)
+          and status in ('APPROVED', 'ACTIVE')
+          ${baseFilters.entityId ? "and entity_id = $3" : ""}
+      `,
+      baseFilters.entityId ? [baseFilters.to, baseFilters.from, baseFilters.entityId] : [baseFilters.to, baseFilters.from]
+    )
+  ]);
+  const sourceRows: DailyItemResumeSourceRow[] = rowsResult.rows.map((row) => ({
+    id: row.id,
+    postingDate: dateText(row.posting_date),
+    documentNo: row.document_no,
+    externalDocumentNo: row.external_document_no,
+    normalizedOutputType: row.normalized_output_type,
+    itemNo: row.item_no,
+    itemDescription: row.item_description,
+    itemCategoryCode: row.item_category_code,
+    machineCenterNo: row.machine_center_no,
+    prodLineNo: row.prod_line_no,
+    prodLineDescription: row.prod_line_description,
+    entityId: row.entity_id,
+    entityCode: row.entity_code,
+    entityDisplayName: row.entity_display_name,
+    plannedRuntimeHours: row.planned_runtime_hours === null ? null : numberValue(row.planned_runtime_hours),
+    shiftCode: row.shift_code,
+    operatorName: row.operator_name,
+    quantity: numberValue(row.quantity),
+    uom: row.uom,
+    grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
+    rejectKg: numberValue(row.reject_kg),
+    rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
+  }));
+  const targets: DailyItemResumeTarget[] = targetsResult.rows.map((row) => ({
+    entityId: row.entity_id,
+    effectiveFrom: dateText(row.effective_from),
+    effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
+    dailyTargetQty: numberValue(row.daily_target_qty)
+  }));
+  const resume = buildDailyItemResume(sourceRows, targets, filters);
+  const allRows = buildDailyItemResume(sourceRows, targets, { ...filters, pageSize: Math.max(1, sourceRows.length) }).rows;
+  const totals = allRows.reduce(
+    (acc, row) => ({
+      netOutput: acc.netOutput + row.netOutputQty,
+      positiveOutput: acc.positiveOutput + row.positiveOutputQty,
+      correctionOutput: acc.correctionOutput + row.correctionOutputQty,
+      rejectAttachedCount: acc.rejectAttachedCount + row.rejectDetails.length,
+      rejectOnlyGroupCount: acc.rejectOnlyGroupCount + (row.netOutputQty === 0 && row.rejectDetails.length > 0 ? 1 : 0),
+      conversionGaps: acc.conversionGaps + row.rejectDetails.filter((detail) => detail.conversionStatus === "INCOMPLETE").length,
+      targetMissingCount: acc.targetMissingCount + (row.achievementStatus === "TARGET_MISSING" ? 1 : 0)
+    }),
+    { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, conversionGaps: 0, targetMissingCount: 0 }
+  );
+
+  console.log("Business Central daily item resume");
+  console.log(`Window: ${baseFilters.from} to ${baseFilters.to}`);
+  console.log(`Raw Output row count: ${sourceRows.length}`);
+  console.log(`Grouped resume row count: ${resume.pagination.totalRows}`);
+  console.log(`Net output: ${formatNumber(totals.netOutput, 4)}`);
+  console.log(`Positive output: ${formatNumber(totals.positiveOutput, 4)}`);
+  console.log(`Correction output: ${formatNumber(totals.correctionOutput, 4)}`);
+  console.log(`Reject attached count: ${totals.rejectAttachedCount}`);
+  console.log(`Reject-only group count: ${totals.rejectOnlyGroupCount}`);
+  console.log(`Conversion gaps: ${totals.conversionGaps}`);
+  console.log(`Target missing count: ${totals.targetMissingCount}`);
+  console.log("Sample grouped rows:");
+  for (const row of resume.rows.slice(0, 5)) {
+    console.log(`- ${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; status=${row.achievementStatus}`);
+  }
+}
+
 async function runTargetCoverage(pool: ReturnType<typeof createDatabase>["pool"]) {
   console.log("Business Central target coverage");
   await printRows("Coverage by entity/machine/month", targetCoverageSummary(pool));
@@ -668,9 +834,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(machine_center_no, '(blank)') as machine_center_no,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
         order by ok_qty desc, rows desc
         limit $2
@@ -684,9 +850,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(prod_line_no, '(blank)') as prod_line_no,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
         order by ok_qty desc, rows desc
         limit $2
@@ -700,9 +866,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select coalesce(prod_line_description, '(blank)') as prod_line_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
         order by ok_qty desc, rows desc
         limit $2
@@ -718,9 +884,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
                coalesce(prod_line_no, '(blank)') as prod_line_no,
                coalesce(prod_line_description, '(blank)') as prod_line_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1, 2, 3
         order by ok_qty desc, rows desc
         limit $2
@@ -736,9 +902,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
                coalesce(item_no, '(blank)') as item_no,
                left(coalesce(max(item_description), ''), 80) as item_description,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1, 2
         order by ok_qty desc, rows desc
         limit $2
@@ -752,9 +918,9 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
       `
         select date_trunc('month', posting_date)::date::text as month,
                count(*) as rows,
-               coalesce(sum(quantity) filter (where normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+               coalesce(sum(quantity) filter (where normalized_output_type = 'OK'), 0) as ok_qty
         from production_outputs
-        where source_system = $1 and entity_id is null
+        where source_system = $1 and ${outputEntryTypePredicate()} and entity_id is null
         group by 1
         order by month desc
         limit $2
@@ -1057,7 +1223,7 @@ async function runMappingApply(pool: ReturnType<typeof createDatabase>["pool"]) 
       select
         count(*) filter (where entity_id is null) as affected_rows,
         count(*) filter (where entity_id is not null) as already_mapped_rows,
-        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK' and quantity > 0), 0) as ok_qty
+        coalesce(sum(quantity) filter (where entity_id is null and normalized_output_type = 'OK'), 0) as ok_qty
       from production_outputs
       where source_system = $1
         and ${sqlNormalizeExpression(sourceColumn)} = $2
@@ -1262,8 +1428,8 @@ function targetCoverageSummary(pool: ReturnType<typeof createDatabase>["pool"]) 
           end as coverage_status
         from production_outputs po
         where po.source_system = $1
+          and ${outputEntryTypePredicate("po")}
           and po.normalized_output_type = 'OK'
-          and po.quantity > 0
       )
       select
         output_rows.month,
@@ -1321,14 +1487,15 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
     if (command === "profile") await runProfile(database.pool);
     else if (command === "reconcile") await runReconcile(database.pool);
     else if (command === "target-coverage") await runTargetCoverage(database.pool);
+    else if (command === "daily-item-resume") await runDailyItemResume(database.pool);
     else if (command === "mapping-candidates") await runMappingCandidates(database.pool);
     else if (command === "mapping-plan") await runMappingPlan(database.pool);
     else if (command === "mapping-plan-apply") await runMappingPlanApply(database.pool);

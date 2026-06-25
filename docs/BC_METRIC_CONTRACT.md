@@ -24,7 +24,7 @@ All SQL, dashboard, sync, health, and reconciliation logic should use this canon
 | `Item_No` / equivalent item number field | `item_no` / `itemNo` | Required for committed output rows. |
 | `Description` / equivalent description field | `item_description` / `itemDescription` | Optional item label. |
 | `Machine_Center_No` / equivalent work center field | `machine_center_no` / `machineCenterNo` | Must map to `master_entities` or `master_entity_aliases` for target matching. |
-| `Quantity` | `quantity` | Main quantity basis. Positive OK rows count as output. Negative/zero rows are excluded from OK output and flagged. |
+| `Quantity` | `quantity` | Main quantity basis. Positive, zero, and negative quantities are preserved. Negative `Entry_Type = Output` OK rows are corrections/reversals and reduce net output. |
 | `Unit_of_Measure_Code` | `uom` | Required for interpretation and conversion review. |
 | `Gross_Weight` | `gross_weight_per_pcs` | Used to convert reject KG into reject PCS equivalent. |
 | `Reject_KG` | `reject_kg` | Reject weight when exposed by BC. |
@@ -34,10 +34,12 @@ All SQL, dashboard, sync, health, and reconciliation logic should use this canon
 
 1. Include only `source_system = 'business-central'`.
 2. Include rows inside the selected `posting_date` range.
-3. Include only rows where `normalized_output_type = 'OK'`.
-4. Include only `quantity > 0`.
-5. Exclude `REJECT`, `OTHER`, zero quantity, negative quantity, missing posting date, and missing item rows from OK output.
-6. Keep unmapped machine/entity rows in output totals, but do not use them for target/achievement matching until a master entity or alias exists.
+3. Include only `entry_type = 'Output'` for production dashboard and resume metrics.
+4. Include only rows where `normalized_output_type = 'OK'`.
+5. Do not add `quantity > 0` as the output filter.
+6. Main output is net quantity: positive OK output plus negative OK corrections.
+7. Non-output BC entry types such as Sale, Purchase, Consumption, and Transfer remain stored for future management panels but are excluded from production dashboard/resume metrics.
+8. Keep unmapped machine/entity rows in output totals, but do not use them for target/achievement matching until a master entity or alias exists.
 
 This rule must be validated with `pnpm bc:reconcile`.
 
@@ -57,6 +59,36 @@ achievement = OK Output / Target * 100
 
 Return `N/A` with reason `TARGET_MISSING` or `TARGET_ZERO` when applicable.
 
+For the daily item resume, transaction target is prorated from the entity daily target:
+
+```text
+transactionProrataTarget = dailyTarget * workHours / 24
+achievementPct = netOutputQty / transactionProrataTarget * 100
+```
+
+When no reliable work-hours value exists, v2 uses the entity `planned_runtime_hours`; if that is absent it falls back to the current v2 default of 24 hours and marks the row with `WORK_HOURS_DEFAULT_24`.
+
+## Resume Harian per Item
+
+`GET /api/v1/dashboard/daily-item-resume` returns the operational table used by `/overview`. It is a grouped daily resume, not a raw ledger table.
+
+Production scope:
+
+```sql
+source_system = 'business-central'
+and entry_type = 'Output'
+```
+
+Grouping key:
+
+1. `posting_date`
+2. resolved machine/entity display label
+3. `item_no`
+
+Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_center_no`, `prod_line_no`, `prod_line_description`, then `Unmapped`.
+
+Each group reports positive output, correction output, net output, UOM consistency, document/operator/shift summaries, reject metrics, gross weight evidence, target status, and calculation drilldown metadata. Missing targets remain `dailyTarget = null`, `transactionProrataTarget = null`, `achievementPct = null`, and `achievementStatus = TARGET_MISSING`; the UI displays `N/A`.
+
 ## Reject Rule
 
 Reject calculations must distinguish:
@@ -75,6 +107,8 @@ reject rate = reject PCS equivalent / (OK Output + reject PCS equivalent) * 100
 ```
 
 If `reject_kg > 0` and `gross_weight_per_pcs` is missing/zero, `reject_pcs_eq` is `null`, the conversion gap is counted, and the dashboard marks reject conversion as incomplete.
+
+Daily item resume reject rows are scoped to the same Business Central Output rows and attach v1-style: same posting date, same resolved machine/entity label, exact document number when available, otherwise same posting date plus same resolved machine/entity. If no OK group exists for that date/machine, a reject-only group is created. Reject PCS equivalent uses the matching OK document gross weight where available; missing or non-positive gross weight is `INCOMPLETE`, never a trustworthy zero.
 
 ## Machine and Entity Mapping
 

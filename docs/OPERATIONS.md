@@ -159,6 +159,7 @@ Use these read-only commands after live data lands, before trusting dashboard nu
 pnpm bc:profile
 pnpm bc:reconcile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
+pnpm bc:daily-item-resume
 pnpm bc:target-coverage
 ```
 
@@ -166,9 +167,11 @@ pnpm bc:target-coverage
 
 `pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when gross-weight conversion is missing, and whether OK output exists without mapped entities.
 
-`pnpm bc:target-coverage` groups positive OK output by month and entity/machine, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
+`pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, reject attachments, reject-only groups, conversion gaps, target gaps, and sample grouped rows.
 
-The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: OK Output uses positive `normalized_output_type = 'OK'` rows from `source_system = 'business-central'`; targets must be approved/active and effective for the entity/date; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps.
+`pnpm bc:target-coverage` groups net OK Output by month and entity/machine, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
+
+The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: production dashboard scope is `source_system = 'business-central'` and `entry_type = 'Output'`; other entry types remain stored for future panels; negative Output quantity is a correction; main output is net output; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps.
 
 ### Master data mapping operations
 

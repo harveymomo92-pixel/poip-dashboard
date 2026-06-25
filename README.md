@@ -95,13 +95,14 @@ After live rows are in PostgreSQL, verify the calculation gate with read-only di
 ```bash
 pnpm bc:profile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
+pnpm bc:daily-item-resume
 pnpm bc:target-coverage
 pnpm bc:mapping-candidates
 pnpm bc:mapping-plan
 pnpm bc:mapping-plan-apply
 ```
 
-Dashboard calculations use canonical `source_system = 'business-central'`. Missing approved targets produce `N/A` achievement rather than a misleading zero target, and unmapped machines/entities remain visible until master entities/aliases are loaded.
+Dashboard calculations use canonical `source_system = 'business-central'` and production scope `entry_type = 'Output'`. Other Business Central entry types remain stored for future management panels, but `/overview` shows the v1-style `Resume Harian per Item`: grouped by posting date, resolved machine/entity label, and item. Output is net quantity, so negative Output corrections reduce production instead of being hidden. Missing approved targets produce `N/A / TARGET_MISSING`, not a misleading zero target.
 
 To preview the v1 master-data import from the local `.tmp/v1-inspection/` export:
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProductionEntryType } from "../constants/business-central.js";
 
 export type DataQualitySeverity = "CRITICAL" | "WARNING" | "INFO";
 
@@ -13,6 +14,7 @@ export interface DataQualitySignal {
     | "MISSING_TARGET"
     | "MISSING_GROSS_WEIGHT"
     | "NEGATIVE_QUANTITY"
+    | "OUTPUT_CORRECTION"
     | "ZERO_QUANTITY"
     | "INVALID_DATE";
   readonly severity: DataQualitySeverity;
@@ -196,7 +198,13 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
       description: "Reject_KG exists but Gross_Weight is empty or zero"
     });
   }
-  if (quantity < 0) {
+  if (quantity < 0 && isProductionEntryType(entryType)) {
+    issues.push({
+      code: "OUTPUT_CORRECTION",
+      severity: "INFO",
+      description: "Output quantity is negative and is treated as a Business Central correction"
+    });
+  } else if (quantity < 0) {
     issues.push({
       code: "NEGATIVE_QUANTITY",
       severity: "WARNING",

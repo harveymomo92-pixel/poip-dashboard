@@ -1,4 +1,7 @@
+import { isProductionEntryType } from "../constants/business-central.js";
+
 export interface OutputQuantityRow {
+  readonly entryType?: string | null;
   readonly normalizedOutputType: string;
   readonly quantity: number;
 }
@@ -13,7 +16,8 @@ export type DataFreshnessStatus = "FRESH" | "STALE" | "CRITICAL" | "NEVER_SYNCED
 
 export function calculateOutputOkQty(rows: readonly OutputQuantityRow[]): number {
   return rows.reduce((total, row) => {
-    if (row.normalizedOutputType !== "OK" || row.quantity <= 0) return total;
+    if (row.entryType !== undefined && !isProductionEntryType(row.entryType)) return total;
+    if (row.normalizedOutputType !== "OK") return total;
     return total + row.quantity;
   }, 0);
 }

@@ -20,6 +20,7 @@
     "odata:backfill:check": "bash scripts/backfill-odata.sh --check",
     "bc:profile": "bash scripts/bc-metrics.sh profile",
     "bc:reconcile": "bash scripts/bc-metrics.sh reconcile",
+    "bc:daily-item-resume": "bash scripts/bc-metrics.sh daily-item-resume",
     "bc:target-coverage": "bash scripts/bc-metrics.sh target-coverage",
     "bc:mapping-candidates": "bash scripts/bc-metrics.sh mapping-candidates",
     "bc:mapping-plan": "bash scripts/bc-metrics.sh mapping-plan",

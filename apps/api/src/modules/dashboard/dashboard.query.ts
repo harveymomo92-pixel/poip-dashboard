@@ -1,6 +1,6 @@
 import { toAsiaJakartaBusinessDate } from "@poip/domain";
 import { z } from "zod";
-import type { DashboardFilters, OutputListFilters } from "./dashboard.types.js";
+import type { DailyItemResumeFilters, DashboardFilters, OutputListFilters } from "./dashboard.types.js";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -84,6 +84,29 @@ export const breakdownQuerySchema = z
     ...toDashboardFilters(value),
     groupBy: value.groupBy,
     limit: value.limit
+  }))
+  .refine(isValidRange, {
+    message: "from must be before or equal to to"
+  });
+
+export const dailyItemResumeQuerySchema = z
+  .object({
+    ...baseQueryFields,
+    machine: z.string().trim().min(1).optional(),
+    search: z.string().trim().min(1).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+    sort: z
+      .enum(["postingDate.desc", "postingDate.asc", "netOutputQty.desc", "netOutputQty.asc"])
+      .default("postingDate.desc")
+  })
+  .transform((value): DailyItemResumeFilters => ({
+    ...toDashboardFilters(value),
+    ...(value.machine ? { machine: value.machine.toUpperCase() } : {}),
+    ...(value.search ? { search: value.search } : {}),
+    page: value.page,
+    pageSize: value.pageSize,
+    sort: value.sort
   }))
   .refine(isValidRange, {
     message: "from must be before or equal to to"

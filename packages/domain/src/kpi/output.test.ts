@@ -11,14 +11,16 @@ import {
   getTargetStatus
 } from "./output.js";
 
-test("calculateOutputOkQty sums only positive OK output", () => {
+test("calculateOutputOkQty sums net OK output for production Output entries", () => {
   assert.equal(
     calculateOutputOkQty([
-      { normalizedOutputType: "OK", quantity: 10 },
-      { normalizedOutputType: "OK", quantity: -2 },
-      { normalizedOutputType: "REJECT", quantity: 5 }
+      { entryType: "Output", normalizedOutputType: "OK", quantity: 10 },
+      { entryType: "Output", normalizedOutputType: "OK", quantity: -2 },
+      { entryType: "Output", normalizedOutputType: "OK", quantity: 0 },
+      { entryType: "Sale", normalizedOutputType: "OK", quantity: 99 },
+      { entryType: "Output", normalizedOutputType: "REJECT", quantity: 5 }
     ]),
-    10
+    8
   );
 });
 

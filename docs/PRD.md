@@ -130,6 +130,20 @@ Menjadi **single operational intelligence platform** untuk menjawab:
 - Manajemen dapat melihat executive summary tanpa membuka data mentah.
 - Admin dapat mengelola user, role, sync, parser, master data, backup, dan health system.
 
+### 3.2.1 V1 Parity: Resume Harian per Item
+
+Production dashboard v2 must preserve the proven v1 operational behavior for daily output review. The `/overview` production table is **Resume Harian per Item**, not a raw ledger table.
+
+- Scope: `source_system = 'business-central'` and `entry_type = 'Output'`.
+- Non-output entry types remain stored for future management panels, but are excluded from current production dashboard/resume metrics.
+- Grouping key: posting date, resolved machine/entity label, and item number.
+- Resolved machine label priority: mapped display name, mapped entity code, machine center, production line number, production line description, then `Unmapped`.
+- Output is net OK quantity. Positive Output adds production; negative Output is a correction/reversal and reduces net output. Do not filter OK output with `quantity > 0`.
+- Reject rows attach to OK groups by same date, same resolved machine/entity, and document number when available; otherwise by same date and machine. If no OK group exists, show a reject-only group.
+- Reject PCS equivalent must use matching OK document gross weight where available. Missing gross weight is an incomplete conversion, not valid zero.
+- Transaction prorata target is `dailyTarget * workHours / 24`. Missing target displays `N/A / TARGET_MISSING`.
+- Validation commands include `pnpm bc:daily-item-resume`, `pnpm bc:reconcile`, `pnpm bc:target-coverage`, and `pnpm bc:mapping-candidates`.
+
 ### 3.3 Technical Goals
 
 - Monorepo yang rapi dan scalable.

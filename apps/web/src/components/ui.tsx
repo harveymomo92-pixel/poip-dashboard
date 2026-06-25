@@ -34,9 +34,9 @@ export function ChartCard({ title, description, legend, action, children, classN
 const statusTone: Record<string, string> = {
   HEALTHY: "success", FRESH: "success", SUCCESS: "success", VALID: "success", ACTIVE: "success", APPROVED: "success", ON_TARGET: "success", RESOLVED: "success", COMMITTED: "success",
   WARNING: "warning", STALE: "warning", MEDIUM: "warning", SUBMITTED: "warning", OPEN: "warning", PARTIAL: "warning", BELOW_TARGET: "warning", QUEUED: "warning",
-  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", NEVER_SYNCED: "danger",
+  CRITICAL: "danger", FAILED: "danger", INVALID: "danger", REJECTED: "danger", HIGH: "danger", NO_TARGET: "danger", TARGET_MISSING: "danger", NEVER_SYNCED: "danger",
   ACKNOWLEDGED: "info", RUNNING: "info", PREVIEW: "info", LOW: "info", ABOVE_TARGET: "info",
-  CLOSED: "neutral", DRAFT: "neutral", IGNORED: "neutral", INACTIVE: "neutral", SUPERSEDED: "neutral"
+  CLOSED: "neutral", DRAFT: "neutral", IGNORED: "neutral", INACTIVE: "neutral", SUPERSEDED: "neutral", NO_OUTPUT: "neutral", NOT_APPLICABLE: "neutral"
 };
 
 export function StatusBadge({ status, label }: Readonly<{ status: string; label?: string }>) {

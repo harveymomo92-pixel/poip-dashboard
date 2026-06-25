@@ -51,6 +51,24 @@ test("normalizeODataOutputRow reports critical and warning quality issues", () =
   );
 });
 
+test("normalizeODataOutputRow treats negative Output quantity as an informational correction", () => {
+  const result = normalizeODataOutputRow({
+    Entry_No: "43",
+    Posting_Date: "2026-06-22",
+    Document_No: "PROD-CORR",
+    Entry_Type: "Output",
+    Item_No: "FG-001",
+    Quantity: "-2",
+    Reject_KG: "0"
+  });
+
+  assert.equal(result.canCommit, true);
+  assert.equal(result.normalized.normalizedOutputType, "OK");
+  assert.deepEqual(result.issues.map((issue) => `${issue.code}:${issue.severity}`), [
+    "OUTPUT_CORRECTION:INFO"
+  ]);
+});
+
 test("createODataRowHash is stable across object key order", () => {
   assert.equal(createODataRowHash({ b: 2, a: 1 }), createODataRowHash({ a: 1, b: 2 }));
 });

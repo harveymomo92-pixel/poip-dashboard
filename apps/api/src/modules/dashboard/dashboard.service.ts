@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { DashboardReadRepository } from "./dashboard.repository.js";
-import type { DashboardFilters } from "./dashboard.types.js";
+import type { DailyItemResumeFilters, DashboardFilters } from "./dashboard.types.js";
 
 @Injectable()
 export class DashboardService {
@@ -20,5 +20,9 @@ export class DashboardService {
     readonly limit: number;
   }) {
     return this.repository.getBreakdowns(input);
+  }
+
+  getDailyItemResume(filters: DailyItemResumeFilters) {
+    return this.repository.listDailyItemResume(filters);
   }
 }
