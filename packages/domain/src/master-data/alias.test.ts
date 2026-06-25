@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BC_ENTITY_SOURCE_FIELD_FALLBACKS,
+  BC_ENTITY_SOURCE_FIELD_PRIMARY,
+  entitySourceCandidates,
   legacyMachineFamilyKey,
   normalizeAliasDisplay,
   normalizeAliasKey,
+  preferredEntitySource,
   sourceAliasCandidates
 } from "./alias.js";
 
@@ -28,6 +32,7 @@ test("legacyMachineFamilyKey maps v1 machine families", () => {
 test("sourceAliasCandidates emits normalized source values", () => {
   assert.deepEqual(
     sourceAliasCandidates({
+      machineDescription: " Repacking ",
       machineCenterNo: " Illig 2 ",
       prodLineNo: "L-01",
       prodLineDescription: "",
@@ -35,10 +40,32 @@ test("sourceAliasCandidates emits normalized source values", () => {
       uom: " pcs "
     }),
     [
+      { sourceField: "machine_description", sourceValue: "REPACKING", normalizedValue: "REPACKING" },
       { sourceField: "machine_center_no", sourceValue: "ILLIG 2", normalizedValue: "ILLIG2" },
       { sourceField: "prod_line_no", sourceValue: "L-01", normalizedValue: "L01" },
       { sourceField: "item_no", sourceValue: "FG-001", normalizedValue: "FG001" },
       { sourceField: "uom", sourceValue: "PCS", normalizedValue: "PCS" }
     ]
   );
+});
+
+test("entity source helpers prefer machine description before machine center and production line fields", () => {
+  assert.equal(BC_ENTITY_SOURCE_FIELD_PRIMARY, "machine_description");
+  assert.deepEqual(BC_ENTITY_SOURCE_FIELD_FALLBACKS, ["machine_center_no", "prod_line_description", "prod_line_no"]);
+  assert.deepEqual(
+    entitySourceCandidates({
+      machineDescription: "GILINGAN",
+      machineCenterNo: "MC-1",
+      prodLineDescription: "Line desc",
+      prodLineNo: "L-01"
+    }).map((candidate) => candidate.sourceField),
+    ["machine_description", "machine_center_no", "prod_line_description", "prod_line_no"]
+  );
+  assert.deepEqual(preferredEntitySource({ machineDescription: "REPACKING", machineCenterNo: "" }), {
+    sourceField: "machine_description",
+    sourceValue: "REPACKING",
+    normalizedValue: "REPACKING"
+  });
+  assert.equal(preferredEntitySource({ machineDescription: "", machineCenterNo: "MC-1" })?.sourceField, "machine_center_no");
+  assert.equal(preferredEntitySource({ machineDescription: "", machineCenterNo: "", prodLineDescription: "LINE A" })?.sourceField, "prod_line_description");
 });

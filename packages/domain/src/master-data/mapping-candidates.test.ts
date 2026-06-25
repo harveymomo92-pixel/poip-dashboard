@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildMappingPlanRows,
   containsMappingSecretLikeText,
+  mappingPlanSourceFields,
   mappingPlanRowsToCsv,
   parseMappingPlanCsv,
   suggestMappingCandidates,
@@ -77,6 +78,15 @@ test("buildMappingPlanRows defaults all actions to REVIEW", () => {
   ]);
   assert.equal(row?.action, "REVIEW");
   assert.equal(row?.suggested_entity_code, "ILLIG 1");
+});
+
+test("mapping plan source fields prefer machine description before machine center", () => {
+  assert.deepEqual(mappingPlanSourceFields, [
+    "machine_description",
+    "machine_center_no",
+    "prod_line_description",
+    "prod_line_no"
+  ]);
 });
 
 test("mapping plan CSV round-trips reviewed rows", () => {

@@ -52,7 +52,7 @@ Use `.env.example` for local development and `.env.production.example` as a prod
 | `RECONCILE_ENTITY_ID` | Diagnostics only, optional | Limits `pnpm bc:reconcile` to a master entity UUID. |
 | `RECONCILE_ITEM_NO` | Diagnostics only, optional | Limits `pnpm bc:reconcile` to one item number. |
 | `MAPPING_CANDIDATE_LIMIT` | Diagnostics only, optional | Limits `pnpm bc:mapping-candidates` output. Defaults to `25`, maximum `100`. |
-| `SOURCE_FIELD` | Mapping apply only | Required for `pnpm bc:mapping-apply`. One of `machine_center_no`, `prod_line_no`, `prod_line_description`, `item_no`, or `uom`. |
+| `SOURCE_FIELD` | Mapping apply only | Required for `pnpm bc:mapping-apply`. One of `machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`, `item_no`, or `uom`. |
 | `SOURCE_VALUE` | Mapping apply only | Required for `pnpm bc:mapping-apply`. Raw Business Central source value to preview/map. |
 | `ENTITY_ID` | Mapping apply only | Required for `pnpm bc:mapping-apply`. Existing active `master_entities.id` to map to. |
 | `APPLY_MAPPING_COMMIT` | Mapping apply only | Defaults to dry-run. Must be exactly `true` before the script mutates aliases/output rows. |
@@ -95,8 +95,8 @@ pnpm bc:mapping-candidates
 Dry-run-first master mapping script:
 
 ```bash
-SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
-SOURCE_FIELD=machine_center_no SOURCE_VALUE="REPLACE_WITH_BC_VALUE" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
+SOURCE_FIELD=machine_description SOURCE_VALUE="REPACKING" ENTITY_ID="00000000-0000-0000-0000-000000000000" pnpm bc:mapping-apply
+SOURCE_FIELD=machine_description SOURCE_VALUE="REPACKING" ENTITY_ID="00000000-0000-0000-0000-000000000000" APPLY_MAPPING_COMMIT=true pnpm bc:mapping-apply
 ```
 
 ## Bootstrap admin variables

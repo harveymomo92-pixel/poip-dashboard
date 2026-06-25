@@ -32,6 +32,7 @@ export interface OutputRowDto {
   readonly normalizedOutputType: string;
   readonly itemNo: string;
   readonly itemDescription: string | null;
+  readonly machineDescription: string | null;
   readonly machineCenterNo: string | null;
   readonly entityId: string | null;
   readonly entityName: string | null;

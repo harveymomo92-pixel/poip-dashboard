@@ -1,4 +1,10 @@
-export type MasterSourceField = "machine_center_no" | "prod_line_no" | "prod_line_description" | "item_no" | "uom";
+export type MasterSourceField =
+  | "machine_description"
+  | "machine_center_no"
+  | "prod_line_description"
+  | "prod_line_no"
+  | "item_no"
+  | "uom";
 
 export interface SourceAliasCandidate {
   readonly sourceField: MasterSourceField;
@@ -6,10 +12,19 @@ export interface SourceAliasCandidate {
   readonly normalizedValue: string;
 }
 
-const allowedSourceFields = [
+export const BC_ENTITY_SOURCE_FIELD_PRIMARY = "machine_description" as const satisfies MasterSourceField;
+export const BC_ENTITY_SOURCE_FIELD_FALLBACKS = [
   "machine_center_no",
-  "prod_line_no",
   "prod_line_description",
+  "prod_line_no"
+] as const satisfies readonly MasterSourceField[];
+export const BC_ENTITY_SOURCE_FIELDS = [
+  BC_ENTITY_SOURCE_FIELD_PRIMARY,
+  ...BC_ENTITY_SOURCE_FIELD_FALLBACKS
+] as const satisfies readonly MasterSourceField[];
+
+const allowedSourceFields = [
+  ...BC_ENTITY_SOURCE_FIELDS,
   "item_no",
   "uom"
 ] as const satisfies readonly MasterSourceField[];
@@ -42,6 +57,7 @@ export function legacyMachineFamilyKey(value: string | null | undefined): string
 }
 
 export function sourceAliasCandidates(row: {
+  readonly machineDescription?: string | null;
   readonly machineCenterNo?: string | null;
   readonly prodLineNo?: string | null;
   readonly prodLineDescription?: string | null;
@@ -49,9 +65,10 @@ export function sourceAliasCandidates(row: {
   readonly uom?: string | null;
 }): SourceAliasCandidate[] {
   const entries: Array<[MasterSourceField, string | null | undefined]> = [
+    ["machine_description", row.machineDescription],
     ["machine_center_no", row.machineCenterNo],
-    ["prod_line_no", row.prodLineNo],
     ["prod_line_description", row.prodLineDescription],
+    ["prod_line_no", row.prodLineNo],
     ["item_no", row.itemNo],
     ["uom", row.uom]
   ];
@@ -62,3 +79,22 @@ export function sourceAliasCandidates(row: {
   });
 }
 
+export function entitySourceCandidates(row: {
+  readonly machineDescription?: string | null;
+  readonly machineCenterNo?: string | null;
+  readonly prodLineNo?: string | null;
+  readonly prodLineDescription?: string | null;
+}): SourceAliasCandidate[] {
+  return sourceAliasCandidates(row).filter((candidate) =>
+    (BC_ENTITY_SOURCE_FIELDS as readonly string[]).includes(candidate.sourceField)
+  );
+}
+
+export function preferredEntitySource(row: {
+  readonly machineDescription?: string | null;
+  readonly machineCenterNo?: string | null;
+  readonly prodLineNo?: string | null;
+  readonly prodLineDescription?: string | null;
+}): SourceAliasCandidate | null {
+  return entitySourceCandidates(row)[0] ?? null;
+}

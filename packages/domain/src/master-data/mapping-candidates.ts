@@ -73,9 +73,10 @@ export const mappingPlanHeaders = [
 ] as const satisfies readonly (keyof MappingPlanRow)[];
 
 export const mappingPlanSourceFields = [
+  "machine_description",
   "machine_center_no",
-  "prod_line_no",
-  "prod_line_description"
+  "prod_line_description",
+  "prod_line_no"
 ] as const satisfies readonly MasterSourceField[];
 
 const familyTokens = ["ILLIG", "NEWDO", "HENGFENG", "OMSO", "VFINE", "LONGSUN", "BORCHE", "CHUMPOWER", "POLYPRINT"] as const;

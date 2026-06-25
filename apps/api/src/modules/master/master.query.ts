@@ -55,7 +55,7 @@ export const updateEntitySchema = createEntitySchema.partial();
 export const createAliasSchema = z.object({
   alias: z.string().trim().min(1).max(160),
   sourceSystem: z.string().trim().min(1).default("business-central"),
-  sourceField: sourceFieldSchema.default("machine_center_no"),
+  sourceField: sourceFieldSchema.default("machine_description"),
   source: z.string().trim().min(1).default("manual"),
   matchConfidence: z.coerce.number().min(0).max(100).nullable().optional()
 });
@@ -92,4 +92,3 @@ export const conversionApplySchema = z.object({
   grossWeightPerPcs: z.coerce.number().positive().optional(),
   note: z.string().trim().min(3).max(500).optional()
 });
-

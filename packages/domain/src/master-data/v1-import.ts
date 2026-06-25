@@ -15,6 +15,7 @@ export const V1_TARGET_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 
 const SOURCE_FIELD_PRIORITY: readonly MasterSourceField[] = [
+  "machine_description",
   "machine_center_no",
   "prod_line_description",
   "prod_line_no",
@@ -657,11 +658,14 @@ export function estimateV1Reconcile(
     } else {
       if (entityKeys.size > 1) conflictIds.add(row.id);
       const entityCandidates = candidates.filter(
-        (candidate) => candidate.sourceField === "machine_center_no" ||
+        (candidate) => candidate.sourceField === "machine_description" ||
+          candidate.sourceField === "machine_center_no" ||
           candidate.sourceField === "prod_line_description" ||
           candidate.sourceField === "prod_line_no"
       );
-      const first = entityCandidates.find((candidate) => candidate.sourceField === "machine_center_no") ?? entityCandidates[0];
+      const first = entityCandidates.find((candidate) => candidate.sourceField === "machine_description")
+        ?? entityCandidates.find((candidate) => candidate.sourceField === "machine_center_no")
+        ?? entityCandidates[0];
       if (!first) continue;
       const key = `${first.sourceField}|${first.normalizedValue}`;
       const current = remainingGroups.get(key) ?? {

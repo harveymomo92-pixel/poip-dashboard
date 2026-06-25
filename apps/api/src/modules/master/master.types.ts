@@ -85,6 +85,7 @@ export interface TargetCoverageRowDto {
   readonly month: string;
   readonly entityId: string | null;
   readonly entityName: string;
+  readonly sourceField: MasterSourceField;
   readonly sourceGroup: string;
   readonly reason: "COVERED" | "UNMAPPED_ENTITY" | "NO_ACTIVE_TARGET" | "TARGET_NOT_APPROVED" | "OUTSIDE_EFFECTIVE_DATE" | "TARGET_ZERO";
   readonly rows: number;
