@@ -257,6 +257,19 @@ pnpm bc:mapping-plan-apply
 
 Do not map low-confidence source values just to make achievement numeric. If a source group is operationally ambiguous, leave it unmapped and ask PPIC/production owners to confirm the canonical entity.
 
+Source-specific reset/remap is available in `/master-data` when a reviewed Business Central source value needs to return to mapping review. Use the Reset / Remap Source panel, select exactly one source field (`prod_line_description`, `prod_line_no`, `machine_center_no`, or `machine_description`) and one source value, then run preview first. Preview is read-only and shows total matching `production_outputs` rows, currently mapped rows, active aliases that would be deactivated, affected master entities, and the KPI warning.
+
+Commit requires the preview, the acknowledgement checkbox, and typing `RESET`. The commit runs in a transaction, sets `production_outputs.entity_id = null` only for matching `source_system = 'business-central'` rows, deactivates matching active aliases for the same source field/value, updates timestamps, and writes an audit log. It does not change output quantity, reject quantity, item/document fields, target rows, sync runs, or raw Business Central source fields. There is intentionally no reset-all Business Central mapping action. After commit, continue mapping review or run:
+
+```bash
+pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:daily-item-resume
+pnpm bc:reconcile
+```
+
+Remaining LOW-confidence or ambiguous mapping candidates still require data-owner review before any remap or alias commit.
+
 Rollback should use a PostgreSQL backup restore whenever possible. A targeted rollback must be reviewed from `audit_logs` and aliases with `source = 'mapping-plan'`; unmap only rows updated by the reviewed plan, deactivate or delete only the inserted aliases, then re-run:
 
 ```bash
