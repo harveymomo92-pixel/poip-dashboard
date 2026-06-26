@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildDailyItemResume,
+  summarizeDailyItemResumeRejectConversions,
   summarizeDailyItemResumeRejectDocuments,
   summarizeDailyItemResumeTargetReasons,
   type DailyItemResumeFilters,
@@ -40,6 +41,8 @@ function row(input: Partial<DailyItemResumeSourceRow> = {}): DailyItemResumeSour
     quantity: input.quantity ?? 100,
     uom: input.uom ?? "PCS",
     grossWeightPerPcs: "grossWeightPerPcs" in input ? input.grossWeightPerPcs ?? null : 0.02,
+    mappedGrossWeightPerPcs: input.mappedGrossWeightPerPcs ?? null,
+    mappedGrossWeightSource: input.mappedGrossWeightSource ?? null,
     rejectKg: input.rejectKg ?? 0,
     rejectPcsEq: input.rejectPcsEq ?? null
   };
@@ -126,6 +129,87 @@ test("RJ KG reject rows attach by same document with PCS equivalent from OK gros
   assert.equal(result.rows[0]?.rejectConversionStatus, "COMPLETE");
   assert.equal(result.rows[0]?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT");
   assert.equal(result.rows[0]?.rejectDetails[0]?.itemNo, "RJ015");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.conversionStatus, "COMPLETE");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.grossWeightSource, "ROW_GROSS_WEIGHT");
+});
+
+test("RJ KG reject rows stay incomplete when matched OK item has missing gross weight", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok", documentNo: "DOC-MISSING-GW", grossWeightPerPcs: null }),
+    row({
+      id: "reject",
+      normalizedOutputType: "REJECT",
+      documentNo: "DOC-MISSING-GW",
+      itemNo: "RJ015",
+      quantity: 10,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: 99
+    })
+  ], [], filters);
+
+  assert.equal(result.rows[0]?.rejectPcsEq, null);
+  assert.equal(result.rows[0]?.rejectConversionStatus, "INCOMPLETE");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.rejectPcsEq, null);
+  assert.equal(result.rows[0]?.rejectDetails[0]?.conversionGapReason, "MISSING_OK_GROSS_WEIGHT");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.grossWeight, null);
+  assert.equal(result.rows[0]?.rejectDetails[0]?.grossWeightSource, null);
+});
+
+test("RJ KG reject rows stay incomplete when matched OK item has zero gross weight", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok", documentNo: "DOC-ZERO-GW", grossWeightPerPcs: 0 }),
+    row({
+      id: "reject",
+      normalizedOutputType: "REJECT",
+      documentNo: "DOC-ZERO-GW",
+      itemNo: "RJ015",
+      quantity: 10,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null
+    })
+  ], [], filters);
+
+  assert.equal(result.rows[0]?.rejectPcsEq, null);
+  assert.equal(result.rows[0]?.rejectDetails[0]?.conversionGapReason, "ZERO_OR_INVALID_OK_GROSS_WEIGHT");
+});
+
+test("RJ KG reject rows use OK item conversion mapping when row gross weight is missing", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok", documentNo: "DOC-MAPPED-GW", grossWeightPerPcs: null, mappedGrossWeightPerPcs: 0.25, mappedGrossWeightSource: "ITEM_CONVERSION_MAPPING" }),
+    row({
+      id: "reject",
+      normalizedOutputType: "REJECT",
+      documentNo: "DOC-MAPPED-GW",
+      itemNo: "RJ015",
+      quantity: 10,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: 99,
+      mappedGrossWeightPerPcs: null
+    })
+  ], [], filters);
+
+  assert.equal(result.rows[0]?.rejectPcsEq, 40);
+  assert.equal(result.rows[0]?.rejectConversionStatus, "COMPLETE");
+  assert.equal(result.rows[0]?.rejectDetails[0]?.grossWeight, 0.25);
+  assert.equal(result.rows[0]?.rejectDetails[0]?.grossWeightSource, "ITEM_CONVERSION_MAPPING");
+});
+
+test("reject conversion summary sums only complete PCS equivalent and counts incomplete details", () => {
+  const result = buildDailyItemResume([
+    row({ id: "ok-complete", documentNo: "DOC-COMPLETE", itemNo: "PF192CL12", quantity: 100, grossWeightPerPcs: 0.5 }),
+    row({ id: "reject-complete", normalizedOutputType: "REJECT", documentNo: "DOC-COMPLETE", itemNo: "RJ015", uom: "KG", quantity: 5, grossWeightPerPcs: null }),
+    row({ id: "ok-incomplete", documentNo: "DOC-INCOMPLETE", itemNo: "PF27CLJB82", quantity: 100, grossWeightPerPcs: null }),
+    row({ id: "reject-incomplete", normalizedOutputType: "REJECT", documentNo: "DOC-INCOMPLETE", itemNo: "RJ016", uom: "KG", quantity: 7, grossWeightPerPcs: null })
+  ], [], filters);
+
+  const summary = summarizeDailyItemResumeRejectConversions(result.rows);
+  assert.equal(summary.rejectPcsEquivalent, 10);
+  assert.equal(summary.completeCount, 1);
+  assert.equal(summary.incompleteCount, 1);
+  assert.equal(summary.gapBreakdown.find((item) => item.reason === "MISSING_OK_GROSS_WEIGHT")?.rowCount, 1);
 });
 
 test("RJ KG reject rows attach by document and posting date when document has multiple OK candidates", () => {
@@ -183,6 +267,7 @@ test("RJ KG reject rows with unmatched document become reject-only groups", () =
   assert.equal(rejectOnly.rows[0]?.netOutputQty, 0);
   assert.equal(rejectOnly.rows[0]?.rejectAttachmentStatus, "REJECT_ONLY");
   assert.equal(rejectOnly.rows[0]?.rejectConversionStatus, "INCOMPLETE");
+  assert.equal(rejectOnly.rows[0]?.rejectDetails[0]?.conversionGapReason, "REJECT_ONLY");
 });
 
 test("multiple RJ KG reject rows attach to one OK document", () => {
@@ -209,6 +294,7 @@ test("multiple OK items with same document do not double count reject kg", () =>
   assert.equal(result.rows.length, 3);
   assert.equal(rejectOnly?.rejectAttachmentStatus, "AMBIGUOUS_REJECT_ATTACHMENT");
   assert.equal(rejectOnly?.rejectKg, 4);
+  assert.equal(rejectOnly?.rejectDetails[0]?.conversionGapReason, "AMBIGUOUS_REJECT_ATTACHMENT");
   assert.equal((rejectOnly?.rejectDetails[0]?.attachmentCandidates as readonly unknown[] | undefined)?.length, 2);
   assert.equal(result.rows.filter((item) => item.itemNo !== "RJ015").reduce((sum, item) => sum + item.rejectKg, 0), 0);
 });

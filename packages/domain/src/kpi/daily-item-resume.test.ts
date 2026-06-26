@@ -109,6 +109,70 @@ test("buildDailyItemResumeRows attaches RJ KG reject by same document", () => {
   assert.equal(rows[0]?.rejectConversionStatus, "COMPLETE");
   assert.equal(rows[0]?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT");
   assert.equal(rows[0]?.rejectDetails[0]?.itemNo, "RJ015");
+  assert.equal(rows[0]?.rejectDetails[0]?.conversionStatus, "COMPLETE");
+  assert.equal(rows[0]?.rejectDetails[0]?.grossWeightSource, "ROW_GROSS_WEIGHT");
+});
+
+test("buildDailyItemResumeRows keeps attached reject incomplete when OK gross weight is missing", () => {
+  const rows = buildDailyItemResumeRows([
+    { ...base, grossWeightPerPcs: null },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      quantity: 5,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: 99
+    }
+  ]);
+
+  assert.equal(rows[0]?.rejectPcsEq, null);
+  assert.equal(rows[0]?.rejectConversionStatus, "INCOMPLETE");
+  assert.equal(rows[0]?.rejectDetails[0]?.rejectPcsEq, null);
+  assert.equal(rows[0]?.rejectDetails[0]?.conversionStatus, "INCOMPLETE");
+  assert.equal(rows[0]?.rejectDetails[0]?.conversionGapReason, "MISSING_OK_GROSS_WEIGHT");
+  assert.equal(rows[0]?.rejectDetails[0]?.grossWeight, null);
+  assert.equal(rows[0]?.rejectDetails[0]?.grossWeightSource, null);
+});
+
+test("buildDailyItemResumeRows keeps attached reject incomplete when OK gross weight is zero", () => {
+  const rows = buildDailyItemResumeRows([
+    { ...base, grossWeightPerPcs: 0 },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      quantity: 5,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null
+    }
+  ]);
+
+  assert.equal(rows[0]?.rejectPcsEq, null);
+  assert.equal(rows[0]?.rejectDetails[0]?.conversionGapReason, "ZERO_OR_INVALID_OK_GROSS_WEIGHT");
+});
+
+test("buildDailyItemResumeRows uses OK item conversion mapping when row gross weight is missing", () => {
+  const rows = buildDailyItemResumeRows([
+    { ...base, grossWeightPerPcs: null, mappedGrossWeightPerPcs: 0.25, mappedGrossWeightSource: "ITEM_CONVERSION_MAPPING" },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      quantity: 5,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: 99,
+      mappedGrossWeightPerPcs: null
+    }
+  ]);
+
+  assert.equal(rows[0]?.rejectPcsEq, 20);
+  assert.equal(rows[0]?.rejectConversionStatus, "COMPLETE");
+  assert.equal(rows[0]?.rejectDetails[0]?.grossWeight, 0.25);
+  assert.equal(rows[0]?.rejectDetails[0]?.grossWeightSource, "ITEM_CONVERSION_MAPPING");
 });
 
 test("buildDailyItemResumeRows attaches reject by document and posting date when document has multiple OK candidates", () => {
@@ -202,6 +266,7 @@ test("buildDailyItemResumeRows creates reject-only when document does not match 
   assert.equal(rejectOnly?.rejectAttachmentStatus, "REJECT_ONLY");
   assert.equal(rejectOnly?.rejectKg, 4);
   assert.equal(rejectOnly?.rejectPcsEq, null);
+  assert.equal(rejectOnly?.rejectDetails[0]?.conversionGapReason, "REJECT_ONLY");
 });
 
 test("buildDailyItemResumeRows creates reject-only groups and flags missing gross weight", () => {
@@ -223,6 +288,7 @@ test("buildDailyItemResumeRows creates reject-only groups and flags missing gros
   assert.equal(rows[0]?.rejectAttachmentStatus, "REJECT_ONLY");
   assert.equal(rows[0]?.rejectConversionStatus, "INCOMPLETE");
   assert.equal(rows[0]?.rejectPcsEq, null);
+  assert.equal(rows[0]?.rejectDetails[0]?.conversionGapReason, "REJECT_ONLY");
 });
 
 test("buildDailyItemResumeRows does not double count ambiguous reject attachment", () => {
@@ -244,6 +310,7 @@ test("buildDailyItemResumeRows does not double count ambiguous reject attachment
   assert.equal(rows.length, 3);
   assert.equal(rejectOnly?.rejectAttachmentStatus, "AMBIGUOUS_REJECT_ATTACHMENT");
   assert.equal(rejectOnly?.rejectKg, 2);
+  assert.equal(rejectOnly?.rejectDetails[0]?.conversionGapReason, "AMBIGUOUS_REJECT_ATTACHMENT");
   assert.equal(rows.filter((row) => row.itemNo !== "RJ015").reduce((sum, row) => sum + row.rejectKg, 0), 0);
 });
 

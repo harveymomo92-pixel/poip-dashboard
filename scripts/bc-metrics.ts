@@ -7,8 +7,10 @@ import { createDatabase } from "../packages/db/src/client.js";
 import {
   buildDailyItemResume,
   DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES,
+  DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS,
   isAttachedDailyItemResumeRejectAttachmentStatus,
   summarizeDailyItemResumeRejectDocuments,
+  summarizeDailyItemResumeRejectConversions,
   DAILY_ITEM_RESUME_TARGET_REASONS,
   summarizeDailyItemResumeTargetReasons,
   type DailyItemResumeRow,
@@ -241,18 +243,152 @@ function buildFilters(): Filters {
   };
 }
 
-function outputWhere(filters: Filters): SqlParts {
-  const clauses = ["source_system = $1", outputEntryTypePredicate(), "posting_date >= $2", "posting_date <= $3"];
+function outputWhere(filters: Filters, alias?: string): SqlParts {
+  const prefix = alias ? `${alias}.` : "";
+  const clauses = [`${prefix}source_system = $1`, outputEntryTypePredicate(alias), `${prefix}posting_date >= $2`, `${prefix}posting_date <= $3`];
   const params: unknown[] = [SOURCE_SYSTEM, filters.from, filters.to];
+  if (filters.entityId) {
+    params.push(filters.entityId);
+    clauses.push(`${prefix}entity_id = $${params.length}`);
+  }
+  if (filters.itemNo) {
+    params.push(filters.itemNo);
+    clauses.push(`${prefix}item_no = $${params.length}`);
+  }
+  return { where: clauses.join(" and "), params };
+}
+
+async function queryDailyItemResumeSourceRows(pool: DatabasePool, filters: Filters): Promise<DailyItemResumeSourceRow[]> {
+  const where = outputWhere(filters, "po");
+  const result = await pool.query<{
+    id: string;
+    posting_date: string;
+    document_no: string | null;
+    external_document_no: string | null;
+    normalized_output_type: string;
+    item_no: string;
+    item_description: string | null;
+    item_category_code: string | null;
+    machine_description: string | null;
+    machine_center_no: string | null;
+    prod_line_no: string | null;
+    prod_line_description: string | null;
+    entity_id: string | null;
+    entity_code: string | null;
+    entity_display_name: string | null;
+    planned_runtime_hours: string | number | null;
+    shift_code: string | null;
+    operator_name: string | null;
+    quantity: string | number;
+    uom: string | null;
+    gross_weight_per_pcs: string | number | null;
+    mapped_gross_weight_per_pcs: string | number | null;
+    mapped_gross_weight_source: string | null;
+    reject_kg: string | number;
+    reject_pcs_eq: string | number | null;
+  }>(
+    `
+      select
+        po.id,
+        po.posting_date::text,
+        po.document_no,
+        po.external_document_no,
+        po.normalized_output_type,
+        po.item_no,
+        po.item_description,
+        po.item_category_code,
+        po.machine_description,
+        po.machine_center_no,
+        po.prod_line_no,
+        po.prod_line_description,
+        po.entity_id,
+        me.entity_code,
+        me.display_name as entity_display_name,
+        me.planned_runtime_hours,
+        po.shift_code,
+        po.operator_name,
+        po.quantity,
+        po.uom,
+        po.gross_weight_per_pcs,
+        icm.gross_weight_per_pcs as mapped_gross_weight_per_pcs,
+        case when icm.gross_weight_per_pcs is not null then 'ITEM_CONVERSION_MAPPING' else null end as mapped_gross_weight_source,
+        po.reject_kg,
+        po.reject_pcs_eq
+      from production_outputs po
+      left join master_entities me on me.id = po.entity_id
+      left join lateral (
+        select gross_weight_per_pcs
+        from item_conversion_mappings
+        where item_no = po.item_no
+          and uom = coalesce(po.uom, '')
+          and is_active = true
+        order by updated_at desc, created_at desc
+        limit 1
+      ) icm on true
+      where ${where.where}
+      order by po.posting_date desc, po.id asc
+    `,
+    where.params
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    postingDate: dateText(row.posting_date),
+    documentNo: row.document_no,
+    externalDocumentNo: row.external_document_no,
+    normalizedOutputType: row.normalized_output_type,
+    itemNo: row.item_no,
+    itemDescription: row.item_description,
+    itemCategoryCode: row.item_category_code,
+    machineDescription: row.machine_description,
+    machineCenterNo: row.machine_center_no,
+    prodLineNo: row.prod_line_no,
+    prodLineDescription: row.prod_line_description,
+    entityId: row.entity_id,
+    entityCode: row.entity_code,
+    entityDisplayName: row.entity_display_name,
+    plannedRuntimeHours: row.planned_runtime_hours === null ? null : numberValue(row.planned_runtime_hours),
+    shiftCode: row.shift_code,
+    operatorName: row.operator_name,
+    quantity: numberValue(row.quantity),
+    uom: row.uom,
+    grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
+    mappedGrossWeightPerPcs: row.mapped_gross_weight_per_pcs === null ? null : numberValue(row.mapped_gross_weight_per_pcs),
+    mappedGrossWeightSource: row.mapped_gross_weight_source === null ? null : "ITEM_CONVERSION_MAPPING",
+    rejectKg: numberValue(row.reject_kg),
+    rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
+  }));
+}
+
+async function queryDailyItemResumeTargets(pool: DatabasePool, filters: Filters): Promise<DailyItemResumeTarget[]> {
+  const params: unknown[] = [];
+  const clauses: string[] = [];
   if (filters.entityId) {
     params.push(filters.entityId);
     clauses.push(`entity_id = $${params.length}`);
   }
-  if (filters.itemNo) {
-    params.push(filters.itemNo);
-    clauses.push(`item_no = $${params.length}`);
-  }
-  return { where: clauses.join(" and "), params };
+  const result = await pool.query<{
+    entity_id: string;
+    effective_from: string;
+    effective_to: string | null;
+    daily_target_qty: string | number;
+    status: string | null;
+  }>(
+    `
+      select entity_id, effective_from::text, effective_to::text, daily_target_qty, status
+      from production_targets
+      ${clauses.length ? `where ${clauses.join(" and ")}` : ""}
+      order by entity_id, effective_from desc
+    `,
+    params
+  );
+  return result.rows.map((row) => ({
+    entityId: row.entity_id,
+    effectiveFrom: dateText(row.effective_from),
+    effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
+    dailyTargetQty: numberValue(row.daily_target_qty),
+    status: row.status
+  }));
 }
 
 async function mappingCoverageSummary(pool: DatabasePool): Promise<MappingCoverageSummary> {
@@ -603,7 +739,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   if (filters.entityId) console.log(`Entity filter: ${filters.entityId}`);
   if (filters.itemNo) console.log(`Item filter: ${filters.itemNo}`);
 
-  const [aggregate, activeDays, targets, latestSync] = await Promise.all([
+  const [aggregate, activeDays, targets, latestSync, sourceRows] = await Promise.all([
     pool.query<{
       output_ok_qty: string | number | null;
       raw_ok_qty: string | number | null;
@@ -629,7 +765,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
           count(*) filter (where ${rejectOutputPredicate()}) as reject_rows,
           count(*) filter (where ${rejectOutputPredicate()} and gross_weight_per_pcs > 0) as reject_conversion_complete_count,
           count(*) as raw_rows,
-          count(*) filter (where not ${okOutputPredicate()}) as excluded_rows
+          count(*) filter (where not (${okOutputPredicate()})) as excluded_rows
         from production_outputs
         where ${where.where}
       `,
@@ -680,19 +816,31 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
         limit 1
       `,
       [SOURCE_SYSTEM, process.env.ODATA_SYNC_MODE === "live"]
-    )
+    ),
+    queryDailyItemResumeSourceRows(pool, filters)
   ]);
 
   const row = aggregate.rows[0];
+  const conversionRows = buildDailyItemResume(sourceRows, [], {
+    from: filters.from,
+    to: filters.to,
+    sourceSystem: SOURCE_SYSTEM,
+    ...(filters.entityId ? { entityId: filters.entityId } : {}),
+    ...(filters.itemNo ? { itemNo: filters.itemNo } : {}),
+    page: 1,
+    pageSize: Math.max(sourceRows.length, 1),
+    sort: "postingDate.desc"
+  }).rows;
+  const conversionTotals = summarizeDailyItemResumeRejectConversions(conversionRows);
   const coverage = computeCoverage(activeDays.rows, targets.rows);
   const kpis = buildDashboardKpiSummary({
     outputOkQty: numberValue(row?.output_ok_qty),
     rejectKg: numberValue(row?.reject_kg),
-    rejectPcsEquivalent: numberValue(row?.reject_pcs_equivalent),
+    rejectPcsEquivalent: conversionTotals.rejectPcsEquivalent,
     prorataTarget: coverage.prorataTarget,
     hasTarget: coverage.hasTarget,
     activeDays: numberValue(row?.active_days),
-    incompleteRejectConversionCount: numberValue(row?.incomplete_reject_conversion_count),
+    incompleteRejectConversionCount: conversionTotals.incompleteCount,
     latestSuccessfulSyncFinishedAt: latestSync.rows[0]?.finished_at ?? null,
     now: new Date(),
     ...(coverage.minAchievementPct ? { minAchievementPct: coverage.minAchievementPct } : {}),
@@ -706,7 +854,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   } else if (kpis.targetStatusReason === "TARGET_MISSING") {
     warnings.push("Achievement is N/A because OK output has no mapped active entity-days for target matching.");
   }
-  if (kpis.rejectConversionStatus === "INCOMPLETE") warnings.push("Reject PCS equivalent is incomplete because reject rows have missing gross weight conversion.");
+  if (kpis.rejectConversionStatus === "INCOMPLETE") warnings.push("Reject PCS equivalent is incomplete because one or more reject rows lack a safe OK-item gross weight conversion.");
   if (coverage.activeEntityDays === 0 && kpis.outputOkQty > 0) warnings.push("OK output exists but no rows are mapped to a master entity, so target coverage cannot be calculated.");
 
   console.log(`Dashboard OK output: ${formatNumber(kpis.outputOkQty, 4)}`);
@@ -719,7 +867,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
   console.log(`Reject conversion status: ${kpis.rejectConversionStatus}; gaps: ${kpis.incompleteRejectConversionCount}`);
   console.log(`Reject rate: ${formatPct(kpis.rejectRatePct)}`);
   console.log(`OK rows count: ${row?.ok_rows ?? 0}; reject rows count: ${row?.reject_rows ?? 0}`);
-  console.log(`Reject PCS Eq complete/incomplete count: ${row?.reject_conversion_complete_count ?? 0}/${row?.incomplete_reject_conversion_count ?? 0}`);
+  console.log(`Reject PCS Eq complete/incomplete count: ${conversionTotals.completeCount}/${conversionTotals.incompleteCount}`);
   console.log(`Raw rows in window: ${row?.raw_rows ?? 0}; excluded from OK KPI: ${row?.excluded_rows ?? 0}`);
   console.log(`Active entity-days: ${coverage.activeEntityDays}; missing target entity-days: ${coverage.missingTargetEntityDays}`);
   console.log(
@@ -774,6 +922,13 @@ function rejectAttachmentCandidates(detail: Record<string, unknown>): readonly R
     : [];
 }
 
+function rejectConversionGapReason(detail: Record<string, unknown>): typeof DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS[number] | null {
+  const reason = typeof detail.conversionGapReason === "string" ? detail.conversionGapReason : "";
+  return DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS.includes(reason as typeof DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS[number])
+    ? reason as typeof DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS[number]
+    : null;
+}
+
 function buildRejectAttachmentStatusBreakdown(rows: readonly DailyItemResumeRow[]) {
   const breakdown = new Map<Exclude<DailyItemResumeRejectAttachmentStatus, "NONE">, { rejectRows: number; groups: number; rejectKg: number }>();
   for (const status of DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES) {
@@ -793,6 +948,24 @@ function buildRejectAttachmentStatusBreakdown(rows: readonly DailyItemResumeRow[
     for (const status of groupStatuses) {
       const current = breakdown.get(status);
       if (current) current.groups += 1;
+    }
+  }
+  return breakdown;
+}
+
+function buildRejectConversionGapBreakdown(rows: readonly DailyItemResumeRow[]) {
+  const breakdown = new Map<typeof DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS[number], { rows: number; rejectKg: number }>();
+  for (const reason of DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS) {
+    breakdown.set(reason, { rows: 0, rejectKg: 0 });
+  }
+  for (const row of rows) {
+    for (const detail of row.rejectDetails) {
+      if (detail.conversionStatus !== "INCOMPLETE") continue;
+      const reason = rejectConversionGapReason(detail) ?? "MISSING_OK_GROSS_WEIGHT";
+      const current = breakdown.get(reason);
+      if (!current) continue;
+      current.rows += 1;
+      current.rejectKg += numberValue(detail.rejectKg as string | number | null | undefined);
     }
   }
   return breakdown;
@@ -821,123 +994,10 @@ async function runDailyItemResume(pool: DatabasePool) {
     pageSize: 20,
     sort: "postingDate.desc"
   };
-  const [rowsResult, targetsResult] = await Promise.all([
-    pool.query<{
-      id: string;
-      posting_date: string;
-      document_no: string | null;
-      external_document_no: string | null;
-      normalized_output_type: string;
-      item_no: string;
-      item_description: string | null;
-      item_category_code: string | null;
-      machine_description: string | null;
-      machine_center_no: string | null;
-      prod_line_no: string | null;
-      prod_line_description: string | null;
-      entity_id: string | null;
-      entity_code: string | null;
-      entity_display_name: string | null;
-      planned_runtime_hours: string | number | null;
-      shift_code: string | null;
-      operator_name: string | null;
-      quantity: string | number;
-      uom: string | null;
-      gross_weight_per_pcs: string | number | null;
-      reject_kg: string | number;
-      reject_pcs_eq: string | number | null;
-    }>(
-      `
-        select
-          po.id,
-          po.posting_date::text,
-          po.document_no,
-          po.external_document_no,
-          po.normalized_output_type,
-          po.item_no,
-          po.item_description,
-          po.item_category_code,
-          po.machine_description,
-          po.machine_center_no,
-          po.prod_line_no,
-          po.prod_line_description,
-          po.entity_id,
-          me.entity_code,
-          me.display_name as entity_display_name,
-          me.planned_runtime_hours,
-          po.shift_code,
-          po.operator_name,
-          po.quantity,
-          po.uom,
-          po.gross_weight_per_pcs,
-          po.reject_kg,
-          po.reject_pcs_eq
-        from production_outputs po
-        left join master_entities me on me.id = po.entity_id
-        where po.source_system = $1
-          and ${outputEntryTypePredicate("po")}
-          and po.posting_date >= $2
-          and po.posting_date <= $3
-          ${baseFilters.entityId ? "and po.entity_id = $4" : ""}
-          ${baseFilters.itemNo ? `and po.item_no = $${baseFilters.entityId ? 5 : 4}` : ""}
-        order by po.posting_date desc, po.id asc
-      `,
-      [
-        SOURCE_SYSTEM,
-        baseFilters.from,
-        baseFilters.to,
-        ...(baseFilters.entityId ? [baseFilters.entityId] : []),
-        ...(baseFilters.itemNo ? [baseFilters.itemNo] : [])
-      ]
-    ),
-    pool.query<{
-      entity_id: string;
-      effective_from: string;
-      effective_to: string | null;
-      daily_target_qty: string | number;
-      status: string | null;
-    }>(
-      `
-        select entity_id, effective_from::text, effective_to::text, daily_target_qty, status
-        from production_targets
-        ${baseFilters.entityId ? "where entity_id = $1" : ""}
-        order by entity_id, effective_from desc
-      `,
-      baseFilters.entityId ? [baseFilters.entityId] : []
-    )
+  const [sourceRows, targets] = await Promise.all([
+    queryDailyItemResumeSourceRows(pool, baseFilters),
+    queryDailyItemResumeTargets(pool, baseFilters)
   ]);
-  const sourceRows: DailyItemResumeSourceRow[] = rowsResult.rows.map((row) => ({
-    id: row.id,
-    postingDate: dateText(row.posting_date),
-    documentNo: row.document_no,
-    externalDocumentNo: row.external_document_no,
-    normalizedOutputType: row.normalized_output_type,
-    itemNo: row.item_no,
-    itemDescription: row.item_description,
-    itemCategoryCode: row.item_category_code,
-    machineDescription: row.machine_description,
-    machineCenterNo: row.machine_center_no,
-    prodLineNo: row.prod_line_no,
-    prodLineDescription: row.prod_line_description,
-    entityId: row.entity_id,
-    entityCode: row.entity_code,
-    entityDisplayName: row.entity_display_name,
-    plannedRuntimeHours: row.planned_runtime_hours === null ? null : numberValue(row.planned_runtime_hours),
-    shiftCode: row.shift_code,
-    operatorName: row.operator_name,
-    quantity: numberValue(row.quantity),
-    uom: row.uom,
-    grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
-    rejectKg: numberValue(row.reject_kg),
-    rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
-  }));
-  const targets: DailyItemResumeTarget[] = targetsResult.rows.map((row) => ({
-    entityId: row.entity_id,
-    effectiveFrom: dateText(row.effective_from),
-    effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
-    dailyTargetQty: numberValue(row.daily_target_qty),
-    status: row.status
-  }));
   const resume = buildDailyItemResume(sourceRows, targets, filters);
   const allRows = buildDailyItemResume(sourceRows, targets, { ...filters, pageSize: Math.max(1, sourceRows.length) }).rows;
   const classificationCounts = sourceRows.reduce(
@@ -970,6 +1030,7 @@ async function runDailyItemResume(pool: DatabasePool) {
     { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, ambiguousRejectAttachmentCount: 0, totalRejectKg: 0, conversionCompleteCount: 0, conversionGaps: 0, targetMissingCount: 0, targetNonMatchedCount: 0 }
   );
   const rejectAttachmentBreakdown = buildRejectAttachmentStatusBreakdown(allRows);
+  const rejectConversionGapBreakdown = buildRejectConversionGapBreakdown(allRows);
 
   console.log("Business Central daily item resume");
   console.log(`Window: ${baseFilters.from} to ${baseFilters.to}`);
@@ -986,6 +1047,11 @@ async function runDailyItemResume(pool: DatabasePool) {
   console.log(`Ambiguous reject attachment count: ${totals.ambiguousRejectAttachmentCount}`);
   console.log(`Total reject kg: ${formatNumber(totals.totalRejectKg, 4)}`);
   console.log(`Reject PCS Eq complete/incomplete count: ${totals.conversionCompleteCount}/${totals.conversionGaps}`);
+  console.log("Reject conversion gap breakdown:");
+  for (const reason of DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS) {
+    const value = rejectConversionGapBreakdown.get(reason) ?? { rows: 0, rejectKg: 0 };
+    console.log(`- ${reason}: rows=${value.rows}; reject_kg=${formatNumber(value.rejectKg, 4)}`);
+  }
   console.log("Reject attachment status breakdown:");
   for (const status of DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES) {
     const value = rejectAttachmentBreakdown.get(status) ?? { rejectRows: 0, groups: 0, rejectKg: 0 };
@@ -1019,6 +1085,31 @@ async function runDailyItemResume(pool: DatabasePool) {
     );
   } else {
     console.log("- none");
+  }
+  console.log("Reject conversion gap examples:");
+  const allGapExamples = allRows.flatMap((row) =>
+    row.rejectDetails
+      .filter((detail) => detail.conversionStatus === "INCOMPLETE")
+      .map((detail) => ({ row, detail }))
+  );
+  const gapExamples = DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS.flatMap((reason) =>
+    allGapExamples.filter((example) => rejectConversionGapReason(example.detail) === reason).slice(0, 2)
+  ).slice(0, 8);
+  if (gapExamples.length === 0) {
+    console.log("- none");
+  }
+  for (const example of gapExamples) {
+    const status = rejectAttachmentStatus(example.detail) ?? "N/A";
+    const hasMatchedOk = status !== "N/A" && isAttachedDailyItemResumeRejectAttachmentStatus(status as DailyItemResumeRejectAttachmentStatus);
+    console.log(`- document_no=${String(example.detail.documentNo ?? "N/A")}`);
+    console.log(`  reject_item=${String(example.detail.itemNo ?? "N/A")}`);
+    console.log(`  reject_kg=${formatNumber(numberValue(example.detail.rejectKg as string | number | null | undefined), 4)}`);
+    console.log(`  attachment_status=${status}`);
+    console.log(`  ok_item=${hasMatchedOk ? example.row.itemNo : "N/A"}`);
+    console.log(`  ok_item_description=${hasMatchedOk ? example.row.itemDescription ?? "N/A" : "N/A"}`);
+    console.log(`  ok_gross_weight=${example.detail.grossWeight === null || typeof example.detail.grossWeight === "undefined" ? "N/A" : formatNumber(numberValue(example.detail.grossWeight as string | number | null | undefined), 6)}`);
+    console.log(`  gross_weight_source=${String(example.detail.grossWeightSource ?? "N/A")}`);
+    console.log(`  reason=${rejectConversionGapReason(example.detail) ?? "MISSING_OK_GROSS_WEIGHT"}`);
   }
   console.log("Ambiguous reject examples:");
   const ambiguousExamples = allRows.flatMap((row) =>

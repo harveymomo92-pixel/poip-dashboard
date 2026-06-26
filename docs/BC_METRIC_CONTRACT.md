@@ -121,15 +121,27 @@ Reject calculations must distinguish:
 3. Conversion gaps when gross weight per PCS is missing.
 4. Reject rate denominator.
 
-Reject PCS equivalent must not silently show zero when conversion data is missing.
+Reject KG is the recorded reject weight from RJ item rows. Reject PCS equivalent is a derived unit conversion used only for reject rate and PCS-based comparison. Reject PCS equivalent must not silently show zero when conversion data is missing.
 
-Current formula:
+For attached reject rows:
+
+```text
+reject PCS equivalent = reject kg / matched OK item gross weight per PCS
+```
+
+Gross weight must come from the matched OK item/group, never from the RJ reject item. Source priority is:
+
+1. `ROW_GROSS_WEIGHT`: the matched OK production output row has a valid positive `gross_weight_per_pcs`.
+2. `ITEM_CONVERSION_MAPPING`: an active reviewed `item_conversion_mappings` row matches the OK `item_no` and OK `uom`.
+3. `MASTER_ENTITY_CONVERSION`: reserved for future reviewed entity-level conversion sources.
+
+Reject rate formula:
 
 ```text
 reject rate = reject PCS equivalent / (OK Output + reject PCS equivalent) * 100
 ```
 
-If `reject_kg > 0` and `gross_weight_per_pcs` is missing/zero, `reject_pcs_eq` is `null`, the conversion gap is counted, and the dashboard marks reject conversion as incomplete.
+If the matched OK gross weight is missing, zero, invalid, or the reject row has no deterministic OK attachment, `reject_pcs_eq` is `null`, the conversion gap is counted with an explicit reason, and the dashboard marks reject conversion as `INCOMPLETE`. When any reject conversion is incomplete, dashboard reject rate is `null`/`N/A`; it must not display `0.00%` from missing PCS equivalent.
 
 Daily item resume reject rows are scoped to the same Business Central Output rows and attach document-first. Reject candidates are non-RJ `PCS` OK rows with the same `document_no`. The resolver attaches only when one OK group is deterministic: same document, then same posting date, then the preferred machine/entity sources (`machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`, mapped entity fallback), then parsed `External_Document_No` context. It never splits reject kg across multiple OK rows.
 
@@ -143,6 +155,15 @@ Reject attachment statuses:
 6. `REJECT_ONLY`
 
 `AMBIGUOUS_REJECT_ATTACHMENT` means multiple OK candidates remain after deterministic narrowing; reject kg stays on the unresolved reject row and is not double-counted. `REJECT_ONLY` means no same-document OK candidate exists. Reject PCS equivalent uses the matched OK document gross weight where available; missing or non-positive gross weight is `INCOMPLETE`, never a trustworthy zero.
+
+Reject conversion gap reasons:
+
+1. `MISSING_OK_GROSS_WEIGHT`
+2. `ZERO_OR_INVALID_OK_GROSS_WEIGHT`
+3. `NO_MATCHED_OK_ROW`
+4. `AMBIGUOUS_REJECT_ATTACHMENT`
+5. `REJECT_ONLY`
+6. `MISSING_CONVERSION_MAPPING`
 
 ## Machine and Entity Mapping
 
@@ -203,9 +224,10 @@ Target coverage after mapping:
 
 Conversion mapping:
 
-1. Reject rows with `reject_kg > 0` and missing/zero `gross_weight_per_pcs` are conversion gaps.
-2. Item/UOM conversion mappings store reviewed `gross_weight_per_pcs`.
-3. Applying a conversion recomputes `reject_pcs_eq` only for rows where conversion is missing and writes audit/data-quality resolution records.
+1. Attached reject rows use the matched OK item gross weight. The RJ item gross weight is not a valid conversion source.
+2. Item/UOM conversion mappings store reviewed OK-item `gross_weight_per_pcs` values and are applied by OK `item_no`/`uom`.
+3. Applying a conversion recomputes only safe missing conversions and writes audit/data-quality resolution records.
+4. Reject-only and ambiguous attachment rows remain `N/A` until the attachment is resolved; a conversion mapping alone must not attach reject kg to an OK row.
 
 ## V1 Master Import Contract
 

@@ -173,17 +173,38 @@ function rejectAttachmentLabel(status: string): string {
   return "Attached";
 }
 
+function rejectConversionReasonLabel(reason: string | null | undefined): string {
+  if (reason === "REJECT_ONLY" || reason === "NO_MATCHED_OK_ROW") return "Konversi reject belum lengkap: output OK terkait belum ditemukan";
+  if (reason === "AMBIGUOUS_REJECT_ATTACHMENT") return "Konversi reject belum lengkap: kandidat output OK masih ambigu";
+  if (reason === "ZERO_OR_INVALID_OK_GROSS_WEIGHT") return "Konversi reject belum lengkap: gross weight OK item tidak valid";
+  if (reason === "MISSING_CONVERSION_MAPPING") return "Konversi reject belum lengkap: mapping gross weight OK item belum tersedia";
+  return "Konversi reject belum lengkap: gross weight OK item belum tersedia";
+}
+
 function formatResumeNote(note: string): string {
   if (note === "AMBIGUOUS_REJECT_ATTACHMENT") return "Reject belum ditempel: beberapa kandidat OK";
   if (note === "NO_MATCHING_OK_ROW_FOR_REJECT_DOCUMENT") return "Reject tanpa output OK terkait";
-  if (note === "REJECT_CONVERSION_INCOMPLETE") return "Konversi reject belum lengkap";
+  if (note === "REJECT_CONVERSION_INCOMPLETE") return "Konversi reject belum lengkap: gross weight OK item belum tersedia";
+  if (note === "MISSING_OK_GROSS_WEIGHT" || note === "ZERO_OR_INVALID_OK_GROSS_WEIGHT" || note === "NO_MATCHED_OK_ROW" || note === "REJECT_ONLY" || note === "MISSING_CONVERSION_MAPPING") {
+    return rejectConversionReasonLabel(note);
+  }
   if (note === "WORK_HOURS_DEFAULT_24") return "Jam kerja memakai default 24";
   if (note === "EXTERNAL_DOCUMENT_UNPARSED") return "External document belum terbaca";
   if (note === "HAS_NEGATIVE_OUTPUT_CORRECTION") return "Ada koreksi output negatif";
   return note;
 }
 
-function formatDetailValue(value: unknown): string {
+function firstRejectConversionGapReason(row: DailyItemResumeRow): string | null {
+  for (const detail of row.rejectDetails) {
+    if (detail.conversionStatus !== "INCOMPLETE") continue;
+    return typeof detail.conversionGapReason === "string" ? detail.conversionGapReason : null;
+  }
+  return null;
+}
+
+function formatDetailValue(key: string, value: unknown): string {
+  if (key === "conversionGapReason") return rejectConversionReasonLabel(typeof value === "string" ? value : null);
+  if (key === "grossWeightSource" && !value) return "N/A";
   if (Array.isArray(value) || (value !== null && typeof value === "object")) return JSON.stringify(value);
   return String(value ?? "N/A");
 }
@@ -195,7 +216,7 @@ function DetailList({ summary, rows }: Readonly<{ summary: string; rows: readonl
       <summary>{summary}</summary>
       <div>
         {rows.map((row, index) => (
-          <pre key={index}>{Object.entries(row).map(([key, value]) => `${key}: ${formatDetailValue(value)}`).join("\n")}</pre>
+          <pre key={index}>{Object.entries(row).map(([key, value]) => `${key}: ${formatDetailValue(key, value)}`).join("\n")}</pre>
         ))}
       </div>
     </details>
@@ -395,7 +416,7 @@ export function DashboardPageClient() {
             <MetricCard icon={<Icons.target />} label="Target" value={formatNumber(summary.kpis.prorataTarget, 1)} detail={summary.kpis.targetStatusReason ? <StatusBadge status={summary.kpis.targetStatusReason} label={summary.kpis.targetStatusReason === "TARGET_ZERO" ? "Target is zero" : summary.kpis.targetStatusReason === "TARGET_MISSING" ? "Target missing" : "No output"} /> : "Prorated production target"} tone={targetTone} />
             <MetricCard icon={<Icons.achievement />} label="Achievement" value={formatPct(summary.kpis.achievementPct)} detail={summary.kpis.targetStatusReason ? <StatusBadge status={summary.kpis.targetStatusReason} /> : <StatusBadge status={summary.kpis.targetStatus} />} tone={targetTone} />
             <MetricCard icon={<Icons.scale />} label="Reject KG" value={formatNumber(summary.kpis.rejectKg, 2)} detail="Recorded reject weight" tone={summary.kpis.rejectKg > 0 ? "warning" : "neutral"} />
-            <MetricCard icon={<Icons.reject />} label="Reject PCS Eq" value={formatNumber(summary.kpis.rejectPcsEquivalent, 1)} detail={summary.kpis.incompleteRejectConversionCount ? `${summary.kpis.incompleteRejectConversionCount} conversion gaps` : "Conversion complete"} tone={summary.kpis.incompleteRejectConversionCount ? "warning" : "neutral"} />
+            <MetricCard icon={<Icons.reject />} label="Reject PCS Eq" value={summary.kpis.incompleteRejectConversionCount && summary.kpis.rejectPcsEquivalent === 0 ? "N/A" : formatNumber(summary.kpis.rejectPcsEquivalent, 1)} detail={summary.kpis.incompleteRejectConversionCount ? `${summary.kpis.incompleteRejectConversionCount} conversion gaps` : "Conversion complete"} tone={summary.kpis.incompleteRejectConversionCount ? "warning" : "neutral"} />
             <MetricCard icon={<Icons.percent />} label="Reject Rate" value={formatPct(summary.kpis.rejectRatePct)} detail="Reject against total production" tone="info" />
             <MetricCard icon={<Icons.downtime />} label="Downtime" value={`${formatNumber(summary.downtime.totalDurationMinutes)} min`} detail={`${summary.downtime.openEventCount} events still open`} tone={summary.downtime.openEventCount ? "warning" : "neutral"} />
             <MetricCard icon={<Icons.database />} label="Freshness" value={summary.dataFreshness.freshnessMinutes === null ? "Never synced" : `${summary.dataFreshness.freshnessMinutes} min`} detail={<StatusBadge status={summary.dataFreshness.status} />} tone={freshnessTone} />
@@ -528,7 +549,10 @@ export function DashboardPageClient() {
                       {isAttachedRejectStatus(row.rejectAttachmentStatus) ? <StatusBadge status="COVERED" label={rejectAttachmentLabel(row.rejectAttachmentStatus)} /> : null}
                       {row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT" ? <StatusBadge status="WARNING" label="Unresolved candidates" /> : null}
                     </td>
-                    <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>
+                    <td>
+                      {row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}
+                      {row.rejectConversionStatus === "INCOMPLETE" ? <><br /><span className="muted-cell">{rejectConversionReasonLabel(firstRejectConversionGapReason(row))}</span></> : null}
+                    </td>
                     <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /> {row.targetReason !== "TARGET_MATCHED" ? <StatusBadge status={row.targetReason} /> : null}</td>
                     <td>{formatPct(row.rejectPct)}</td>
                     <td>{row.grossWeight === null ? "N/A" : formatNumber(row.grossWeight, 4)}</td>

@@ -165,9 +165,9 @@ pnpm bc:target-coverage
 
 `pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, preferred entity source usage, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
 
-`pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when gross-weight conversion is missing, and whether OK output exists without mapped entities.
+`pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when the matched OK item has no safe gross-weight conversion or reject attachment is unresolved, and whether OK output exists without mapped entities. Reject rate is `N/A` while any reject PCS conversion remains incomplete.
 
-`pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, parsed `External_Document_No` shift/work-hours/operator details, deterministic reject attachment statuses, reject-only groups, ambiguous reject examples, conversion gaps, target gaps, target reason breakdown, and sample grouped rows. The reason breakdown prints row count, net output, top machines/entities, top items, and sample rows for `TARGET_MATCHED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, `TARGET_BUCKET_MISSING`, and `TARGET_ZERO`.
+`pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, parsed `External_Document_No` shift/work-hours/operator details, deterministic reject attachment statuses, reject-only groups, ambiguous reject examples, conversion gap reason breakdown, target gaps, target reason breakdown, and sample grouped rows. The reject conversion breakdown prints reason-coded counts for `MISSING_OK_GROSS_WEIGHT`, `ZERO_OR_INVALID_OK_GROSS_WEIGHT`, `NO_MATCHED_OK_ROW`, `AMBIGUOUS_REJECT_ATTACHMENT`, `REJECT_ONLY`, and `MISSING_CONVERSION_MAPPING`, plus incomplete-row examples with reject item, attachment status, OK item context, OK gross weight, gross-weight source, and reason.
 
 `pnpm bc:target-coverage` groups net OK Output by month and entity/preferred BC source, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
 
@@ -276,12 +276,14 @@ Full details: `docs/V1_MASTER_DATA_MIGRATION_PLAN.md`.
 
 Use `/master-data` → Conversion Gap View when reject PCS equivalent is incomplete.
 
-1. Review item/UOM groups with `reject_kg > 0` and missing gross-weight conversion.
-2. Enter the reviewed gross weight per PCS for that exact item/UOM.
-3. Commit only after checking the affected reject row count.
-4. Re-run `pnpm bc:profile` or `pnpm bc:reconcile` to verify conversion gaps decreased.
+1. Review the daily item resume gap breakdown first. If the reason is `REJECT_ONLY` or `AMBIGUOUS_REJECT_ATTACHMENT`, resolve the attachment/data issue before adding conversion data.
+2. For attached rows with missing OK-item gross weight, review the OK item/UOM group and enter the reviewed gross weight per PCS for that exact OK item/UOM.
+3. Commit only after checking the affected row count.
+4. Re-run `pnpm bc:daily-item-resume` and `pnpm bc:reconcile` to verify conversion gaps decreased.
 
 Conversion commits update only rows where `reject_pcs_eq` or `gross_weight_per_pcs` is missing/invalid. They do not overwrite already converted rows.
+
+Reject KG and reject PCS equivalent are different metrics. Reject KG always remains the source weight aggregate. Reject PCS equivalent is calculated as `reject kg / matched OK item gross weight per PCS` and is `N/A` when the OK gross weight or deterministic attachment is not available. Do not use the RJ item gross weight to fill this conversion.
 
 ## Data quality operations
 

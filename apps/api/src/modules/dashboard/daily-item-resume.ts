@@ -13,6 +13,18 @@ export type DailyItemResumeTargetReason =
 
 export type DailyItemResumeTargetSource = "NONE" | "ENTITY_DAILY_TARGET" | "BUCKET_DAILY_TARGET";
 export type DailyItemResumeWorkHoursSource = "EXTERNAL_DOCUMENT" | "FALLBACK" | "UNKNOWN";
+export type DailyItemResumeRejectConversionStatus = "COMPLETE" | "INCOMPLETE";
+export type DailyItemResumeRejectConversionGapReason =
+  | "NO_MATCHED_OK_ROW"
+  | "MISSING_OK_GROSS_WEIGHT"
+  | "ZERO_OR_INVALID_OK_GROSS_WEIGHT"
+  | "AMBIGUOUS_REJECT_ATTACHMENT"
+  | "REJECT_ONLY"
+  | "MISSING_CONVERSION_MAPPING";
+export type DailyItemResumeGrossWeightSource =
+  | "ROW_GROSS_WEIGHT"
+  | "ITEM_CONVERSION_MAPPING"
+  | "MASTER_ENTITY_CONVERSION";
 export type DailyItemResumeAttachedRejectAttachmentStatus =
   | "ATTACHED_BY_DOCUMENT"
   | "ATTACHED_BY_DOCUMENT_DATE"
@@ -86,6 +98,8 @@ export interface DailyItemResumeSourceRow {
   readonly grossWeightPerPcs: number | null;
   readonly rejectKg: number;
   readonly rejectPcsEq: number | null;
+  readonly mappedGrossWeightPerPcs?: number | null;
+  readonly mappedGrossWeightSource?: DailyItemResumeGrossWeightSource | null;
 }
 
 export interface DailyItemResumeTarget {
@@ -127,7 +141,7 @@ export interface DailyItemResumeRow {
   readonly uom: string;
   readonly rejectKg: number;
   readonly rejectPcsEq: number | null;
-  readonly rejectConversionStatus: "COMPLETE" | "INCOMPLETE" | "NOT_APPLICABLE";
+  readonly rejectConversionStatus: DailyItemResumeRejectConversionStatus | "NOT_APPLICABLE";
   readonly rejectAttachmentStatus: DailyItemResumeRejectAttachmentStatus;
   readonly rejectPct: number | null;
   readonly achievementPct: number | null;
@@ -151,6 +165,15 @@ export interface DailyItemResumeRejectAttachmentCandidate {
   readonly shift: string;
   readonly workHours: number | null;
 }
+
+export const DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS = [
+  "MISSING_OK_GROSS_WEIGHT",
+  "ZERO_OR_INVALID_OK_GROSS_WEIGHT",
+  "NO_MATCHED_OK_ROW",
+  "AMBIGUOUS_REJECT_ATTACHMENT",
+  "REJECT_ONLY",
+  "MISSING_CONVERSION_MAPPING"
+] as const satisfies readonly DailyItemResumeRejectConversionGapReason[];
 
 interface GroupState {
   readonly key: string;
@@ -200,6 +223,17 @@ export interface DailyItemResumeRejectDocumentSummary {
   readonly rejectItems: readonly string[];
 }
 
+export interface DailyItemResumeRejectConversionSummary {
+  readonly rejectPcsEquivalent: number;
+  readonly completeCount: number;
+  readonly incompleteCount: number;
+  readonly gapBreakdown: readonly {
+    readonly reason: DailyItemResumeRejectConversionGapReason;
+    readonly rowCount: number;
+    readonly rejectKg: number;
+  }[];
+}
+
 export function summarizeDailyItemResumeTargetReasons(
   rows: readonly DailyItemResumeRow[]
 ): readonly DailyItemResumeTargetReasonSummary[] {
@@ -245,6 +279,48 @@ export function summarizeDailyItemResumeRejectDocuments(
     okItems: [...value.okItems],
     rejectItems: [...value.rejectItems]
   }));
+}
+
+function detailNumber(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function summarizeDailyItemResumeRejectConversions(
+  rows: readonly DailyItemResumeRow[]
+): DailyItemResumeRejectConversionSummary {
+  const gapBreakdown = new Map<DailyItemResumeRejectConversionGapReason, { rowCount: number; rejectKg: number }>();
+  for (const reason of DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS) {
+    gapBreakdown.set(reason, { rowCount: 0, rejectKg: 0 });
+  }
+  let rejectPcsEquivalent = 0;
+  let completeCount = 0;
+  let incompleteCount = 0;
+  for (const row of rows) {
+    for (const detail of row.rejectDetails) {
+      if (detail.conversionStatus === "COMPLETE") {
+        rejectPcsEquivalent += detailNumber(detail.rejectPcsEq);
+        completeCount += 1;
+        continue;
+      }
+      if (detail.conversionStatus !== "INCOMPLETE") continue;
+      incompleteCount += 1;
+      const rawReason = typeof detail.conversionGapReason === "string" ? detail.conversionGapReason : "";
+      const reason = DAILY_ITEM_RESUME_REJECT_CONVERSION_GAP_REASONS.includes(rawReason as DailyItemResumeRejectConversionGapReason)
+        ? rawReason as DailyItemResumeRejectConversionGapReason
+        : "MISSING_OK_GROSS_WEIGHT";
+      const current = gapBreakdown.get(reason);
+      if (!current) continue;
+      current.rowCount += 1;
+      current.rejectKg += detailNumber(detail.rejectKg);
+    }
+  }
+  return {
+    rejectPcsEquivalent,
+    completeCount,
+    incompleteCount,
+    gapBreakdown: [...gapBreakdown.entries()].map(([reason, value]) => ({ reason, ...value }))
+  };
 }
 
 export function normalizeDailyItemResumeValue(value: string | null | undefined): string {
@@ -751,6 +827,59 @@ function matchesSearch(row: DailyItemResumeRow, search: string | undefined): boo
   return normalizeDailyItemResumeValue(haystack).includes(needle);
 }
 
+interface GrossWeightResolution {
+  readonly grossWeight: number | null;
+  readonly source: DailyItemResumeGrossWeightSource | null;
+  readonly gapReason: DailyItemResumeRejectConversionGapReason | null;
+}
+
+function isValidGrossWeight(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function hasInvalidGrossWeight(value: number | null | undefined): boolean {
+  return typeof value === "number" && (!Number.isFinite(value) || value <= 0);
+}
+
+function resolveGrossWeight(rows: readonly DailyItemResumeSourceRow[]): GrossWeightResolution {
+  if (rows.length === 0) {
+    return { grossWeight: null, source: null, gapReason: "NO_MATCHED_OK_ROW" };
+  }
+
+  const rowGrossWeight = rows.find((row) => isValidGrossWeight(row.grossWeightPerPcs))?.grossWeightPerPcs ?? null;
+  if (rowGrossWeight !== null) {
+    return { grossWeight: rowGrossWeight, source: "ROW_GROSS_WEIGHT", gapReason: null };
+  }
+
+  if (rows.some((row) => hasInvalidGrossWeight(row.grossWeightPerPcs))) {
+    return { grossWeight: null, source: null, gapReason: "ZERO_OR_INVALID_OK_GROSS_WEIGHT" };
+  }
+
+  const mappedRow = rows.find((row) => isValidGrossWeight(row.mappedGrossWeightPerPcs));
+  if (mappedRow?.mappedGrossWeightPerPcs) {
+    return {
+      grossWeight: mappedRow.mappedGrossWeightPerPcs,
+      source: mappedRow.mappedGrossWeightSource ?? "ITEM_CONVERSION_MAPPING",
+      gapReason: null
+    };
+  }
+
+  if (rows.some((row) => hasInvalidGrossWeight(row.mappedGrossWeightPerPcs))) {
+    return { grossWeight: null, source: null, gapReason: "ZERO_OR_INVALID_OK_GROSS_WEIGHT" };
+  }
+
+  return { grossWeight: null, source: null, gapReason: "MISSING_OK_GROSS_WEIGHT" };
+}
+
+function rejectConversionGapReason(
+  attachmentStatus: DailyItemResumeRejectAttachmentStatus,
+  grossWeightResolution: GrossWeightResolution
+): DailyItemResumeRejectConversionGapReason {
+  if (attachmentStatus === "REJECT_ONLY") return "REJECT_ONLY";
+  if (attachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT") return "AMBIGUOUS_REJECT_ATTACHMENT";
+  return grossWeightResolution.gapReason ?? "MISSING_OK_GROSS_WEIGHT";
+}
+
 function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[]): DailyItemResumeRow {
   const allRows = [...group.okRows, ...group.rejectRows];
   const anchor = group.okRows[0] ?? group.rejectRows[0] ?? null;
@@ -765,7 +894,8 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
   const uom = uoms.length === 0 ? "N/A" : uoms.length === 1 ? uoms[0] ?? "N/A" : "MIXED";
   const workHoursResolution = resolveGroupWorkHours(group.okRows.length ? group.okRows : allRows, group.plannedRuntimeHours && group.plannedRuntimeHours > 0 ? group.plannedRuntimeHours : 24);
   const workHours = workHoursResolution.workHours;
-  const grossWeight = group.okRows.map((row) => row.grossWeightPerPcs).find((value) => value !== null && value > 0) ?? null;
+  const grossWeightResolution = resolveGrossWeight(group.okRows);
+  const grossWeight = grossWeightResolution.grossWeight;
   const targetResolution = resolveDailyItemResumeTarget({
     entityId: group.entityId,
     entityCode: group.entityCode,
@@ -812,11 +942,12 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     transactionProrataFormula: dailyTarget === null ? "N/A" : "dailyTarget * workHours / 24",
     achievementFormula: transactionProrataTarget && transactionProrataTarget > 0 ? "netOutputQty / transactionProrataTarget * 100" : "N/A"
   };
-  const okGrossByDocument = new Map<string, number>();
+  const okGrossByDocument = new Map<string, GrossWeightResolution>();
   for (const row of group.okRows) {
     const doc = compact(row.documentNo);
-    if (!doc || !row.grossWeightPerPcs || row.grossWeightPerPcs <= 0 || okGrossByDocument.has(doc)) continue;
-    okGrossByDocument.set(doc, row.grossWeightPerPcs);
+    if (!doc || okGrossByDocument.has(doc)) continue;
+    const resolution = resolveGrossWeight([row]);
+    if (resolution.grossWeight !== null) okGrossByDocument.set(doc, resolution);
   }
 
   let rejectKg = 0;
@@ -825,8 +956,10 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
   const rejectDetails = group.rejectRows.map((row) => {
     const kg = rejectKgForRow(row);
     const doc = compact(row.documentNo);
-    const docGrossWeight = doc ? okGrossByDocument.get(doc) ?? grossWeight : grossWeight;
-    const pcsEq = docGrossWeight && docGrossWeight > 0 ? kg / docGrossWeight : null;
+    const attachmentStatus = group.rejectAttachmentStatusByRowId[row.id] ?? group.rejectAttachmentStatus;
+    const docGrossWeight = doc ? okGrossByDocument.get(doc) ?? grossWeightResolution : grossWeightResolution;
+    const pcsEq = docGrossWeight.grossWeight && docGrossWeight.grossWeight > 0 ? kg / docGrossWeight.grossWeight : null;
+    const conversionStatus: DailyItemResumeRejectConversionStatus = pcsEq === null ? "INCOMPLETE" : "COMPLETE";
     rejectKg += kg;
     if (pcsEq === null) conversionGaps += 1;
     else rejectPcsEq += pcsEq;
@@ -838,10 +971,14 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
       rejectKg: kg,
       uom: row.uom,
       postingDate: row.postingDate,
-      attachmentStatus: group.rejectAttachmentStatusByRowId[row.id] ?? group.rejectAttachmentStatus,
-      grossWeight: docGrossWeight ?? null,
+      attachmentStatus,
+      grossWeight: docGrossWeight.grossWeight,
+      grossWeightSource: pcsEq === null ? null : docGrossWeight.source,
       rejectPcsEq: pcsEq,
-      conversionStatus: pcsEq === null ? "INCOMPLETE" : "COMPLETE",
+      conversionStatus,
+      conversionGapReason: conversionStatus === "INCOMPLETE"
+        ? rejectConversionGapReason(attachmentStatus, docGrossWeight)
+        : null,
       rawExternalDocument: row.externalDocumentNo,
       parsedExternalDocument: parseExternalDocument(row.externalDocumentNo),
       operatorName: resolveOperatorName(row),

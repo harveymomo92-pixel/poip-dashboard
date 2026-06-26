@@ -52,11 +52,14 @@ export function buildDashboardKpiSummary(input: DashboardKpiInput): DashboardKpi
     ? calculateAchievementPct(input.outputOkQty, input.prorataTarget)
     : null;
   const latestSync = input.latestSuccessfulSyncFinishedAt;
+  const rejectConversionStatus: RejectConversionStatus = input.incompleteRejectConversionCount > 0 ? "INCOMPLETE" : "COMPLETE";
   return {
     outputOkQty: input.outputOkQty,
     rejectKg: input.rejectKg,
     rejectPcsEquivalent: input.rejectPcsEquivalent,
-    rejectRatePct: calculateRejectRate(input.outputOkQty, input.rejectPcsEquivalent),
+    rejectRatePct: rejectConversionStatus === "INCOMPLETE"
+      ? null
+      : calculateRejectRate(input.outputOkQty, input.rejectPcsEquivalent),
     prorataTarget: input.prorataTarget,
     achievementPct,
     targetStatus: getTargetStatus({
@@ -71,7 +74,7 @@ export function buildDashboardKpiSummary(input: DashboardKpiInput): DashboardKpi
         : {})
     }),
     targetStatusReason: targetStatusReason(input),
-    rejectConversionStatus: input.incompleteRejectConversionCount > 0 ? "INCOMPLETE" : "COMPLETE",
+    rejectConversionStatus,
     dataFreshnessStatus: calculateDataFreshnessStatus({
       latestSuccessfulSyncFinishedAt: latestSync,
       now: input.now

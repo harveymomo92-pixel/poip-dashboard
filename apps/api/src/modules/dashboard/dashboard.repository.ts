@@ -7,6 +7,7 @@ import type { DatabaseConnection } from "../database/database.module.js";
 import {
   buildDailyItemResume,
   dailyItemResumeGroupKey,
+  summarizeDailyItemResumeRejectConversions,
   type DailyItemResumeSourceRow,
   type DailyItemResumeTarget
 } from "./daily-item-resume.js";
@@ -35,6 +36,12 @@ interface AggregateRow {
   readonly incomplete_reject_conversion_count: string | number | null;
   readonly active_days: string | number | null;
   readonly row_count: string | number | null;
+}
+
+interface RejectConversionAggregate {
+  readonly rejectPcsEquivalent: number;
+  readonly incompleteRejectConversionCount: number;
+  readonly completeRejectConversionCount: number;
 }
 
 interface ActiveEntityDayRow {
@@ -238,23 +245,24 @@ export class DashboardReadRepository {
 
   async getSummary(filters: DashboardFilters): Promise<DashboardSummaryDto> {
     const where = buildWhere(filters);
-    const [aggregate, activeEntityDays, targets, latestSync, dataQuality, downtime] = await Promise.all([
+    const [aggregate, activeEntityDays, targets, latestSync, dataQuality, downtime, rejectConversion] = await Promise.all([
       this.queryAggregate(where),
       this.queryActiveEntityDays(where),
       this.queryTargets(filters),
       this.queryLatestSuccessfulSync(filters.sourceSystem),
       this.getDataQualitySummary(filters),
-      this.queryDowntimeSummary(filters)
+      this.queryDowntimeSummary(filters),
+      this.queryRejectConversionAggregate(filters)
     ]);
     const coverage = computeTargetCoverage(activeEntityDays, targets);
     const kpis = buildDashboardKpiSummary({
       outputOkQty: numberValue(aggregate.output_ok_qty),
       rejectKg: numberValue(aggregate.reject_kg),
-      rejectPcsEquivalent: numberValue(aggregate.reject_pcs_equivalent),
+      rejectPcsEquivalent: rejectConversion.rejectPcsEquivalent,
       prorataTarget: coverage.prorataTarget,
       hasTarget: coverage.hasTarget,
       activeDays: numberValue(aggregate.active_days),
-      incompleteRejectConversionCount: numberValue(aggregate.incomplete_reject_conversion_count),
+      incompleteRejectConversionCount: rejectConversion.incompleteRejectConversionCount,
       latestSuccessfulSyncFinishedAt: latestSync,
       now: new Date(),
       ...(coverage.minAchievementPct ? { minAchievementPct: coverage.minAchievementPct } : {}),
@@ -638,6 +646,8 @@ export class DashboardReadRepository {
         quantity: string | number;
         uom: string | null;
         gross_weight_per_pcs: string | number | null;
+        mapped_gross_weight_per_pcs: string | number | null;
+        mapped_gross_weight_source: string | null;
         reject_kg: string | number;
         reject_pcs_eq: string | number | null;
       }>(
@@ -664,10 +674,21 @@ export class DashboardReadRepository {
             po.quantity,
             po.uom,
             po.gross_weight_per_pcs,
+            icm.gross_weight_per_pcs as mapped_gross_weight_per_pcs,
+            case when icm.gross_weight_per_pcs is not null then 'ITEM_CONVERSION_MAPPING' else null end as mapped_gross_weight_source,
             po.reject_kg,
             po.reject_pcs_eq
           from production_outputs po
           left join master_entities me on me.id = po.entity_id
+          left join lateral (
+            select gross_weight_per_pcs
+            from item_conversion_mappings
+            where item_no = po.item_no
+              and uom = coalesce(po.uom, '')
+              and is_active = true
+            order by updated_at desc, created_at desc
+            limit 1
+          ) icm on true
           where ${sourceWhere.where}
             and exists (
               select 1
@@ -703,6 +724,8 @@ export class DashboardReadRepository {
       quantity: numberValue(row.quantity),
       uom: row.uom,
       grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
+      mappedGrossWeightPerPcs: row.mapped_gross_weight_per_pcs === null ? null : numberValue(row.mapped_gross_weight_per_pcs),
+      mappedGrossWeightSource: row.mapped_gross_weight_source === null ? null : "ITEM_CONVERSION_MAPPING",
       rejectKg: numberValue(row.reject_kg),
       rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
     }));
@@ -896,6 +919,126 @@ export class DashboardReadRepository {
         durationMinutes: numberValue(item.duration_minutes),
         eventCount: numberValue(item.event_count)
       }))
+    };
+  }
+
+  private async queryRejectConversionAggregate(filters: DashboardFilters): Promise<RejectConversionAggregate> {
+    const where = buildWhere(filters);
+    const result = await this.database.pool.query<{
+      id: string;
+      posting_date: string;
+      document_no: string | null;
+      external_document_no: string | null;
+      normalized_output_type: string;
+      item_no: string;
+      item_description: string | null;
+      item_category_code: string | null;
+      machine_description: string | null;
+      machine_center_no: string | null;
+      prod_line_no: string | null;
+      prod_line_description: string | null;
+      entity_id: string | null;
+      entity_code: string | null;
+      entity_display_name: string | null;
+      planned_runtime_hours: string | number | null;
+      shift_code: string | null;
+      operator_name: string | null;
+      quantity: string | number;
+      uom: string | null;
+      gross_weight_per_pcs: string | number | null;
+      mapped_gross_weight_per_pcs: string | number | null;
+      mapped_gross_weight_source: string | null;
+      reject_kg: string | number;
+      reject_pcs_eq: string | number | null;
+    }>(
+      `
+        select
+          po.id,
+          po.posting_date::text,
+          po.document_no,
+          po.external_document_no,
+          po.normalized_output_type,
+          po.item_no,
+          po.item_description,
+          po.item_category_code,
+          po.machine_description,
+          po.machine_center_no,
+          po.prod_line_no,
+          po.prod_line_description,
+          po.entity_id,
+          me.entity_code,
+          me.display_name as entity_display_name,
+          me.planned_runtime_hours,
+          po.shift_code,
+          po.operator_name,
+          po.quantity,
+          po.uom,
+          po.gross_weight_per_pcs,
+          icm.gross_weight_per_pcs as mapped_gross_weight_per_pcs,
+          case when icm.gross_weight_per_pcs is not null then 'ITEM_CONVERSION_MAPPING' else null end as mapped_gross_weight_source,
+          po.reject_kg,
+          po.reject_pcs_eq
+        from production_outputs po
+        left join master_entities me on me.id = po.entity_id
+        left join lateral (
+          select gross_weight_per_pcs
+          from item_conversion_mappings
+          where item_no = po.item_no
+            and uom = coalesce(po.uom, '')
+            and is_active = true
+          order by updated_at desc, created_at desc
+          limit 1
+        ) icm on true
+        where ${where.where}
+        order by po.posting_date desc, po.id asc
+      `,
+      where.params
+    );
+
+    const sourceRows: DailyItemResumeSourceRow[] = result.rows.map((row) => ({
+      id: row.id,
+      postingDate: dateText(row.posting_date),
+      documentNo: row.document_no,
+      externalDocumentNo: row.external_document_no,
+      normalizedOutputType: row.normalized_output_type,
+      itemNo: row.item_no,
+      itemDescription: row.item_description,
+      itemCategoryCode: row.item_category_code,
+      machineDescription: row.machine_description,
+      machineCenterNo: row.machine_center_no,
+      prodLineNo: row.prod_line_no,
+      prodLineDescription: row.prod_line_description,
+      entityId: row.entity_id,
+      entityCode: row.entity_code,
+      entityDisplayName: row.entity_display_name,
+      plannedRuntimeHours: row.planned_runtime_hours === null ? null : numberValue(row.planned_runtime_hours),
+      shiftCode: row.shift_code,
+      operatorName: row.operator_name,
+      quantity: numberValue(row.quantity),
+      uom: row.uom,
+      grossWeightPerPcs: row.gross_weight_per_pcs === null ? null : numberValue(row.gross_weight_per_pcs),
+      mappedGrossWeightPerPcs: row.mapped_gross_weight_per_pcs === null ? null : numberValue(row.mapped_gross_weight_per_pcs),
+      mappedGrossWeightSource: row.mapped_gross_weight_source === null ? null : "ITEM_CONVERSION_MAPPING",
+      rejectKg: numberValue(row.reject_kg),
+      rejectPcsEq: row.reject_pcs_eq === null ? null : numberValue(row.reject_pcs_eq)
+    }));
+    const resumeRows = buildDailyItemResume(sourceRows, [], {
+      from: filters.from,
+      to: filters.to,
+      sourceSystem: filters.sourceSystem,
+      ...(filters.entityId ? { entityId: filters.entityId } : {}),
+      ...(filters.machineCenterNo ? { machine: filters.machineCenterNo } : {}),
+      ...(filters.itemNo ? { itemNo: filters.itemNo } : {}),
+      page: 1,
+      pageSize: Math.max(sourceRows.length, 1),
+      sort: "postingDate.desc"
+    }).rows;
+
+    const summary = summarizeDailyItemResumeRejectConversions(resumeRows);
+    return {
+      rejectPcsEquivalent: summary.rejectPcsEquivalent,
+      incompleteRejectConversionCount: summary.incompleteCount,
+      completeRejectConversionCount: summary.completeCount
     };
   }
 

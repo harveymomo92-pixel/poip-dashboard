@@ -16,12 +16,29 @@ test("buildDashboardKpiSummary calculates achievement and reject rate", () => {
   });
 
   assert.equal(summary.achievementPct, 90);
-  assert.equal(summary.rejectRatePct, 10);
+  assert.equal(summary.rejectRatePct, null);
   assert.equal(summary.targetStatus, "UNDER_TARGET");
   assert.equal(summary.targetStatusReason, null);
   assert.equal(summary.rejectConversionStatus, "INCOMPLETE");
   assert.equal(summary.dataFreshnessStatus, "FRESH");
   assert.equal(summary.freshnessMinutes, 60);
+});
+
+test("buildDashboardKpiSummary calculates reject rate only when conversion is complete", () => {
+  const summary = buildDashboardKpiSummary({
+    outputOkQty: 90,
+    rejectKg: 5,
+    rejectPcsEquivalent: 10,
+    prorataTarget: 100,
+    hasTarget: true,
+    activeDays: 2,
+    incompleteRejectConversionCount: 0,
+    latestSuccessfulSyncFinishedAt: new Date("2026-06-22T07:00:00.000Z"),
+    now: new Date("2026-06-22T08:00:00.000Z")
+  });
+
+  assert.equal(summary.rejectRatePct, 10);
+  assert.equal(summary.rejectConversionStatus, "COMPLETE");
 });
 
 test("buildDashboardKpiSummary reports no output and never synced states", () => {
