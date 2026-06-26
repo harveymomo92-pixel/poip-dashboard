@@ -23,6 +23,7 @@ import {
   businessCentralMappingResetSchema,
   conditionalMappingCommitSchema,
   conditionalMappingPreviewSchema,
+  conditionalMappingRulesQuerySchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -193,6 +194,12 @@ export class MasterController {
   @RequirePermissions("master_data.view")
   previewConditionalMapping(@Body() body: unknown) {
     return this.masterService.previewConditionalMapping(parseBody(conditionalMappingPreviewSchema, body));
+  }
+
+  @Get("business-central/conditional-mapping/rules")
+  @RequirePermissions("master_data.view")
+  listConditionalMappingRules(@Query() query: Record<string, unknown>) {
+    return this.masterService.listConditionalMappingRules(parseQuery(conditionalMappingRulesQuerySchema, query));
   }
 
   @Post("business-central/conditional-mapping/commit")

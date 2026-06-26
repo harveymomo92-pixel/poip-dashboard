@@ -23,6 +23,7 @@ import type {
   BusinessCentralMappingResetDto,
   BusinessCentralMappingResetSourceField,
   ConditionalMappingPreviewDto,
+  ConditionalMappingRuleListDto,
   ConditionalMappingRuleDto,
   ConditionalMappingSampleDto,
   ConditionalMappingTargetEntityDto,
@@ -1223,6 +1224,85 @@ export class MasterRepository {
         outputOkQtyAfter: preview.outputOkQtyBefore
       };
     });
+  }
+
+  async listConditionalMappingRules(filters: {
+    readonly sourceField?: ConditionalMappingSourceField | undefined;
+    readonly sourceValue?: string | undefined;
+  }): Promise<readonly ConditionalMappingRuleListDto[]> {
+    const params: unknown[] = [SOURCE_SYSTEM];
+    const clauses = ["mcr.source_system = $1", "mcr.is_active"];
+    if (filters.sourceField) {
+      params.push(filters.sourceField);
+      clauses.push(`mcr.source_field = $${params.length}`);
+    }
+    if (filters.sourceValue) {
+      params.push(normalizeAliasKey(filters.sourceValue));
+      clauses.push(`mcr.source_value_normalized = $${params.length}`);
+    }
+
+    const result = await this.database.pool.query<{
+      id: string;
+      entity_id: string;
+      source_system: string;
+      source_field: string;
+      source_value: string;
+      source_value_normalized: string;
+      condition_type: string;
+      condition_value: string;
+      condition_value_normalized: string;
+      source: string;
+      is_active: boolean;
+      created_at: Date | string;
+      updated_at: Date | string;
+      entity_code: string;
+      display_name: string;
+    }>(
+      `
+        select mcr.id::text,
+               mcr.entity_id::text,
+               mcr.source_system,
+               mcr.source_field,
+               mcr.source_value,
+               mcr.source_value_normalized,
+               mcr.condition_type,
+               mcr.condition_value,
+               mcr.condition_value_normalized,
+               mcr.source,
+               mcr.is_active,
+               mcr.created_at,
+               mcr.updated_at,
+               me.entity_code,
+               me.display_name
+        from master_entity_conditional_rules mcr
+        join master_entities me on me.id = mcr.entity_id
+        where ${clauses.join(" and ")}
+        order by mcr.source_field, mcr.source_value, mcr.condition_type, mcr.condition_value, me.entity_code
+        limit 100
+      `,
+      params
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      entityId: row.entity_id,
+      sourceSystem: row.source_system,
+      sourceField: row.source_field as ConditionalMappingSourceField,
+      sourceValue: row.source_value,
+      sourceValueNormalized: row.source_value_normalized,
+      conditionType: row.condition_type as ConditionalMappingConditionType,
+      conditionValue: row.condition_value,
+      conditionValueNormalized: row.condition_value_normalized,
+      source: row.source,
+      isActive: row.is_active,
+      createdAt: timestampText(row.created_at) ?? new Date().toISOString(),
+      updatedAt: timestampText(row.updated_at) ?? new Date().toISOString(),
+      targetEntity: {
+        entityId: row.entity_id,
+        entityCode: row.entity_code,
+        displayName: row.display_name
+      }
+    }));
   }
 
   async targetCoverage(filters: { readonly from?: string | undefined; readonly to?: string | undefined; readonly page: number; readonly pageSize: number }) {

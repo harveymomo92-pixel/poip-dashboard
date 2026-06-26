@@ -109,6 +109,11 @@ export const conditionalMappingPreviewSchema = z.object({
   entityId: z.string().uuid()
 });
 
+export const conditionalMappingRulesQuerySchema = z.object({
+  sourceField: businessCentralMappingResetSourceFieldSchema.optional(),
+  sourceValue: z.string().trim().min(1).max(160).optional()
+});
+
 export const conditionalMappingCommitSchema = conditionalMappingPreviewSchema.extend({
   confirmation: z.literal("COMMIT"),
   note: z.string().trim().min(3).max(500).optional()

@@ -146,6 +146,10 @@ export interface ConditionalMappingRuleDto {
   readonly updatedAt: string;
 }
 
+export interface ConditionalMappingRuleListDto extends ConditionalMappingRuleDto {
+  readonly targetEntity: ConditionalMappingTargetEntityDto;
+}
+
 export interface ConditionalMappingPreviewDto {
   readonly sourceSystem: "business-central";
   readonly sourceField: BusinessCentralMappingResetSourceField;

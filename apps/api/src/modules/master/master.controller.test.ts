@@ -23,6 +23,7 @@ test("MasterController protects read routes with master_data.view", () => {
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.unmappedSources), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.previewBusinessCentralMappingReset), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.previewConditionalMapping), ["master_data.view"]);
+  assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.listConditionalMappingRules), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.targetCoverage), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.conversionGaps), ["master_data.view"]);
 });
@@ -226,4 +227,44 @@ test("MasterController audits conditional mapping commit", async () => {
   assert.equal(events.length, 1);
   assert.equal(events[0]?.action, "master.conditional-mapping.commit");
   assert.equal(events[0]?.entityType, "master_entity_conditional_rule");
+});
+
+test("MasterController lists conditional mapping rules with filters", async () => {
+  const seen: unknown[] = [];
+  const controller = new MasterController(
+    {
+      listConditionalMappingRules: async (filters: unknown) => {
+        seen.push(filters);
+        return [{
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          entityId: "11111111-1111-4111-8111-111111111111",
+          sourceSystem: "business-central",
+          sourceField: "machine_center_no",
+          sourceValue: "OMSO1 OZ",
+          sourceValueNormalized: "OMSO1OZ",
+          conditionType: "item_description_pattern",
+          conditionValue: "22 OZ",
+          conditionValueNormalized: "22 OZ",
+          source: "conditional-mapping-center",
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          targetEntity: {
+            entityId: "11111111-1111-4111-8111-111111111111",
+            entityCode: "OMSO1-22",
+            displayName: "OMSO 1-OZ - Printing 22 OZ"
+          }
+        }];
+      }
+    } as unknown as MasterService,
+    { log: async () => undefined } as unknown as AuditService
+  );
+
+  const result = await controller.listConditionalMappingRules({
+    sourceField: "machine_center_no",
+    sourceValue: " OMSO1 OZ "
+  });
+
+  assert.equal(result[0]?.targetEntity.entityCode, "OMSO1-22");
+  assert.deepEqual(seen[0], { sourceField: "machine_center_no", sourceValue: "OMSO1 OZ" });
 });

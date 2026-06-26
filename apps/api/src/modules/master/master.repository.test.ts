@@ -485,6 +485,38 @@ function repositoryWithConditionalCommitFlow(options: {
   return { repository, executed, insertedRules, updatedRules, poolQueries };
 }
 
+function repositoryWithConditionalRules() {
+  const queries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
+  const repository = new MasterRepository({
+    pool: {
+      query: async (text: string, values: readonly unknown[] = []) => {
+        queries.push({ text, values });
+        return {
+          rows: [{
+            id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            entity_id: ENTITY_ID,
+            source_system: "business-central",
+            source_field: "machine_center_no",
+            source_value: "OMSO1 OZ",
+            source_value_normalized: "OMSO1OZ",
+            condition_type: "item_description_pattern",
+            condition_value: "22 OZ",
+            condition_value_normalized: "22 OZ",
+            source: "conditional-mapping-center",
+            is_active: true,
+            created_at: NOW,
+            updated_at: NOW,
+            entity_code: "OMSO1-22",
+            display_name: "OMSO 1-OZ - Printing 22 OZ"
+          }]
+        };
+      }
+    },
+    db: {}
+  } as unknown as DatabaseConnection);
+  return { repository, queries };
+}
+
 test("previewMapping selected source uses a typed third parameter without skipping $3", async () => {
   const { repository, queries } = repositoryWithQueries();
 
@@ -700,6 +732,29 @@ test("commitConditionalMapping does not overwrite unrelated mapped rows", async 
   assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"), false);
   assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"), false);
   assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"), false);
+});
+
+test("listConditionalMappingRules returns active rules with target entity summary", async () => {
+  const { repository, queries } = repositoryWithConditionalRules();
+
+  const result = await repository.listConditionalMappingRules({
+    sourceField: "machine_center_no",
+    sourceValue: " OMSO1 OZ "
+  });
+
+  assert.equal(result[0]?.conditionValue, "22 OZ");
+  assert.equal(result[0]?.targetEntity.entityCode, "OMSO1-22");
+  assert.match(queries[0]?.text ?? "", /mcr\.is_active/);
+  assert.match(queries[0]?.text ?? "", /join master_entities me/);
+  assert.deepEqual(queries[0]?.values, ["business-central", "machine_center_no", "OMSO1OZ"]);
+});
+
+test("listConditionalMappingRules does not require source filters", async () => {
+  const { repository, queries } = repositoryWithConditionalRules();
+
+  await repository.listConditionalMappingRules({});
+
+  assert.deepEqual(queries[0]?.values, ["business-central"]);
 });
 
 test("commitMapping skips data quality resolution when no source refs are updated", async () => {

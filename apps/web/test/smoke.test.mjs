@@ -48,3 +48,22 @@ test("master data exposes source-specific Business Central reset flow", async ()
   assert.match(masterData, /KPI quantities and raw BC source fields are unchanged/);
   assert.match(masterData, /prefillReset\(group\)/);
 });
+
+test("master data exposes conditional mapping rule flow", async () => {
+  const masterData = await readFile(new URL("../src/app/master-data/MasterDataPageClient.tsx", import.meta.url), "utf8");
+  assert.match(masterData, /Conditional Mapping Rule/);
+  assert.match(masterData, /\/master\/business-central\/conditional-mapping\/preview/);
+  assert.match(masterData, /\/master\/business-central\/conditional-mapping\/commit/);
+  assert.match(masterData, /\/master\/business-central\/conditional-mapping\/rules/);
+  assert.match(masterData, /Source value, condition, dan target entity wajib diisi/);
+  assert.match(masterData, /conditionalConfirmText !== "COMMIT"/);
+  assert.match(masterData, /confirmation: "COMMIT"/);
+  assert.match(masterData, /conditionMatchingRows/);
+  assert.match(masterData, /alreadyMappedDifferentEntityRows/);
+  assert.match(masterData, /estimatedTargetEligibilityChange/);
+  assert.match(masterData, /conditionMatchingOkQty/);
+  assert.match(masterData, /sample\.entryNo/);
+  assert.match(masterData, /sample\.itemDescription/);
+  assert.match(masterData, /updatedRows/);
+  assert.match(masterData, /prefillConditional\(group\)/);
+});

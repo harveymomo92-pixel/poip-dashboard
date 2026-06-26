@@ -268,7 +268,7 @@ pnpm bc:daily-item-resume
 pnpm bc:reconcile
 ```
 
-Reviewed conditional mapping is available for ambiguous Business Central source values that cannot safely become one broad alias, such as `machine_center_no = OMSO1 OZ`. This P0.5 patch exposes the workflow through API endpoints; use `/master-data` for source/entity review, then call the conditional preview/commit API with an authenticated admin session until a dedicated UI panel is added.
+Reviewed conditional mapping is available in `/master-data` for ambiguous Business Central source values that cannot safely become one broad alias, such as `machine_center_no = OMSO1 OZ`. Use the Conditional Mapping Rule panel to quick-fill from an unmapped source row when available, choose the source field/value, enter a narrow item/product condition, search and select the target entity, then run preview before commit. The panel also shows existing active rules for the selected source value.
 
 Conditional mapping resolver order is exact reviewed alias first, exactly one matching conditional rule second, existing fallback only when no reviewed conditional rules exist for that source value, then unmapped. If no condition matches a source that has reviewed conditional rules, the row remains unmapped. If multiple rules match, the row remains unmapped and sync records a `CONDITIONAL_MAPPING_REVIEW` warning. Conditional commits update only currently unmapped rows matching both source and condition; they do not overwrite rows mapped to a different entity unless Reset / Remap Source is used first.
 
@@ -278,7 +278,9 @@ Supported condition types are `item_description_pattern`, `item_no_pattern`, `it
 - `item_description_pattern = 12 OZ`, `14 OZ`, `16 OZ`, or `18 OZ`, or `inferred_target_bucket = target_printing_oz_lt_20`, mapped to `OMSO 1-OZ - Printing OZ < 20`
 - A non-OZ rule only when item/category evidence explicitly indicates printing with no OZ size, mapped to `OMSO 1-OZ - Printing non-OZ`
 
-Preview first:
+Preview first from the UI or API. The UI displays the target entity, `totalMatchingRows`, `conditionMatchingRows`, `currentlyMappedRows`, `alreadyMappedDifferentEntityRows`, `eligibleRows`, `estimatedTargetEligibilityChange`, `conditionMatchingOkQty`, sample `entryNo`/`itemNo`/`itemDescription`/`documentNo`, and warnings. Commit remains disabled until a successful preview exists and the operator types `COMMIT`.
+
+API preview:
 
 ```bash
 curl -b /tmp/poip.cookies \
@@ -293,7 +295,7 @@ curl -b /tmp/poip.cookies \
   }'
 ```
 
-Commit only after reviewing `totalMatchingRows`, `conditionMatchingRows`, `currentlyMappedRows`, `alreadyMappedDifferentEntityRows`, `eligibleRows`, `estimatedTargetEligibilityChange`, sample item/document rows, and warnings:
+Commit only after reviewing the preview counts, sample item/document rows, and warnings:
 
 ```bash
 curl -b /tmp/poip.cookies \
@@ -310,6 +312,8 @@ curl -b /tmp/poip.cookies \
 ```
 
 Remaining LOW-confidence or ambiguous mapping candidates still require data-owner review before any remap or alias commit.
+
+Conditional rule deletion/deactivation is not exposed in P0.5b. If a rule must be retired, review `audit_logs` and handle it through a targeted admin/database procedure until a dedicated safe UI is added.
 
 Rollback should use a PostgreSQL backup restore whenever possible. A targeted rollback must be reviewed from `audit_logs` and aliases with `source = 'mapping-plan'`; unmap only rows updated by the reviewed plan, deactivate or delete only the inserted aliases, then re-run:
 

@@ -5,6 +5,7 @@ import type {
   businessCentralMappingResetSchema,
   conditionalMappingCommitSchema,
   conditionalMappingPreviewSchema,
+  conditionalMappingRulesQuerySchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -94,6 +95,10 @@ export class MasterService {
 
   previewConditionalMapping(input: z.infer<typeof conditionalMappingPreviewSchema>) {
     return this.repository.previewConditionalMapping(input);
+  }
+
+  listConditionalMappingRules(filters: z.infer<typeof conditionalMappingRulesQuerySchema>) {
+    return this.repository.listConditionalMappingRules(filters);
   }
 
   commitConditionalMapping(input: z.infer<typeof conditionalMappingCommitSchema> & { readonly actorUserId?: string | null }) {
