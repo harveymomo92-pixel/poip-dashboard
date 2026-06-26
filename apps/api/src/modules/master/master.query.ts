@@ -3,6 +3,12 @@ import { z } from "zod";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const sourceFieldSchema = z.string().refine(isMasterSourceField, "Invalid source field");
+const businessCentralMappingResetSourceFieldSchema = z.enum([
+  "prod_line_description",
+  "prod_line_no",
+  "machine_center_no",
+  "machine_description"
+]);
 
 export const listEntitiesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -77,6 +83,15 @@ export const mappingCommitSchema = mappingPreviewSchema.extend({
   sourceValue: z.string().trim().min(1),
   entityId: z.string().uuid(),
   note: z.string().trim().min(3).max(500).optional()
+});
+
+export const businessCentralMappingResetSchema = z.object({
+  sourceField: businessCentralMappingResetSourceFieldSchema,
+  sourceValue: z.string().trim().min(1).max(160)
+});
+
+export const businessCentralMappingResetCommitSchema = businessCentralMappingResetSchema.extend({
+  confirmation: z.literal("RESET")
 });
 
 export const createConversionSchema = z.object({

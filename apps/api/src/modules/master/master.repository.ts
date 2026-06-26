@@ -15,6 +15,8 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { DATABASE, type DatabaseConnection } from "../database/database.module.js";
 import type {
+  BusinessCentralMappingResetDto,
+  BusinessCentralMappingResetSourceField,
   ConversionGapDto,
   ConversionMappingDto,
   MappingCandidateDto,
@@ -38,8 +40,23 @@ const sourceColumns: Record<MasterSourceField, string> = {
   uom: "uom"
 };
 
+const resettableSourceColumns: Record<BusinessCentralMappingResetSourceField, string> = {
+  machine_description: "machine_description",
+  machine_center_no: "machine_center_no",
+  prod_line_description: "prod_line_description",
+  prod_line_no: "prod_line_no"
+};
+
+const MAPPING_RESET_WARNINGS = [
+  "KPI quantities are not changed. Output quantity, reject quantity, item fields, document fields, targets, sync runs, and raw Business Central source fields remain unchanged."
+] as const;
+
 function columnFor(sourceField: MasterSourceField): string {
   return sourceColumns[sourceField];
+}
+
+function resetColumnFor(sourceField: BusinessCentralMappingResetSourceField): string {
+  return resettableSourceColumns[sourceField];
 }
 
 function sqlNormalizeExpression(column: string): string {
@@ -74,6 +91,10 @@ function numberValue(value: string | number | null | undefined): number {
   if (value === null || typeof value === "undefined" || value === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sqlNumberValue(value: unknown): number {
+  return numberValue(value as string | number | null | undefined);
 }
 
 function uniqueSourceRefs(values: readonly unknown[]): string[] {
@@ -743,6 +764,259 @@ export class MasterRepository {
         resolvedIssues,
         alias: this.serializeAlias(aliasRow),
         aliasCommitStatus
+      };
+    });
+  }
+
+  async previewBusinessCentralMappingReset(input: {
+    readonly sourceField: BusinessCentralMappingResetSourceField;
+    readonly sourceValue: string;
+  }): Promise<BusinessCentralMappingResetDto> {
+    const sourceField = input.sourceField;
+    const sourceValue = input.sourceValue.trim();
+    const column = resetColumnFor(sourceField);
+    const [counts, affectedEntities] = await Promise.all([
+      this.database.pool.query<{
+        total_output_rows: string | number;
+        mapped_output_rows_before: string | number;
+        aliases_matched: string | number;
+      }>(
+        `
+          select
+            (
+              select count(*)
+              from production_outputs po
+              where po.source_system = $1
+                and btrim(coalesce(po.${column}, '')) = $2
+            ) as total_output_rows,
+            (
+              select count(*)
+              from production_outputs po
+              where po.source_system = $1
+                and btrim(coalesce(po.${column}, '')) = $2
+                and po.entity_id is not null
+            ) as mapped_output_rows_before,
+            (
+              select count(*)
+              from master_entity_aliases mea
+              where mea.source_system = $1
+                and mea.source_field = $3
+                and mea.alias = $2
+                and mea.is_active
+            ) as aliases_matched
+        `,
+        [SOURCE_SYSTEM, sourceValue, sourceField]
+      ),
+      this.database.pool.query<{
+        entity_id: string;
+        entity_code: string;
+        display_name: string;
+        mapped_output_rows: string | number;
+        active_alias_rows: string | number;
+      }>(
+        `
+          with output_entities as (
+            select me.id as entity_id, me.entity_code, me.display_name,
+                   count(*) as mapped_output_rows,
+                   0::bigint as active_alias_rows
+            from production_outputs po
+            inner join master_entities me on me.id = po.entity_id
+            where po.source_system = $1
+              and btrim(coalesce(po.${column}, '')) = $2
+            group by me.id, me.entity_code, me.display_name
+          ),
+          alias_entities as (
+            select me.id as entity_id, me.entity_code, me.display_name,
+                   0::bigint as mapped_output_rows,
+                   count(*) as active_alias_rows
+            from master_entity_aliases mea
+            inner join master_entities me on me.id = mea.entity_id
+            where mea.source_system = $1
+              and mea.source_field = $3
+              and mea.alias = $2
+              and mea.is_active
+            group by me.id, me.entity_code, me.display_name
+          ),
+          combined as (
+            select * from output_entities
+            union all
+            select * from alias_entities
+          )
+          select entity_id, entity_code, display_name,
+                 sum(mapped_output_rows) as mapped_output_rows,
+                 sum(active_alias_rows) as active_alias_rows
+          from combined
+          group by entity_id, entity_code, display_name
+          order by sum(mapped_output_rows) desc, sum(active_alias_rows) desc, entity_code asc
+        `,
+        [SOURCE_SYSTEM, sourceValue, sourceField]
+      )
+    ]);
+    const row = counts.rows[0];
+    const aliasesMatched = numberValue(row?.aliases_matched);
+    return {
+      sourceSystem: SOURCE_SYSTEM,
+      sourceField,
+      sourceValue,
+      mode: "preview",
+      totalOutputRows: numberValue(row?.total_output_rows),
+      mappedOutputRowsBefore: numberValue(row?.mapped_output_rows_before),
+      mappedOutputRowsAfter: 0,
+      aliasesMatched,
+      aliasesDeactivated: aliasesMatched,
+      aliasesActiveAfter: 0,
+      affectedEntities: affectedEntities.rows.map((entity) => ({
+        entityId: entity.entity_id,
+        entityCode: entity.entity_code,
+        displayName: entity.display_name,
+        mappedOutputRows: numberValue(entity.mapped_output_rows),
+        activeAliasRows: numberValue(entity.active_alias_rows)
+      })),
+      warnings: MAPPING_RESET_WARNINGS
+    };
+  }
+
+  async commitBusinessCentralMappingReset(input: {
+    readonly sourceField: BusinessCentralMappingResetSourceField;
+    readonly sourceValue: string;
+    readonly actorUserId?: string | null | undefined;
+  }): Promise<BusinessCentralMappingResetDto> {
+    const sourceField = input.sourceField;
+    const sourceValue = input.sourceValue.trim();
+    const column = resetColumnFor(sourceField);
+    return this.database.db.transaction(async (tx) => {
+      const affectedEntitiesResult = await tx.execute(sql`
+        with output_entities as (
+          select me.id as entity_id, me.entity_code, me.display_name,
+                 count(*) as mapped_output_rows,
+                 0::bigint as active_alias_rows
+          from production_outputs po
+          inner join master_entities me on me.id = po.entity_id
+          where po.source_system = ${SOURCE_SYSTEM}
+            and ${sql.raw(`btrim(coalesce(po.${column}, ''))`)} = ${sourceValue}
+          group by me.id, me.entity_code, me.display_name
+        ),
+        alias_entities as (
+          select me.id as entity_id, me.entity_code, me.display_name,
+                 0::bigint as mapped_output_rows,
+                 count(*) as active_alias_rows
+          from ${masterEntityAliases} mea
+          inner join ${masterEntities} me on me.id = mea.entity_id
+          where mea.source_system = ${SOURCE_SYSTEM}
+            and mea.source_field = ${sourceField}
+            and mea.alias = ${sourceValue}
+            and mea.is_active
+          group by me.id, me.entity_code, me.display_name
+        ),
+        combined as (
+          select * from output_entities
+          union all
+          select * from alias_entities
+        )
+        select entity_id::text, entity_code, display_name,
+               sum(mapped_output_rows) as mapped_output_rows,
+               sum(active_alias_rows) as active_alias_rows
+        from combined
+        group by entity_id, entity_code, display_name
+        order by sum(mapped_output_rows) desc, sum(active_alias_rows) desc, entity_code asc
+      `);
+      const before = await tx.execute(sql`
+        select
+          (
+            select count(*)
+            from production_outputs po
+            where po.source_system = ${SOURCE_SYSTEM}
+              and ${sql.raw(`btrim(coalesce(po.${column}, ''))`)} = ${sourceValue}
+          ) as total_output_rows,
+          (
+            select count(*)
+            from production_outputs po
+            where po.source_system = ${SOURCE_SYSTEM}
+              and ${sql.raw(`btrim(coalesce(po.${column}, ''))`)} = ${sourceValue}
+              and po.entity_id is not null
+          ) as mapped_output_rows_before,
+          (
+            select count(*)
+            from ${masterEntityAliases} mea
+            where mea.source_system = ${SOURCE_SYSTEM}
+              and mea.source_field = ${sourceField}
+              and mea.alias = ${sourceValue}
+              and mea.is_active
+          ) as aliases_matched
+      `);
+      await tx.execute(sql`
+        update production_outputs po
+        set entity_id = null,
+            updated_at = now()
+        where po.source_system = ${SOURCE_SYSTEM}
+          and ${sql.raw(`btrim(coalesce(po.${column}, ''))`)} = ${sourceValue}
+          and po.entity_id is not null
+      `);
+      const aliasUpdate = await tx.execute(sql`
+        update ${masterEntityAliases} mea
+        set is_active = false,
+            updated_by = ${input.actorUserId ?? null},
+            updated_at = now()
+        where mea.source_system = ${SOURCE_SYSTEM}
+          and mea.source_field = ${sourceField}
+          and mea.alias = ${sourceValue}
+          and mea.is_active
+      `);
+      const after = await tx.execute(sql`
+        select
+          (
+            select count(*)
+            from production_outputs po
+            where po.source_system = ${SOURCE_SYSTEM}
+              and ${sql.raw(`btrim(coalesce(po.${column}, ''))`)} = ${sourceValue}
+              and po.entity_id is not null
+          ) as mapped_output_rows_after,
+          (
+            select count(*)
+            from ${masterEntityAliases} mea
+            where mea.source_system = ${SOURCE_SYSTEM}
+              and mea.source_field = ${sourceField}
+              and mea.alias = ${sourceValue}
+              and mea.is_active
+          ) as aliases_active_after
+      `);
+      const beforeRow = before.rows[0] as {
+        total_output_rows?: unknown;
+        mapped_output_rows_before?: unknown;
+        aliases_matched?: unknown;
+      } | undefined;
+      const afterRow = after.rows[0] as {
+        mapped_output_rows_after?: unknown;
+        aliases_active_after?: unknown;
+      } | undefined;
+      return {
+        sourceSystem: SOURCE_SYSTEM,
+        sourceField,
+        sourceValue,
+        mode: "commit",
+        totalOutputRows: sqlNumberValue(beforeRow?.total_output_rows),
+        mappedOutputRowsBefore: sqlNumberValue(beforeRow?.mapped_output_rows_before),
+        mappedOutputRowsAfter: sqlNumberValue(afterRow?.mapped_output_rows_after),
+        aliasesMatched: sqlNumberValue(beforeRow?.aliases_matched),
+        aliasesDeactivated: aliasUpdate.rowCount ?? Math.max(0, sqlNumberValue(beforeRow?.aliases_matched) - sqlNumberValue(afterRow?.aliases_active_after)),
+        aliasesActiveAfter: sqlNumberValue(afterRow?.aliases_active_after),
+        affectedEntities: affectedEntitiesResult.rows.map((row) => {
+          const entity = row as {
+            entity_id: unknown;
+            entity_code: unknown;
+            display_name: unknown;
+            mapped_output_rows: unknown;
+            active_alias_rows: unknown;
+          };
+          return {
+            entityId: String(entity.entity_id),
+            entityCode: String(entity.entity_code),
+            displayName: String(entity.display_name),
+            mappedOutputRows: sqlNumberValue(entity.mapped_output_rows),
+            activeAliasRows: sqlNumberValue(entity.active_alias_rows)
+          };
+        }),
+        warnings: MAPPING_RESET_WARNINGS
       };
     });
   }

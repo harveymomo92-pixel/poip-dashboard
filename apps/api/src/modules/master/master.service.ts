@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { z } from "zod";
 import type {
+  businessCentralMappingResetCommitSchema,
+  businessCentralMappingResetSchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -80,6 +82,14 @@ export class MasterService {
     return this.repository.commitMapping(input);
   }
 
+  previewBusinessCentralMappingReset(input: z.infer<typeof businessCentralMappingResetSchema>) {
+    return this.repository.previewBusinessCentralMappingReset(input);
+  }
+
+  commitBusinessCentralMappingReset(input: z.infer<typeof businessCentralMappingResetCommitSchema> & { readonly actorUserId?: string | null }) {
+    return this.repository.commitBusinessCentralMappingReset(input);
+  }
+
   targetCoverage(filters: z.infer<typeof targetCoverageQuerySchema>) {
     return this.repository.targetCoverage(filters);
   }
@@ -100,4 +110,3 @@ export class MasterService {
     return this.repository.commitConversion(input);
   }
 }
-

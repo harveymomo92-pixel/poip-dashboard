@@ -5,7 +5,7 @@ Environment: local/UAT
 
 ## Summary
 
-Manually corrected Business Central alias mapping for:
+Corrected Business Central alias mapping for:
 
 - source_system: business-central
 - source_field: machine_center_no
@@ -17,9 +17,10 @@ Previous active alias pointed to:
 
 Evidence showed the affected output row was:
 
-- item: CUP 14 OZ KOPI KENANGAN 9G-2000 NEW QR
-- quantity: 150,000
 - document: SPK2601/P0025
+- item: CR14OZ9KKQR
+- description: CUP 14 OZ KOPI KENANGAN 9G-2000 NEW QR
+- quantity: 150,000
 
 The source was remapped to:
 
@@ -32,7 +33,7 @@ After remap:
 - OK Output remained 30,512,440.0000
 - Raw OK Output remained 30,512,440.0000
 - Reject KG remained 4,012.2000
-- Reject PCS Eq incomplete gaps improved from 20 to 16
+- Reject PCS Eq incomplete gaps improved to 16
 - Reject rate remained N/A because Reject PCS Eq is still incomplete
 
 ## Observed KPI change

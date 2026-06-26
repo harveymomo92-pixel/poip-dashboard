@@ -1,6 +1,11 @@
 import type { MasterSourceField } from "@poip/domain";
 import type { MappingConfidence } from "@poip/domain";
 
+export type BusinessCentralMappingResetSourceField = Extract<
+  MasterSourceField,
+  "prod_line_description" | "prod_line_no" | "machine_center_no" | "machine_description"
+>;
+
 export interface Pagination {
   readonly page: number;
   readonly pageSize: number;
@@ -80,6 +85,29 @@ export interface MappingCommitDto extends MappingPreviewDto {
   readonly aliasCommitStatus?: "inserted" | "already_mapped" | "reactivated" | undefined;
   readonly updatedRows: number;
   readonly resolvedIssues: number;
+}
+
+export interface BusinessCentralMappingResetAffectedEntityDto {
+  readonly entityId: string;
+  readonly entityCode: string;
+  readonly displayName: string;
+  readonly mappedOutputRows: number;
+  readonly activeAliasRows: number;
+}
+
+export interface BusinessCentralMappingResetDto {
+  readonly sourceSystem: "business-central";
+  readonly sourceField: BusinessCentralMappingResetSourceField;
+  readonly sourceValue: string;
+  readonly mode: "preview" | "commit";
+  readonly totalOutputRows: number;
+  readonly mappedOutputRowsBefore: number;
+  readonly mappedOutputRowsAfter: number;
+  readonly aliasesMatched: number;
+  readonly aliasesDeactivated: number;
+  readonly aliasesActiveAfter: number;
+  readonly affectedEntities: readonly BusinessCentralMappingResetAffectedEntityDto[];
+  readonly warnings: readonly string[];
 }
 
 export interface TargetCoverageRowDto {

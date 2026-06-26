@@ -19,6 +19,8 @@ import { parseBody, parseQuery } from "../../common/validation.js";
 import { AuditService } from "../audit/audit.service.js";
 import type { AuthenticatedRequest } from "../auth/auth.types.js";
 import {
+  businessCentralMappingResetCommitSchema,
+  businessCentralMappingResetSchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -167,6 +169,24 @@ export class MasterController {
     return result;
   }
 
+  @Post("business-central/mapping-reset/preview")
+  @RequirePermissions("master_data.view")
+  previewBusinessCentralMappingReset(@Body() body: unknown) {
+    return this.masterService.previewBusinessCentralMappingReset(parseBody(businessCentralMappingResetSchema, body));
+  }
+
+  @Post("business-central/mapping-reset/commit")
+  @RequirePermissions("master_data.manage")
+  async commitBusinessCentralMappingReset(@Body() body: unknown, @Req() request: AuthenticatedRequest) {
+    const input = parseBody(businessCentralMappingResetCommitSchema, body);
+    const result = await this.masterService.commitBusinessCentralMappingReset({
+      ...input,
+      actorUserId: request.user?.id ?? null
+    });
+    await this.logWrite(request, "master.mapping-reset.commit", "production_output_mapping", `${input.sourceField}:${input.sourceValue}`, null, result);
+    return result;
+  }
+
   @Get("mapping/target-coverage")
   @RequirePermissions("master_data.view")
   targetCoverage(@Query() query: Record<string, unknown>) {
@@ -230,4 +250,3 @@ export class MasterController {
     });
   }
 }
-

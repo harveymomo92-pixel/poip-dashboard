@@ -22,6 +22,7 @@ import {
 import { API_BASE_URL, type ApiResult, type CurrentUser } from "../../lib/api";
 
 type SourceField = "machine_description" | "machine_center_no" | "prod_line_description" | "prod_line_no" | "item_no" | "uom";
+type ResetSourceField = Extract<SourceField, "machine_description" | "machine_center_no" | "prod_line_description" | "prod_line_no">;
 type MappingConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 interface Overview {
@@ -89,6 +90,27 @@ interface MappingPreview {
   readonly resolvedIssues?: number;
 }
 
+interface MappingResetPreview {
+  readonly sourceSystem: "business-central";
+  readonly sourceField: ResetSourceField;
+  readonly sourceValue: string;
+  readonly mode: "preview" | "commit";
+  readonly totalOutputRows: number;
+  readonly mappedOutputRowsBefore: number;
+  readonly mappedOutputRowsAfter: number;
+  readonly aliasesMatched: number;
+  readonly aliasesDeactivated: number;
+  readonly aliasesActiveAfter: number;
+  readonly affectedEntities: readonly {
+    readonly entityId: string;
+    readonly entityCode: string;
+    readonly displayName: string;
+    readonly mappedOutputRows: number;
+    readonly activeAliasRows: number;
+  }[];
+  readonly warnings: readonly string[];
+}
+
 interface CoverageRow {
   readonly month: string;
   readonly entityName: string;
@@ -114,6 +136,8 @@ const sourceFieldOptions: readonly { readonly value: SourceField; readonly label
   { value: "prod_line_no", label: "Prod line no" }
 ];
 
+const resetSourceFieldOptions = sourceFieldOptions as readonly { readonly value: ResetSourceField; readonly label: string }[];
+
 const confidenceOptions: readonly { readonly value: MappingConfidence; readonly label: string }[] = [
   { value: "HIGH", label: "High" },
   { value: "MEDIUM", label: "Medium" },
@@ -130,6 +154,10 @@ function formatPct(value: number | null | undefined) {
 
 function sourceFieldLabel(value: SourceField) {
   return sourceFieldOptions.find((option) => option.value === value)?.label ?? value.replaceAll("_", " ");
+}
+
+function isResetSourceField(value: SourceField): value is ResetSourceField {
+  return resetSourceFieldOptions.some((option) => option.value === value);
 }
 
 function query(params: Record<string, string | number | undefined>) {
@@ -177,6 +205,10 @@ export function MasterDataPageClient() {
   const [selectedGroup, setSelectedGroup] = useState<UnmappedGroup | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [preview, setPreview] = useState<MappingPreview | null>(null);
+  const [resetForm, setResetForm] = useState<{ readonly sourceField: ResetSourceField; readonly sourceValue: string }>({ sourceField: "prod_line_description", sourceValue: "" });
+  const [resetPreview, setResetPreview] = useState<MappingResetPreview | null>(null);
+  const [resetAcknowledged, setResetAcknowledged] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState("");
   const [entityForm, setEntityForm] = useState({ entityCode: "", displayName: "", area: "", lineCode: "" });
   const [conversionForm, setConversionForm] = useState({ itemNo: "", uom: "", grossWeightPerPcs: "" });
   const [sourceField, setSourceField] = useState<SourceField | "">("");
@@ -308,6 +340,69 @@ export function MasterDataPageClient() {
     }
   }
 
+  function prefillReset(group: UnmappedGroup) {
+    if (!isResetSourceField(group.sourceField)) return;
+    setResetForm({ sourceField: group.sourceField, sourceValue: group.sourceValue });
+    setResetPreview(null);
+    setResetAcknowledged(false);
+    setResetConfirmText("");
+    toast(`Reset / Remap source diisi dari ${sourceFieldLabel(group.sourceField)}. Jalankan preview sebelum commit.`, "info");
+  }
+
+  async function previewMappingReset() {
+    if (!resetForm.sourceValue.trim()) {
+      setError("Source value untuk reset wajib diisi.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<MappingResetPreview>("/master/business-central/mapping-reset/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceField: resetForm.sourceField,
+          sourceValue: resetForm.sourceValue
+        })
+      });
+      setResetPreview(result);
+      setResetAcknowledged(false);
+      setResetConfirmText("");
+      toast(`Preview reset siap: ${formatNumber(result.mappedOutputRowsBefore)} mapped row dan ${formatNumber(result.aliasesMatched)} alias aktif terdampak.`, "info");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Preview reset/remap gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commitMappingReset() {
+    if (!resetPreview || resetConfirmText !== "RESET" || !resetAcknowledged) {
+      setError("Preview, checkbox, dan konfirmasi RESET wajib lengkap sebelum commit reset.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<MappingResetPreview>("/master/business-central/mapping-reset/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceField: resetPreview.sourceField,
+          sourceValue: resetPreview.sourceValue,
+          confirmation: "RESET"
+        })
+      });
+      setResetPreview(result);
+      setResetAcknowledged(false);
+      setResetConfirmText("");
+      toast(`Reset selesai: ${formatNumber(result.mappedOutputRowsBefore - result.mappedOutputRowsAfter)} row dilepas dan ${formatNumber(result.aliasesDeactivated)} alias dinonaktifkan. Lanjutkan mapping review atau jalankan mapping plan.`, "success");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Commit reset/remap gagal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createConversion() {
     if (!conversionForm.itemNo || !conversionForm.grossWeightPerPcs) {
       setError("Item dan gross weight wajib diisi.");
@@ -385,7 +480,7 @@ export function MasterDataPageClient() {
                       <td>{formatNumber(group.outputOkQty, 1)}</td>
                       <td>{group.firstPostingDate ?? "—"} → {group.lastPostingDate ?? "—"}<small>{group.sampleDocumentNos.slice(0, 2).join(", ")}</small></td>
                       <td>{group.candidates[0] ? <>{group.candidates[0].entityCode}<small>{group.candidates[0].confidence} · score {group.candidates[0].score} · {group.candidates[0].targetExists ? "target exists" : "target missing"}</small><small>{group.candidates[0].reason}</small></> : "No candidate"}</td>
-                      <td><button className="secondary-button" onClick={() => { setSelectedGroup(group); if (group.candidates[0]) setSelectedEntityId(group.candidates[0].entityId); }}>Select</button></td>
+                      <td><div className="table-actions"><button className="secondary-button" onClick={() => { setSelectedGroup(group); if (group.candidates[0]) setSelectedEntityId(group.candidates[0].entityId); }}>Select</button><button className="secondary-button" onClick={() => prefillReset(group)}>Reset / Remap</button></div></td>
                     </tr>
                   ))}
                 </DataTable>
@@ -419,6 +514,91 @@ export function MasterDataPageClient() {
                 {canManage ? <div className="detail-actions"><button disabled={busy || !selectedGroup.normalizedValue || !selectedEntityId} onClick={() => void previewMapping()}>Preview</button><button className="secondary-button" disabled={busy || !selectedGroup.normalizedValue || !preview || !selectedEntityId} onClick={() => setConfirmMapping(true)}>Commit mapping</button></div> : <p className="permission-note">Mapping commits require master data management permission.</p>}
               </>
             ) : <EmptyState title="No source selected" description="Select an unmapped Business Central source group from the table." />}
+          </aside>
+        </section>
+
+        <section className="master-detail-layout">
+          <div>
+            <SectionHeader title="Reset / Remap Source" description="Preview then reset one exact Business Central source value. This removes existing entity mapping for the selected source and deactivates the matching active alias so the value can return to mapping review." />
+            <div className="form-panel">
+              <div className="form-grid">
+                <Field label="Source field" helper="Only BC entity source fields are eligible.">
+                  <select
+                    value={resetForm.sourceField}
+                    onChange={(event) => {
+                      setResetForm((value) => ({ ...value, sourceField: event.target.value as ResetSourceField }));
+                      setResetPreview(null);
+                      setResetAcknowledged(false);
+                      setResetConfirmText("");
+                    }}
+                  >
+                    {resetSourceFieldOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Source value" helper="Exact selected source value only.">
+                  <input
+                    value={resetForm.sourceValue}
+                    onChange={(event) => {
+                      setResetForm((value) => ({ ...value, sourceValue: event.target.value }));
+                      setResetPreview(null);
+                      setResetAcknowledged(false);
+                      setResetConfirmText("");
+                    }}
+                    placeholder="THERMO 2 ILLIG"
+                  />
+                </Field>
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={() => void previewMappingReset()} disabled={busy || !resetForm.sourceValue.trim()}>{busy ? "Previewing..." : "Preview reset"}</button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={!canManage || busy || !resetPreview || resetPreview.mode !== "preview" || !resetAcknowledged || resetConfirmText !== "RESET"}
+                  onClick={() => void commitMappingReset()}
+                >
+                  Commit reset
+                </button>
+              </div>
+              {!canManage ? <p className="permission-note">Reset commits require master data management permission.</p> : null}
+            </div>
+          </div>
+          <aside className="detail-panel">
+            <div className="detail-panel-header"><div><p className="eyebrow">Reset preview</p><h2>{resetPreview?.sourceValue || resetForm.sourceValue || "Select a source value"}</h2></div>{resetPreview ? <StatusBadge status={resetPreview.mode === "commit" ? "COMMITTED" : "PREVIEW"} /> : null}</div>
+            {resetPreview ? (
+              <>
+                <dl className="detail-facts">
+                  <div><dt>Source field</dt><dd>{sourceFieldLabel(resetPreview.sourceField)}</dd></div>
+                  <div><dt>Total matching rows</dt><dd>{formatNumber(resetPreview.totalOutputRows)}</dd></div>
+                  <div><dt>Mapped before</dt><dd>{formatNumber(resetPreview.mappedOutputRowsBefore)}</dd></div>
+                  <div><dt>Mapped after</dt><dd>{formatNumber(resetPreview.mappedOutputRowsAfter)}</dd></div>
+                  <div><dt>Active aliases</dt><dd>{formatNumber(resetPreview.aliasesMatched)}</dd></div>
+                  <div><dt>Aliases deactivated</dt><dd>{formatNumber(resetPreview.aliasesDeactivated)}</dd></div>
+                </dl>
+                {resetPreview.affectedEntities.length > 0 ? (
+                  <div className="detail-section">
+                    <h3>Affected master entity</h3>
+                    {resetPreview.affectedEntities.map((entity) => (
+                      <p key={entity.entityId}><strong>{entity.entityCode}</strong> · {entity.displayName}<small>{formatNumber(entity.mappedOutputRows)} mapped rows · {formatNumber(entity.activeAliasRows)} active aliases</small></p>
+                    ))}
+                  </div>
+                ) : <div className="detail-section"><h3>Affected master entity</h3><p>No mapped entity or active alias currently matches this source value.</p></div>}
+                <div className="detail-section">
+                  <h3>Safety</h3>
+                  {resetPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+                </div>
+                {resetPreview.mode === "preview" ? (
+                  <div className="detail-section">
+                    <Field label="Confirmation" helper="Type RESET and tick the checkbox to enable commit.">
+                      <input value={resetConfirmText} onChange={(event) => setResetConfirmText(event.target.value)} placeholder="RESET" />
+                    </Field>
+                    <label className="field">
+                      <span className="field-label">Acknowledgement</span>
+                      <span className="button-row"><input className="checkbox" type="checkbox" checked={resetAcknowledged} onChange={(event) => setResetAcknowledged(event.target.checked)} /> KPI quantities and raw BC source fields are unchanged.</span>
+                    </label>
+                  </div>
+                ) : <div className="detail-section"><h3>Next step</h3><p>Refresh is complete. Continue mapping review or run the Business Central mapping plan before validating dashboard KPIs.</p></div>}
+              </>
+            ) : <EmptyState title="No reset preview" description="Enter a Business Central source field/value or prefill from a candidate row, then run Preview reset." />}
           </aside>
         </section>
 

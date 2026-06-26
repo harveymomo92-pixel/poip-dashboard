@@ -21,6 +21,7 @@ const request = {
 test("MasterController protects read routes with master_data.view", () => {
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.overview), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.unmappedSources), ["master_data.view"]);
+  assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.previewBusinessCentralMappingReset), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.targetCoverage), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.conversionGaps), ["master_data.view"]);
 });
@@ -29,6 +30,7 @@ test("MasterController protects write routes with master_data.manage", () => {
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.createEntity), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.createAlias), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitMapping), ["master_data.manage"]);
+  assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitBusinessCentralMappingReset), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitConversion), ["master_data.manage"]);
 });
 
@@ -108,3 +110,62 @@ test("MasterController audits mapping commit", async () => {
   assert.equal(events[0]?.action, "master.mapping.commit");
 });
 
+test("MasterController rejects unsupported Business Central reset source fields", () => {
+  const controller = new MasterController(
+    {
+      previewBusinessCentralMappingReset: async () => {
+        throw new Error("Should not reach service");
+      }
+    } as unknown as MasterService,
+    { log: async () => undefined } as unknown as AuditService
+  );
+
+  assert.throws(
+    () => controller.previewBusinessCentralMappingReset({
+      sourceField: "item_no",
+      sourceValue: "ITEM-1"
+    }),
+    /Input tidak valid/
+  );
+});
+
+test("MasterController audits Business Central mapping reset commit", async () => {
+  const events: AuditEvent[] = [];
+  const controller = new MasterController(
+    {
+      commitBusinessCentralMappingReset: async () => ({
+        sourceSystem: "business-central",
+        sourceField: "prod_line_description",
+        sourceValue: "THERMO 2 ILLIG",
+        mode: "commit",
+        totalOutputRows: 12,
+        mappedOutputRowsBefore: 12,
+        mappedOutputRowsAfter: 0,
+        aliasesMatched: 1,
+        aliasesDeactivated: 1,
+        aliasesActiveAfter: 0,
+        affectedEntities: [],
+        warnings: ["KPI quantities are not changed."]
+      })
+    } as unknown as MasterService,
+    {
+      log: async (event: AuditEvent) => {
+        events.push(event);
+      }
+    } as unknown as AuditService
+  );
+
+  const result = await controller.commitBusinessCentralMappingReset(
+    {
+      sourceField: "prod_line_description",
+      sourceValue: "THERMO 2 ILLIG",
+      confirmation: "RESET"
+    },
+    request
+  );
+
+  assert.equal(result.mappedOutputRowsBefore, 12);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.action, "master.mapping-reset.commit");
+  assert.equal(events[0]?.entityType, "production_output_mapping");
+});

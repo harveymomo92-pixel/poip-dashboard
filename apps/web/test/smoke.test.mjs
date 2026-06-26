@@ -37,3 +37,14 @@ test("overview resume uses machineDisplay for the Mesin column", async () => {
   assert.match(overview, /function resumeMachineDisplay/);
   assert.match(overview, /<td title=\{row\.machineLabel\}>\{resumeMachineDisplay\(row\)\}<\/td>/);
 });
+
+test("master data exposes source-specific Business Central reset flow", async () => {
+  const masterData = await readFile(new URL("../src/app/master-data/MasterDataPageClient.tsx", import.meta.url), "utf8");
+  assert.match(masterData, /Reset \/ Remap Source/);
+  assert.match(masterData, /\/master\/business-central\/mapping-reset\/preview/);
+  assert.match(masterData, /\/master\/business-central\/mapping-reset\/commit/);
+  assert.match(masterData, /confirmation: "RESET"/);
+  assert.match(masterData, /resetPreview\.mode !== "preview"/);
+  assert.match(masterData, /KPI quantities and raw BC source fields are unchanged/);
+  assert.match(masterData, /prefillReset\(group\)/);
+});

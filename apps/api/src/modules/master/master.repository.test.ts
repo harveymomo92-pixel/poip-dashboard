@@ -159,6 +159,113 @@ function repositoryWithCommitFlow(
   return { repository, executed, insertedAliases, poolQueries, selectConditions, updatedAliases };
 }
 
+function repositoryWithResetPreview() {
+  const queries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
+  let transactionCalled = false;
+  const repository = new MasterRepository({
+    pool: {
+      query: async (text: string, values: readonly unknown[] = []) => {
+        queries.push({ text, values });
+        if (text.includes("aliases_matched")) {
+          return { rows: [{ total_output_rows: 4, mapped_output_rows_before: 3, aliases_matched: 1 }] };
+        }
+        if (text.includes("with output_entities")) {
+          return {
+            rows: [{
+              entity_id: ENTITY_ID,
+              entity_code: "THERMO2",
+              display_name: "Thermo 2",
+              mapped_output_rows: 3,
+              active_alias_rows: 1
+            }]
+          };
+        }
+        return { rows: [] };
+      }
+    },
+    db: {
+      transaction: async () => {
+        transactionCalled = true;
+        throw new Error("Preview must not open a write transaction");
+      }
+    }
+  } as unknown as DatabaseConnection);
+  return { repository, queries, transactionCalled: () => transactionCalled };
+}
+
+function repositoryWithResetCommitFlow(options: {
+  readonly sourceField?: "prod_line_description" | "prod_line_no" | "machine_center_no" | "machine_description";
+  readonly sourceValue?: string;
+  readonly mappedBefore?: number;
+  readonly mappedAfter?: number;
+  readonly aliasesBefore?: number;
+  readonly aliasesAfter?: number;
+  readonly aliasesDeactivated?: number;
+} = {}) {
+  const dialect = new PgDialect();
+  const executed: { readonly sql: string; readonly params: readonly unknown[] }[] = [];
+  const mappedBefore = options.mappedBefore ?? 2;
+  const aliasesBefore = options.aliasesBefore ?? 1;
+  const tx = {
+    execute: async (query: SQL) => {
+      const compiled = dialect.sqlToQuery(query);
+      executed.push({ sql: compiled.sql, params: compiled.params });
+      if (compiled.sql.includes("with output_entities")) {
+        return {
+          rows: [{
+            entity_id: ENTITY_ID,
+            entity_code: "THERMO2",
+            display_name: "Thermo 2",
+            mapped_output_rows: mappedBefore,
+            active_alias_rows: aliasesBefore
+          }],
+          rowCount: 1
+        };
+      }
+      if (compiled.sql.includes("total_output_rows")) {
+        return {
+          rows: [{
+            total_output_rows: 3,
+            mapped_output_rows_before: mappedBefore,
+            aliases_matched: aliasesBefore
+          }],
+          rowCount: 1
+        };
+      }
+      if (compiled.sql.includes("update production_outputs")) {
+        return { rows: [], rowCount: mappedBefore };
+      }
+      if (compiled.sql.includes("update") && compiled.sql.includes("master_entity_aliases")) {
+        return { rows: [], rowCount: options.aliasesDeactivated ?? aliasesBefore };
+      }
+      if (compiled.sql.includes("mapped_output_rows_after")) {
+        return {
+          rows: [{
+            mapped_output_rows_after: options.mappedAfter ?? 0,
+            aliases_active_after: options.aliasesAfter ?? 0
+          }],
+          rowCount: 1
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+  };
+  const repository = new MasterRepository({
+    pool: {
+      query: async () => ({ rows: [] })
+    },
+    db: {
+      transaction: async (callback: (transaction: typeof tx) => unknown) => callback(tx)
+    }
+  } as unknown as DatabaseConnection);
+  return {
+    repository,
+    executed,
+    sourceField: options.sourceField ?? "prod_line_description",
+    sourceValue: options.sourceValue ?? "THERMO 2 ILLIG"
+  };
+}
+
 test("previewMapping selected source uses a typed third parameter without skipping $3", async () => {
   const { repository, queries } = repositoryWithQueries();
 
@@ -193,6 +300,93 @@ test("targetCoverage exposes preferred source field and machine description grou
   assert.match(coverageQuery?.text ?? "", /machine_description/);
   assert.match(coverageQuery?.text ?? "", /source_field/);
   assert.match(coverageQuery?.text ?? "", /source_group/);
+});
+
+test("previewBusinessCentralMappingReset is read-only and reports projected reset counts", async () => {
+  const { repository, queries, transactionCalled } = repositoryWithResetPreview();
+
+  const result = await repository.previewBusinessCentralMappingReset({
+    sourceField: "prod_line_description",
+    sourceValue: "THERMO 2 ILLIG"
+  });
+
+  assert.equal(transactionCalled(), false);
+  assert.equal(result.mode, "preview");
+  assert.equal(result.totalOutputRows, 4);
+  assert.equal(result.mappedOutputRowsBefore, 3);
+  assert.equal(result.mappedOutputRowsAfter, 0);
+  assert.equal(result.aliasesMatched, 1);
+  assert.equal(result.aliasesDeactivated, 1);
+  assert.equal(result.affectedEntities[0]?.entityCode, "THERMO2");
+  assert.match(result.warnings[0] ?? "", /KPI quantities are not changed/);
+  assert.equal(queries.length, 2);
+  assert.equal(queries.some((query) => /\b(update|insert|delete)\b/i.test(query.text)), false);
+  assert.deepEqual(queries[0]?.values, ["business-central", "THERMO 2 ILLIG", "prod_line_description"]);
+});
+
+test("commitBusinessCentralMappingReset resets only exact matching Business Central source rows", async () => {
+  const { repository, executed } = repositoryWithResetCommitFlow();
+
+  const result = await repository.commitBusinessCentralMappingReset({
+    sourceField: "prod_line_description",
+    sourceValue: "THERMO 2 ILLIG",
+    actorUserId: ACTOR_ID
+  });
+
+  const outputUpdate = executed.find((query) => query.sql.includes("update production_outputs"));
+  assert.equal(result.mode, "commit");
+  assert.equal(result.mappedOutputRowsBefore, 2);
+  assert.equal(result.mappedOutputRowsAfter, 0);
+  assert.ok(outputUpdate);
+  assert.match(outputUpdate.sql, /set entity_id = null/);
+  assert.match(outputUpdate.sql, /po\.source_system = \$\d+/);
+  assert.match(outputUpdate.sql, /btrim\(coalesce\(po\.prod_line_description, ''\)\) = \$\d+/);
+  assert.match(outputUpdate.sql, /po\.entity_id is not null/);
+  assert.ok(outputUpdate.params.includes("business-central"));
+  assert.ok(outputUpdate.params.includes("THERMO 2 ILLIG"));
+});
+
+test("commitBusinessCentralMappingReset deactivates only matching active alias rows", async () => {
+  const { repository, executed } = repositoryWithResetCommitFlow({ aliasesBefore: 2, aliasesDeactivated: 2 });
+
+  const result = await repository.commitBusinessCentralMappingReset({
+    sourceField: "prod_line_description",
+    sourceValue: "THERMO 2 ILLIG",
+    actorUserId: ACTOR_ID
+  });
+
+  const aliasUpdate = executed.find((query) => query.sql.includes("update") && query.sql.includes("master_entity_aliases"));
+  assert.equal(result.aliasesMatched, 2);
+  assert.equal(result.aliasesDeactivated, 2);
+  assert.ok(aliasUpdate);
+  assert.match(aliasUpdate.sql, /set is_active = false/);
+  assert.match(aliasUpdate.sql, /source_system = \$\d+/);
+  assert.match(aliasUpdate.sql, /source_field = \$\d+/);
+  assert.match(aliasUpdate.sql, /alias = \$\d+/);
+  assert.match(aliasUpdate.sql, /is_active/);
+  assert.ok(aliasUpdate.params.includes("business-central"));
+  assert.ok(aliasUpdate.params.includes("prod_line_description"));
+  assert.ok(aliasUpdate.params.includes("THERMO 2 ILLIG"));
+});
+
+test("commitBusinessCentralMappingReset does not reset unrelated mapped source fields", async () => {
+  const { repository, executed } = repositoryWithResetCommitFlow({
+    sourceField: "machine_center_no",
+    sourceValue: "VFINE-BT400"
+  });
+
+  await repository.commitBusinessCentralMappingReset({
+    sourceField: "machine_center_no",
+    sourceValue: "VFINE-BT400",
+    actorUserId: ACTOR_ID
+  });
+
+  const outputUpdate = executed.find((query) => query.sql.includes("update production_outputs"));
+  assert.ok(outputUpdate);
+  assert.match(outputUpdate.sql, /po\.machine_center_no/);
+  assert.doesNotMatch(outputUpdate.sql, /po\.prod_line_description/);
+  assert.doesNotMatch(outputUpdate.sql, /po\.prod_line_no/);
+  assert.doesNotMatch(outputUpdate.sql, /po\.machine_description/);
 });
 
 test("commitMapping skips data quality resolution when no source refs are updated", async () => {

@@ -201,6 +201,8 @@ Read endpoints require `master_data.view`. Write endpoints require `master_data.
 | `GET` | `/master/mapping/suggestions` | `master_data.view` | Candidate entity suggestions for one source value. |
 | `POST` | `/master/mapping/apply/preview` | `master_data.view` | Dry-run mapping preview with affected row count and samples. |
 | `POST` | `/master/mapping/apply/commit` | `master_data.manage` | Create/reuse alias and map matching unmapped `production_outputs` rows. |
+| `POST` | `/master/business-central/mapping-reset/preview` | `master_data.view` | Dry-run source-specific BC mapping reset preview for one whitelisted source field/value. |
+| `POST` | `/master/business-central/mapping-reset/commit` | `master_data.manage` | Reset matching BC `production_outputs.entity_id` values to null and deactivate matching aliases after explicit `RESET` confirmation. |
 | `GET` | `/master/mapping/target-coverage` | `master_data.view` | Target coverage grouped by month/entity/source group and reason. |
 | `GET` | `/master/mapping/conversion-gaps` | `master_data.view` | Reject conversion gaps grouped by item/UOM. |
 | `POST` | `/master/mapping/conversions` | `master_data.manage` | Create item/UOM gross-weight mapping. |
