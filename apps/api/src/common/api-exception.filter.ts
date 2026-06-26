@@ -39,11 +39,18 @@ export class ApiExceptionFilter implements ExceptionFilter {
         : exception instanceof Error
           ? exception.message
           : "Internal error";
+    const code =
+      typeof exceptionResponse === "object" &&
+      exceptionResponse !== null &&
+      "code" in exceptionResponse &&
+      typeof (exceptionResponse as { code: unknown }).code === "string"
+        ? (exceptionResponse as { code: string }).code
+        : errorCodeForStatus(status);
 
     response.status(status).json({
       ok: false,
       error: {
-        code: errorCodeForStatus(status),
+        code,
         message
       },
       meta: {

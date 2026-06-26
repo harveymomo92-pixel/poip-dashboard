@@ -26,5 +26,7 @@ test("overview resume renders reject attachment details under OK row", async () 
   assert.match(overview, /rejectAttachmentStatus/);
   assert.match(overview, /Reject only/);
   assert.match(overview, /Ambiguous reject/);
-  assert.match(overview, /rows=\\{row\\.rejectDetails\\}/);
+  assert.match(overview, /rows=\{row\.rejectDetails\}/);
+  assert.match(overview, /<RejectDetail row=\{row\} \/>/);
+  assert.doesNotMatch(overview, /\$<RejectDetail/);
 });

@@ -184,7 +184,7 @@ function TargetDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
 
 function RejectDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
   const summary = row.rejectDetails.length === 0
-    ? `$<RejectDetail row={row} />`
+    ? `${formatNumber(row.rejectKg, 1)} kg`
     : `${formatNumber(row.rejectKg, 1)} kg · ${row.rejectDetails.length} detail`;
 
   return <DetailList summary={summary} rows={row.rejectDetails} />;
@@ -494,7 +494,7 @@ export function DashboardPageClient() {
                     <td>{row.uom}</td>
                     <td className={row.correctionOutputQty < 0 ? "negative-number" : ""}>{formatNumber(row.correctionOutputQty, 1)}</td>
                     <td>
-                      <DetailList summary={`${formatNumber(row.rejectKg, 2)} kg`} rows={row.rejectDetails} />
+                      <RejectDetail row={row} />
                       {row.rejectAttachmentStatus === "ATTACHED" ? <StatusBadge status="COVERED" label="Attached" /> : null}
                     </td>
                     <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>

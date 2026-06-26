@@ -77,6 +77,7 @@ export interface MappingPreviewDto {
 
 export interface MappingCommitDto extends MappingPreviewDto {
   readonly alias?: MasterAliasDto | undefined;
+  readonly aliasCommitStatus?: "inserted" | "already_mapped" | "reactivated" | undefined;
   readonly updatedRows: number;
   readonly resolvedIssues: number;
 }

@@ -140,6 +140,14 @@ function query(params: Record<string, string | number | undefined>) {
   return next.toString();
 }
 
+function friendlyApiError(code: string, message: string) {
+  if (code === "ALIAS_ALREADY_MAPPED") return message;
+  if (/failed query:|params:|insert into|update\s+"/i.test(message)) {
+    return "Commit mapping gagal karena kendala database. Coba ulangi atau hubungi admin.";
+  }
+  return message;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const requestInit: RequestInit = {
     ...init,
@@ -154,7 +162,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...requestInit
   });
   const payload = (await response.json()) as ApiResult<T>;
-  if (!payload.ok) throw new Error(payload.error.message);
+  if (!payload.ok) throw new Error(friendlyApiError(payload.error.code, payload.error.message));
   return payload.data;
 }
 

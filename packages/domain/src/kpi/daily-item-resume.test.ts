@@ -48,9 +48,9 @@ test("buildDailyItemResumeRows groups by date, resolved machine, and item", () =
 
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((row) => `${row.postingDate}:${row.machineLabel}:${row.itemNo}`), [
-    "2026-06-25:Illig 1:FG-001",
     "2026-06-25:Illig 1:FG-002",
-    "2026-06-24:Illig 1:FG-001"
+    "2026-06-25:Illig 1:PF192CL12",
+    "2026-06-24:Illig 1:PF192CL12"
   ]);
 });
 

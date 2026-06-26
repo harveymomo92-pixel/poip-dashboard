@@ -7,6 +7,41 @@ import { MasterRepository } from "./master.repository.js";
 
 const ENTITY_ID = "11111111-1111-4111-8111-111111111111";
 const ACTOR_ID = "22222222-2222-4222-8222-222222222222";
+const OTHER_ENTITY_ID = "33333333-3333-4333-8333-333333333333";
+const NOW = new Date("2026-06-25T00:00:00.000Z");
+
+type AliasFixture = {
+  readonly id: string;
+  readonly entityId: string;
+  readonly alias: string;
+  readonly sourceSystem: string;
+  readonly sourceField: string;
+  readonly aliasNormalized: string;
+  readonly source: string;
+  readonly confidence: string | null;
+  readonly matchConfidence: string | null;
+  readonly isActive: boolean;
+  readonly createdAt: Date;
+  readonly updatedAt: Date | null;
+};
+
+function aliasFixture(overrides: Partial<AliasFixture> = {}): AliasFixture {
+  return {
+    id: "alias-1",
+    entityId: ENTITY_ID,
+    alias: "REPACKING",
+    sourceSystem: "business-central",
+    sourceField: "machine_description",
+    aliasNormalized: "REPACKING",
+    source: "mapping-center",
+    confidence: "100",
+    matchConfidence: "100",
+    isActive: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides
+  };
+}
 
 function repositoryWithQueries() {
   const queries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
@@ -26,36 +61,52 @@ function repositoryWithQueries() {
   return { repository, queries };
 }
 
-function repositoryWithCommitFlow(entryNos: readonly unknown[], issueRowCount: number) {
+function repositoryWithCommitFlow(
+  entryNos: readonly unknown[],
+  issueRowCount: number,
+  options: { readonly existingAlias?: AliasFixture | null | undefined } = {}
+) {
   const dialect = new PgDialect();
   const executed: { readonly sql: string; readonly params: readonly unknown[] }[] = [];
+  const selectConditions: { readonly sql: string; readonly params: readonly unknown[] }[] = [];
+  const insertedAliases: unknown[] = [];
+  const updatedAliases: unknown[] = [];
   const poolQueries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
-  const now = new Date("2026-06-25T00:00:00.000Z");
-  const alias = {
-    id: "alias-1",
-    entityId: ENTITY_ID,
-    alias: "REPACKING",
-    sourceSystem: "business-central",
-    sourceField: "machine_description",
-    aliasNormalized: "REPACKING",
-    source: "mapping-center",
-    confidence: "100",
-    matchConfidence: "100",
-    isActive: true,
-    createdAt: now,
-    updatedAt: now
-  };
+  const alias = aliasFixture();
   const tx = {
     select: () => ({
       from: () => ({
-        where: () => ({
-          limit: async () => []
+        where: (condition: SQL) => ({
+          limit: async () => {
+            const compiled = dialect.sqlToQuery(condition);
+            selectConditions.push({ sql: compiled.sql, params: compiled.params });
+            return options.existingAlias ? [options.existingAlias] : [];
+          }
         })
       })
     }),
     insert: () => ({
-      values: () => ({
-        returning: async () => [alias]
+      values: (values: unknown) => ({
+        returning: async () => {
+          insertedAliases.push(values);
+          return [alias];
+        }
+      })
+    }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => ({
+        where: () => ({
+          returning: async () => {
+            updatedAliases.push(values);
+            if (!options.existingAlias) return [];
+            return [{
+              ...options.existingAlias,
+              ...values,
+              createdAt: options.existingAlias.createdAt,
+              updatedAt: NOW
+            }];
+          }
+        })
       })
     }),
     execute: async (query: SQL) => {
@@ -89,8 +140,8 @@ function repositoryWithCommitFlow(entryNos: readonly unknown[], issueRowCount: n
               alias_count: 0,
               target_count: 0,
               output_row_count: 0,
-              created_at: now,
-              updated_at: now
+              created_at: NOW,
+              updated_at: NOW
             }]
           };
         }
@@ -105,7 +156,7 @@ function repositoryWithCommitFlow(entryNos: readonly unknown[], issueRowCount: n
       transaction: async (callback: (transaction: typeof tx) => unknown) => callback(tx)
     }
   } as unknown as DatabaseConnection);
-  return { repository, executed, poolQueries };
+  return { repository, executed, insertedAliases, poolQueries, selectConditions, updatedAliases };
 }
 
 test("previewMapping selected source uses a typed third parameter without skipping $3", async () => {
@@ -145,7 +196,7 @@ test("targetCoverage exposes preferred source field and machine description grou
 });
 
 test("commitMapping skips data quality resolution when no source refs are updated", async () => {
-  const { repository, executed } = repositoryWithCommitFlow([], 0);
+  const { repository, executed, insertedAliases, selectConditions } = repositoryWithCommitFlow([], 0);
 
   const result = await repository.commitMapping({
     sourceField: "machine_description",
@@ -155,7 +206,93 @@ test("commitMapping skips data quality resolution when no source refs are update
   });
 
   assert.equal(result.resolvedIssues, 0);
+  assert.equal(result.aliasCommitStatus, "inserted");
+  assert.equal(insertedAliases.length, 1);
   assert.equal(executed.filter((query) => query.sql.includes("data_quality_issues")).length, 0);
+  assert.match(selectConditions[0]?.sql ?? "", /source_system/);
+  assert.match(selectConditions[0]?.sql ?? "", /source_field/);
+  assert.match(selectConditions[0]?.sql ?? "", /alias_normalized/);
+  assert.deepEqual(selectConditions[0]?.params, ["business-central", "machine_description", "REPACKING"]);
+});
+
+test("commitMapping same alias and same entity is idempotent", async () => {
+  const { repository, insertedAliases, updatedAliases } = repositoryWithCommitFlow(["200"], 0, {
+    existingAlias: aliasFixture({
+      alias: "VFINE-BT400",
+      sourceField: "machine_center_no",
+      aliasNormalized: "VFINEBT400"
+    })
+  });
+
+  const result = await repository.commitMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "VFINE-BT400",
+    entityId: ENTITY_ID,
+    actorUserId: ACTOR_ID
+  });
+
+  assert.equal(result.aliasCommitStatus, "already_mapped");
+  assert.equal(result.alias?.alias, "VFINE-BT400");
+  assert.equal(result.alias?.sourceField, "machine_center_no");
+  assert.equal(insertedAliases.length, 0);
+  assert.equal(updatedAliases.length, 1);
+  assert.equal((updatedAliases[0] as { isActive?: unknown }).isActive, true);
+});
+
+test("commitMapping reactivates inactive same-entity alias", async () => {
+  const { repository, insertedAliases, updatedAliases } = repositoryWithCommitFlow(["200"], 0, {
+    existingAlias: aliasFixture({
+      alias: "VFINE-BT400",
+      sourceField: "machine_center_no",
+      aliasNormalized: "VFINEBT400",
+      isActive: false
+    })
+  });
+
+  const result = await repository.commitMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "VFINE-BT400",
+    entityId: ENTITY_ID,
+    actorUserId: ACTOR_ID
+  });
+
+  assert.equal(result.aliasCommitStatus, "reactivated");
+  assert.equal(result.alias?.isActive, true);
+  assert.equal(insertedAliases.length, 0);
+  assert.equal(updatedAliases.length, 1);
+  assert.equal((updatedAliases[0] as { isActive?: unknown }).isActive, true);
+});
+
+test("commitMapping same alias mapped to another entity returns a friendly conflict", async () => {
+  const { repository, executed, insertedAliases, updatedAliases } = repositoryWithCommitFlow(["200"], 0, {
+    existingAlias: aliasFixture({
+      entityId: OTHER_ENTITY_ID,
+      alias: "VFINE-BT400",
+      sourceField: "machine_center_no",
+      aliasNormalized: "VFINEBT400"
+    })
+  });
+
+  await assert.rejects(
+    () => repository.commitMapping({
+      sourceField: "machine_center_no",
+      sourceValue: "VFINE-BT400",
+      entityId: ENTITY_ID,
+      actorUserId: ACTOR_ID
+    }),
+    (error) => {
+      const response = error && typeof error === "object" && "getResponse" in error
+        ? (error as { getResponse: () => unknown }).getResponse()
+        : null;
+      assert.equal((response as { code?: unknown } | null)?.code, "ALIAS_ALREADY_MAPPED");
+      assert.match(String((response as { message?: unknown } | null)?.message), /VFINE-BT400/);
+      return true;
+    }
+  );
+
+  assert.equal(insertedAliases.length, 0);
+  assert.equal(updatedAliases.length, 0);
+  assert.equal(executed.length, 0);
 });
 
 test("commitMapping resolves one data quality source ref with a PostgreSQL array constructor", async () => {

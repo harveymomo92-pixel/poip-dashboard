@@ -633,23 +633,59 @@ export class MasterRepository {
     const normalized = normalizeAliasKey(sourceValue);
     const column = columnFor(sourceField);
     return this.database.db.transaction(async (tx) => {
-      let aliasRow = await tx
+      const findAlias = (includeSourceField: boolean) => tx
         .select()
         .from(masterEntityAliases)
         .where(
-          and(
-            eq(masterEntityAliases.sourceSystem, sourceSystem),
-            eq(masterEntityAliases.sourceField, sourceField),
-            eq(masterEntityAliases.aliasNormalized, normalized),
-            eq(masterEntityAliases.isActive, true)
-          )
+          includeSourceField
+            ? and(
+                eq(masterEntityAliases.sourceSystem, sourceSystem),
+                eq(masterEntityAliases.sourceField, sourceField),
+                eq(masterEntityAliases.aliasNormalized, normalized)
+              )
+            : and(
+                eq(masterEntityAliases.sourceSystem, sourceSystem),
+                eq(masterEntityAliases.aliasNormalized, normalized)
+              )
         )
         .limit(1)
         .then((rows) => rows[0] ?? null);
+
+      let aliasCommitStatus: MappingCommitDto["aliasCommitStatus"] = "inserted";
+      let aliasRow = await findAlias(true);
+      if (!aliasRow) aliasRow = await findAlias(false);
       if (aliasRow && aliasRow.entityId !== input.entityId) {
-        throw new ConflictException("Active alias already maps to another entity");
+        throw new ConflictException({
+          code: "ALIAS_ALREADY_MAPPED",
+          message: `Alias ${sourceValue} is already mapped to another entity.`,
+          alias: sourceValue,
+          sourceField,
+          existingEntityId: aliasRow.entityId,
+          requestedEntityId: input.entityId
+        });
       }
-      if (!aliasRow) {
+      if (aliasRow) {
+        const wasActive = aliasRow.isActive;
+        const [updatedAlias] = await tx
+          .update(masterEntityAliases)
+          .set({
+            alias: sourceValue,
+            sourceSystem,
+            sourceField,
+            aliasNormalized: normalized,
+            source: "mapping-center",
+            confidence: "100",
+            matchConfidence: "100",
+            isActive: true,
+            updatedBy: input.actorUserId ?? null,
+            updatedAt: sql`now()`
+          })
+          .where(eq(masterEntityAliases.id, aliasRow.id))
+          .returning();
+        if (!updatedAlias) throw new BadRequestException("Unable to update mapping alias");
+        aliasRow = updatedAlias;
+        aliasCommitStatus = wasActive ? "already_mapped" : "reactivated";
+      } else {
         const [insertedAlias] = await tx
           .insert(masterEntityAliases)
           .values({
@@ -705,7 +741,8 @@ export class MasterRepository {
         affectedRows: entryNos.length,
         updatedRows: entryNos.length,
         resolvedIssues,
-        alias: this.serializeAlias(aliasRow)
+        alias: this.serializeAlias(aliasRow),
+        aliasCommitStatus
       };
     });
   }
