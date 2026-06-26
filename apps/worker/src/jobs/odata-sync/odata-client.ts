@@ -175,6 +175,7 @@ export function buildODataRequestUrl(
   }
 
   const filters: string[] = [];
+  filters.push(...(request.filters ?? []));
   if (request.mode === "incremental" && request.lastEntryNo) {
     filters.push(`Entry_No gt ${request.lastEntryNo.toString()}`);
   }
@@ -189,6 +190,12 @@ export function buildODataRequestUrl(
   if (combinedFilter) {
     const existingFilter = url.searchParams.get("$filter");
     url.searchParams.set("$filter", existingFilter === combinedFilter ? existingFilter : combinedFilter);
+  }
+  const requiredSelectFields = request.requiredSelectFields ?? [];
+  if (requiredSelectFields.length > 0 && (request.forceSelectFields || url.searchParams.has("$select"))) {
+    for (const field of requiredSelectFields) {
+      appendSelectField(url, validateODataFieldName(field, "requiredSelectFields"));
+    }
   }
   return url;
 }
@@ -306,6 +313,8 @@ export class MockBusinessCentralODataClient implements ODataClient {
         Item_No: "FG-MOCK-001",
         Description: "Mock finished good",
         Machine_Center_No: "MC-MOCK-01",
+        gProdOrRotLine_No: "MOCK-LINE-01",
+        gProdOrRotLine_Description: "Mock line",
         Prod_Order_Line_No: "10",
         Prod_Line_Description: "Mock line",
         Quantity: "120",
@@ -322,6 +331,8 @@ export class MockBusinessCentralODataClient implements ODataClient {
         Entry_Type: "Reject",
         Item_No: "FG-MOCK-001",
         Machine_Center_No: "MC-MOCK-01",
+        gProdOrRotLine_No: "MOCK-LINE-01",
+        gProdOrRotLine_Description: "Mock line",
         Quantity: "0",
         Unit_of_Measure_Code: "PCS",
         Reject_KG: "2"

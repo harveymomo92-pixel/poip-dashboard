@@ -1,4 +1,4 @@
-import { classifyOutputRow, inferResumeTargetBucket, parseExternalDocument, type ParsedExternalDocument, type ResumeTargetBucket } from "@poip/domain";
+import { classifyOutputRow, inferResumeTargetBucket, parseExternalDocument, resolveMachineDisplay, type ParsedExternalDocument, type ResumeTargetBucket } from "@poip/domain";
 
 export type DailyItemResumeSort = "postingDate.desc" | "postingDate.asc" | "netOutputQty.desc" | "netOutputQty.asc";
 
@@ -117,6 +117,9 @@ export interface DailyItemResumeRow {
   readonly entityId: string | null;
   readonly entityCode: string | null;
   readonly machineLabel: string;
+  readonly machineDisplay: string;
+  readonly machineAreaLine: string | null;
+  readonly machineDescriptionLabel: string | null;
   readonly itemNo: string;
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
@@ -179,6 +182,9 @@ interface GroupState {
   readonly key: string;
   readonly postingDate: string;
   readonly machineLabel: string;
+  readonly machineDisplay: string;
+  readonly machineAreaLine: string | null;
+  readonly machineDescriptionLabel: string | null;
   readonly itemNo: string;
   entityId: string | null;
   entityCode: string | null;
@@ -393,6 +399,39 @@ export function resolveMachineLabel(row: DailyItemResumeSourceRow): string {
     compact(row.prodLineNo) ||
     "Unmapped"
   );
+}
+
+function resolveMachinePresentation(
+  row: DailyItemResumeSourceRow,
+  machineLabel = resolveMachineLabel(row)
+): Pick<GroupState, "machineDisplay" | "machineAreaLine" | "machineDescriptionLabel"> {
+  const machineDescriptionLabel =
+    compact(row.prodLineDescription) ||
+    compact(row.prodLineNo) ||
+    compact(row.machineDescription) ||
+    machineLabel;
+  const candidates = unique([
+    machineLabel,
+    row.prodLineDescription,
+    row.prodLineNo,
+    row.machineDescription,
+    row.machineCenterNo
+  ]);
+  for (const candidate of candidates) {
+    const resolved = resolveMachineDisplay(candidate);
+    if (resolved.displaySource !== "machine_display_mapping") continue;
+    return {
+      machineDisplay: resolved.display,
+      machineAreaLine: resolved.areaLine ?? null,
+      machineDescriptionLabel
+    };
+  }
+  const fallback = resolveMachineDisplay(machineLabel);
+  return {
+    machineDisplay: fallback.display,
+    machineAreaLine: fallback.areaLine ?? null,
+    machineDescriptionLabel
+  };
 }
 
 function groupKey(row: DailyItemResumeSourceRow, rejectOnly = false): string {
@@ -815,6 +854,8 @@ function matchesSearch(row: DailyItemResumeRow, search: string | undefined): boo
   if (!needle) return true;
   const haystack = [
     row.machineLabel,
+    row.machineDisplay,
+    row.machineDescriptionLabel,
     row.itemNo,
     row.itemDescription,
     row.documentSummary,
@@ -1047,6 +1088,9 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     entityId: group.entityId,
     entityCode: group.entityCode,
     machineLabel: group.machineLabel,
+    machineDisplay: group.machineDisplay,
+    machineAreaLine: group.machineAreaLine,
+    machineDescriptionLabel: group.machineDescriptionLabel,
     itemNo: group.itemNo,
     itemDescription: group.itemDescription,
     itemCategoryCode: group.itemCategoryCode,
@@ -1085,6 +1129,9 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
     drilldown: {
       groupKey: group.key,
       grouping: "postingDate + resolved machine/entity label + itemNo",
+      machineDisplay: group.machineDisplay,
+      machineAreaLine: group.machineAreaLine,
+      machineDescriptionLabel: group.machineDescriptionLabel,
       targetReason: targetResolution.targetReason,
       targetSource: targetResolution.targetSource,
       targetBucket: targetResolution.targetBucket,
@@ -1109,10 +1156,15 @@ export function buildDailyItemResume(
   for (const row of rows) {
     if (!isOkOutput(row)) continue;
     const key = groupKey(row);
+    const machineLabel = resolveMachineLabel(row);
+    const machinePresentation = resolveMachinePresentation(row, machineLabel);
     const group = groups.get(key) ?? {
       key,
       postingDate: row.postingDate,
-      machineLabel: resolveMachineLabel(row),
+      machineLabel,
+      machineDisplay: machinePresentation.machineDisplay,
+      machineAreaLine: machinePresentation.machineAreaLine,
+      machineDescriptionLabel: machinePresentation.machineDescriptionLabel,
       itemNo: row.itemNo,
       entityId: row.entityId,
       entityCode: row.entityCode,
@@ -1139,6 +1191,7 @@ export function buildDailyItemResume(
   for (const row of rows) {
     if (!isRejectOutput(row)) continue;
     const machineLabel = resolveMachineLabel(row);
+    const machinePresentation = resolveMachinePresentation(row, machineLabel);
     const document = normalizeDailyItemResumeValue(row.documentNo);
     const candidateKeys = document ? docIndex.get(document) : null;
     const candidateGroups = candidateKeys
@@ -1157,6 +1210,9 @@ export function buildDailyItemResume(
       key,
       postingDate: row.postingDate,
       machineLabel,
+      machineDisplay: machinePresentation.machineDisplay,
+      machineAreaLine: machinePresentation.machineAreaLine,
+      machineDescriptionLabel: machinePresentation.machineDescriptionLabel,
       itemNo: row.itemNo,
       entityId: row.entityId,
       entityCode: row.entityCode,

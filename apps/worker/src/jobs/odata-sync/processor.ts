@@ -7,6 +7,11 @@ const knownSecretValues = [
   process.env.BC_ODATA_USERNAME
 ].filter((value): value is string => Boolean(value && value.length >= 3));
 
+const REQUIRED_OUTPUT_SELECT_FIELDS = [
+  "gProdOrRotLine_No",
+  "gProdOrRotLine_Description"
+] as const;
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -172,6 +177,7 @@ export class ODataSyncProcessor {
             mode: payload.mode,
             sourceSystem: payload.sourceSystem,
             lastEntryNo: decision.lastEntryNo,
+            requiredSelectFields: REQUIRED_OUTPUT_SELECT_FIELDS,
             ...(decision.range ? { range: decision.range } : {}),
             ...(payload.backfill ? { backfill: payload.backfill } : {})
           });

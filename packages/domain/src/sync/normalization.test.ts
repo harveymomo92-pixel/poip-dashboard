@@ -15,6 +15,8 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
     Item_No: " fg-001 ",
     Machine_Description: " repacking ",
     Machine_Center_No: " mc-01 ",
+    gProdOrRotLine_No: "OMSO-1-OZ",
+    gProdOrRotLine_Description: "OMSO 1-OZ",
     Quantity: "12.5",
     Unit_of_Measure_Code: " pcs ",
     Gross_Weight: "0.25",
@@ -26,7 +28,67 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
   assert.equal(result.normalized.itemNo, "FG-001");
   assert.equal(result.normalized.machineDescription, "REPACKING");
   assert.equal(result.normalized.machineCenterNo, "MC-01");
+  assert.equal(result.normalized.prodLineNo, "OMSO-1-OZ");
+  assert.equal(result.normalized.prodLineDescription, "OMSO 1-OZ");
   assert.equal(result.normalized.normalizedOutputType, "OK");
+});
+
+test("normalizeODataOutputRow reads machine description aliases and tolerates missing values", () => {
+  const spaced = normalizeODataOutputRow({
+    Entry_No: "47",
+    Posting_Date: "2026-06-22",
+    Document_No: "DOC-47",
+    Entry_Type: "Output",
+    Item_No: "FG-001",
+    "Machine Description": " illig 1 ",
+    Quantity: "12",
+    Unit_of_Measure_Code: "PCS"
+  });
+  const camel = normalizeODataOutputRow({
+    Entry_No: "48",
+    Posting_Date: "2026-06-22",
+    Document_No: "DOC-48",
+    Entry_Type: "Output",
+    Item_No: "FG-001",
+    MachineDescription: " cai 2 ",
+    Quantity: "12",
+    Unit_of_Measure_Code: "PCS"
+  });
+  const missing = normalizeODataOutputRow({
+    Entry_No: "49",
+    Posting_Date: "2026-06-22",
+    Document_No: "DOC-49",
+    Entry_Type: "Output",
+    Item_No: "FG-001",
+    Quantity: "12",
+    Unit_of_Measure_Code: "PCS"
+  });
+
+  assert.equal(spaced.normalized.machineDescription, "ILLIG 1");
+  assert.equal(camel.normalized.machineDescription, "CAI 2");
+  assert.equal(missing.normalized.machineDescription, null);
+  assert.equal(missing.canCommit, true);
+});
+
+test("normalizeODataOutputRow maps profiled Business Central line fields and does not use gSrcDesc as machine", () => {
+  const result = normalizeODataOutputRow({
+    Entry_No: "50",
+    Posting_Date: "2026-06-22",
+    Document_No: "DOC-50",
+    Entry_Type: "Output",
+    Item_No: "RJ008",
+    Machine_Center_No: "",
+    gProdOrRotLine_No: "OMSO-1-OZ",
+    gProdOrRotLine_Description: "OMSO 1-OZ",
+    gSrcDesc: "REJECT CUP PRINTING (PP)",
+    Quantity: "12",
+    Unit_of_Measure_Code: "KG"
+  });
+
+  assert.equal(result.normalized.machineDescription, null);
+  assert.equal(result.normalized.prodLineNo, "OMSO-1-OZ");
+  assert.equal(result.normalized.prodLineDescription, "OMSO 1-OZ");
+  assert.equal(result.normalized.itemDescription, "REJECT CUP PRINTING (PP)");
 });
 
 test("normalizeODataOutputRow reports critical and warning quality issues", () => {

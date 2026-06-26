@@ -160,6 +160,67 @@ test("buildODataRequestUrl preserves percent encoding and existing query paramet
   );
 });
 
+test("buildODataRequestUrl combines caller filters with generated filters", () => {
+  const url = buildODataRequestUrl(
+    "http://tailscale-host:7048/ODataV4/Company('A')/Output",
+    {
+      mode: "resync-range",
+      sourceSystem: "business-central",
+      lastEntryNo: null,
+      filters: ["(Entry_No eq 1001 or Entry_No eq 1002)"],
+      range: { from: "2026-06-01", to: "2026-06-24" }
+    },
+    "25"
+  );
+
+  assert.equal(
+    url.searchParams.get("$filter"),
+    "(Entry_No eq 1001 or Entry_No eq 1002) and Posting_Date ge 2026-06-01 and Posting_Date le 2026-06-24"
+  );
+});
+
+test("buildODataRequestUrl appends required select fields without duplicates", () => {
+  const url = buildODataRequestUrl(
+    "http://tailscale-host:7048/ODataV4/Company('A')/Output?$select=Entry_No,Item_No",
+    {
+      mode: "resync-range",
+      sourceSystem: "business-central",
+      lastEntryNo: null,
+      requiredSelectFields: ["Entry_No", "gProdOrRotLine_No"]
+    },
+    "25"
+  );
+
+  assert.equal(url.searchParams.get("$select"), "Entry_No,Item_No,gProdOrRotLine_No");
+});
+
+test("buildODataRequestUrl leaves full payload endpoints unselected unless forced", () => {
+  const fullPayload = buildODataRequestUrl(
+    "http://tailscale-host:7048/ODataV4/Company('A')/Output",
+    {
+      mode: "resync-range",
+      sourceSystem: "business-central",
+      lastEntryNo: null,
+      requiredSelectFields: ["gProdOrRotLine_No"]
+    },
+    "25"
+  );
+  const forced = buildODataRequestUrl(
+    "http://tailscale-host:7048/ODataV4/Company('A')/Output",
+    {
+      mode: "resync-range",
+      sourceSystem: "business-central",
+      lastEntryNo: null,
+      requiredSelectFields: ["Entry_No", "gProdOrRotLine_No"],
+      forceSelectFields: true
+    },
+    "25"
+  );
+
+  assert.equal(fullPayload.searchParams.get("$select"), null);
+  assert.equal(forced.searchParams.get("$select"), "Entry_No,gProdOrRotLine_No");
+});
+
 test("buildBackfillFilter supports BACKFILL_FROM only", () => {
   assert.equal(
     buildBackfillFilter({ from: "2026-01-01", dateField: "Posting_Date" }),

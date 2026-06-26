@@ -68,6 +68,9 @@ export interface ODataFetchRequest {
   readonly mode: ODataSyncMode;
   readonly sourceSystem: string;
   readonly lastEntryNo: bigint | null;
+  readonly requiredSelectFields?: readonly string[];
+  readonly forceSelectFields?: boolean;
+  readonly filters?: readonly string[];
   readonly range?: {
     readonly from: string;
     readonly to: string;

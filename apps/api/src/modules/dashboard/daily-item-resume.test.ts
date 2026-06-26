@@ -91,6 +91,22 @@ test("daily item resume key uses posting date, resolved machine label, and item"
   assert.deepEqual(new Set(result.rows.map((item) => item.machineLabel)), new Set(["Illig 1"]));
 });
 
+test("daily item resume returns short machineDisplay while preserving canonical machineLabel", () => {
+  const result = buildDailyItemResume([
+    row({
+      entityDisplayName: "Borche 1 - Preform 19.0 / 19.1 gram",
+      machineCenterNo: "BORCH 1 PREFORM 19 GR",
+      prodLineNo: "BORCH-1",
+      prodLineDescription: "BORCH 1 PREFORM 19 GR"
+    })
+  ], [], filters);
+
+  assert.equal(result.rows[0]?.machineLabel, "Borche 1 - Preform 19.0 / 19.1 gram");
+  assert.equal(result.rows[0]?.machineDisplay, "Borch 1");
+  assert.equal(result.rows[0]?.machineAreaLine, "INJECTION");
+  assert.equal(result.rows[0]?.machineDescriptionLabel, "BORCH 1 PREFORM 19 GR");
+});
+
 test("daily item resume uses machine description label when no mapped entity exists", () => {
   const result = buildDailyItemResume([
     row({

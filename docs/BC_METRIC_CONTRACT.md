@@ -24,8 +24,11 @@ All SQL, dashboard, sync, health, and reconciliation logic should use this canon
 | `Entry_Type` | `entry_type` / `entryType` | Used with quantity/reject KG to normalize OK, reject, or other movement. |
 | `Item_No` / equivalent item number field | `item_no` / `itemNo` | Required for committed output rows. |
 | `Description` / equivalent description field | `item_description` / `itemDescription` | Optional item label. |
-| `Machine_Description` / `Machine Description` | `machine_description` / `machineDescription` | Primary Business Central entity/machine source. This is more reliable than `Machine_Center_No`, which is often blank for rows such as `REPACKING` or `GILINGAN`. |
-| `Machine_Center_No` / equivalent work center field | `machine_center_no` / `machineCenterNo` | Fallback entity/machine source. Existing aliases remain valid, but this field is not the primary grouping key. |
+| `Machine_Description` / `Machine Description` | `machine_description` / `machineDescription` | Stored only when Business Central exposes a true machine-description field. The current profiled endpoint does not expose one, so this remains blank for those rows. |
+| `Machine_Center_No` / equivalent work center field | `machine_center_no` / `machineCenterNo` | Useful but incomplete machine/work-center source. Existing aliases remain valid fallback aliases. |
+| `gProdOrRotLine_No` | `prod_line_no` / `prodLineNo` | Reliable production-line source from the current Business Central OData profile. |
+| `gProdOrRotLine_Description` | `prod_line_description` / `prodLineDescription` | Reliable production-line description from the current Business Central OData profile. |
+| `gSrcDesc` | item/source description only | Item, reject, or sparepart description. It must not be used as machine, line, or machine description. |
 | `Quantity` | `quantity` | Main quantity basis. Positive, zero, and negative quantities are preserved. Negative `Entry_Type = Output` OK rows are corrections/reversals and reduce net output. |
 | `Unit_of_Measure_Code` | `uom` | Required for interpretation and conversion review. |
 | `Gross_Weight` | `gross_weight_per_pcs` | Used to convert reject KG into reject PCS equivalent. |
@@ -99,7 +102,9 @@ Grouping key:
 2. resolved machine/entity display label
 3. `item_no`
 
-Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`, then `Unmapped`.
+Machine label priority is mapped `master_entities.display_name`, mapped `entity_code`, `machine_description` when a true field exists, `machine_center_no`, `prod_line_description`, `prod_line_no`, then `Unmapped`.
+
+`machineLabel` is the canonical/resolved label used for matching, targets, grouping, and diagnostics. `machineDisplay` is UI-only short display text for `/overview` tables, for example `Borche 1 - Preform 19.0 / 19.1 gram -> Borch 1` and `THERMO HENGFENG-2-OZ -> Hengfeng 2`. `machineDisplay` must not replace canonical labels in target matching or reject attachment.
 
 Each group reports positive output, correction output, net output, UOM consistency, document/operator/shift summaries, reject metrics, gross weight evidence, target status, and calculation drilldown metadata. Missing targets remain `dailyTarget = null`, `transactionProrataTarget = null`, `achievementPct = null`, and `achievementStatus = TARGET_MISSING`; the UI displays `N/A`.
 
@@ -186,12 +191,23 @@ Mapping priority:
 
 Preferred source grouping for new mapping candidates is:
 
-1. `machine_description`
+1. `machine_description` when BC exposes a true machine-description field
 2. `machine_center_no`
 3. `prod_line_description`
 4. `prod_line_no`
 
-This prevents rows with `Machine Description = REPACKING` or `GILINGAN` and blank `Machine Center No` from collapsing into a generic blank/`Unmapped` group. If a row has no usable value in any of those fields, it is the only case treated as a truly blank source group.
+For the current profiled endpoint, `gProdOrRotLine_No` and `gProdOrRotLine_Description` are the reliable production-line fields. If a row has no usable value in any reviewed source field, it is the only case treated as a truly blank source group.
+
+Live OData sync must request and store `gProdOrRotLine_No` into `production_outputs.prod_line_no` and `gProdOrRotLine_Description` into `production_outputs.prod_line_description`. If the configured OData endpoint uses `$select`, the sync client appends those fields so new rows do not silently lose production-line source data. `machine_description` remains blank unless Business Central later exposes a true machine-description field.
+
+Existing rows synced before these fields were populated can be enriched by the non-destructive source-fields backfill. The backfill:
+
+1. Selects only `business-central` rows where `prod_line_no` or `prod_line_description` is null or blank.
+2. Fetches Business Central rows by stable `Entry_No`.
+3. Matches updates by stable `Entry_No` / `entry_no`.
+4. Writes only `prod_line_no <= gProdOrRotLine_No` and `prod_line_description <= gProdOrRotLine_Description`, and only while each local value is still blank.
+5. Never writes `machine_description` from `gProdOrRotLine_Description`, `gSrcDesc`, or `Machine_Center_No`.
+6. Leaves OK/reject classification, reject attachment, target logic, quantities, and existing non-blank production-line values unchanged.
 
 Concepts:
 

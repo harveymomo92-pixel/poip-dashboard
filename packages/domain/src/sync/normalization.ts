@@ -256,7 +256,7 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
     entryType,
     normalizedOutputType,
     itemNo,
-    itemDescription: cleanString(readField(row, "Description", "item_description")),
+    itemDescription: cleanString(readField(row, "Description", "gSrcDesc", "GSrcDesc", "item_description")),
     itemCategoryCode: cleanString(
       readField(row, "Item_Category_Code", "ItemCategoryCode", "item_category_code"),
       true
@@ -264,10 +264,17 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
     machineDescription,
     machineCenterNo,
     prodLineNo: cleanString(
-      readField(row, "Prod_Order_Line_No", "ProdOrderLineNo", "prod_line_no")
+      readField(row, "gProdOrRotLine_No", "GProdOrRotLine_No", "Prod_Order_Line_No", "ProdOrderLineNo", "prod_line_no")
     ),
     prodLineDescription: cleanString(
-      readField(row, "Prod_Line_Description", "ProdLineDescription", "prod_line_description")
+      readField(
+        row,
+        "gProdOrRotLine_Description",
+        "GProdOrRotLine_Description",
+        "Prod_Line_Description",
+        "ProdLineDescription",
+        "prod_line_description"
+      )
     ),
     shiftCode: cleanString(readField(row, "Shift", "shift_code"), true),
     operatorName: cleanString(readField(row, "Operator", "operator_name")),

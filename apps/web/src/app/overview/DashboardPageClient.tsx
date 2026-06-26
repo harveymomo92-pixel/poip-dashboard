@@ -75,6 +75,9 @@ interface BreakdownRow {
 interface DailyItemResumeRow {
   readonly postingDate: string;
   readonly machineLabel: string;
+  readonly machineDisplay?: string | null;
+  readonly machineAreaLine?: string | null;
+  readonly machineDescriptionLabel?: string | null;
   readonly itemNo: string;
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
@@ -179,6 +182,10 @@ function rejectConversionReasonLabel(reason: string | null | undefined): string 
   if (reason === "ZERO_OR_INVALID_OK_GROSS_WEIGHT") return "Konversi reject belum lengkap: gross weight OK item tidak valid";
   if (reason === "MISSING_CONVERSION_MAPPING") return "Konversi reject belum lengkap: mapping gross weight OK item belum tersedia";
   return "Konversi reject belum lengkap: gross weight OK item belum tersedia";
+}
+
+function resumeMachineDisplay(row: DailyItemResumeRow): string {
+  return row.machineDisplay?.trim() || row.machineLabel;
 }
 
 function formatResumeNote(note: string): string {
@@ -351,7 +358,7 @@ export function DashboardPageClient() {
   }
 
   async function copyOutputReference(row: DailyItemResumeRow) {
-    const reference = `${row.postingDate} ${row.machineLabel} ${row.itemNo}`;
+    const reference = `${row.postingDate} ${resumeMachineDisplay(row)} ${row.itemNo}`;
     try {
       await navigator.clipboard.writeText(reference);
       toast(`Referensi output ${reference} disalin.`);
@@ -528,7 +535,7 @@ export function DashboardPageClient() {
                 {resume.rows.map((row) => (
                   <tr key={`${row.postingDate}-${row.machineLabel}-${row.itemNo}`}>
                     <td>{row.postingDate}</td>
-                    <td>{row.machineLabel}</td>
+                    <td title={row.machineLabel}>{resumeMachineDisplay(row)}</td>
                     <td>
                       <strong>{row.itemNo}</strong><br />
                       <span className="muted-cell">{row.itemDescription ?? "—"}</span>

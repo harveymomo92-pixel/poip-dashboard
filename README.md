@@ -97,12 +97,17 @@ pnpm bc:profile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
 pnpm bc:daily-item-resume
 pnpm bc:target-coverage
+pnpm bc:backfill-source-fields
 pnpm bc:mapping-candidates
 pnpm bc:mapping-plan
 pnpm bc:mapping-plan-apply
 ```
 
-Dashboard calculations use canonical `source_system = 'business-central'` and production scope `entry_type = 'Output'`. Other Business Central entry types remain stored for future management panels, but `/overview` shows the v1-style `Resume Harian per Item`: grouped by posting date, resolved machine/entity label, and item. The Business Central entity source is `Machine Description` first, then `Machine Center No`, then production-line fields; `Machine Center No` is often blank, so values such as `REPACKING` and `GILINGAN` must come from `machine_description`. Output is net quantity, so negative Output corrections reduce production instead of being hidden. Missing approved targets produce `N/A` with an explicit reason, never a misleading zero target. Aggregate achievement can reconcile while some resume rows remain `N/A` because aggregate target coverage uses mapped entity-days and the resume keeps unmapped groups visible for mapping review.
+Dashboard calculations use canonical `source_system = 'business-central'` and production scope `entry_type = 'Output'`. Other Business Central entry types remain stored for future management panels, but `/overview` shows the v1-style `Resume Harian per Item`: grouped by posting date, resolved machine/entity label, and item. The current Business Central OData profile does not expose a true machine-description field; `gProdOrRotLine_No` and `gProdOrRotLine_Description` are stored as production-line source fields, while `gSrcDesc` remains item/source description only. Output is net quantity, so negative Output corrections reduce production instead of being hidden. Missing approved targets produce `N/A` with an explicit reason, never a misleading zero target. Aggregate achievement can reconcile while some resume rows remain `N/A` because aggregate target coverage uses mapped entity-days and the resume keeps unmapped groups visible for mapping review.
+
+`machineLabel` remains the canonical/entity/source label used for matching, targets, grouping, and diagnostics. `/overview` also receives `machineDisplay`, a short UI-only label such as `Borch 1`, `CAI 2`, or `Hengfeng 2` for the `Mesin` column.
+
+Use `pnpm bc:backfill-source-fields` to dry-run the non-destructive source-fields backfill for existing rows; `pnpm bc:backfill-machine-description` is kept as a compatibility alias. Commit mode is guarded by `BC_SOURCE_FIELDS_BACKFILL_COMMIT=true` or the legacy `BC_MACHINE_DESCRIPTION_BACKFILL_COMMIT=true` and only fills blank `prod_line_no` / `prod_line_description` by `Entry_No`.
 
 Per-item resume target matching uses resolved entity, target effective date, approved/active status, and bucket metadata when the target model provides it. V1-compatible bucket inference covers printing `22 OZ`, printing other OZ, printing non-OZ, thermoforming gross-weight threshold `>= 0.012`, regular thermoforming, and bottle/preform family. Ambiguous or unknown bucket cases stay `N/A / TARGET_BUCKET_MISSING` instead of borrowing a target.
 

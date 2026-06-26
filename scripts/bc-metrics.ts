@@ -903,7 +903,7 @@ function topResumeValues(
 
 function sampleResumeRows(rows: readonly DailyItemResumeRow[], limit = 3): string {
   const samples = rows.slice(0, limit).map((row) => (
-    `${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 2)}; bucket=${row.targetBucketLabel ?? row.targetBucket ?? "N/A"}; target=${row.dailyTarget ?? "N/A"}`
+    `${row.postingDate}; machine_display=${row.machineDisplay}; machine_label=${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 2)}; bucket=${row.targetBucketLabel ?? row.targetBucket ?? "N/A"}; target=${row.dailyTarget ?? "N/A"}`
   ));
   return samples.length ? samples.join(" | ") : "none";
 }
@@ -1140,7 +1140,7 @@ async function runDailyItemResume(pool: DatabasePool) {
   }
   console.log("Sample grouped rows:");
   for (const row of resume.rows.slice(0, 5)) {
-    console.log(`- ${row.postingDate}; ${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; reason=${row.targetReason}; achievement=${formatPct(row.achievementPct)}; status=${row.achievementStatus}`);
+    console.log(`- ${row.postingDate}; machine_display=${row.machineDisplay}; machine_label=${row.machineLabel}; ${row.itemNo}; net=${formatNumber(row.netOutputQty, 4)}; correction=${formatNumber(row.correctionOutputQty, 4)}; rejectKg=${formatNumber(row.rejectKg, 4)}; target=${row.dailyTarget ?? "N/A"}; reason=${row.targetReason}; achievement=${formatPct(row.achievementPct)}; status=${row.achievementStatus}`);
   }
 }
 

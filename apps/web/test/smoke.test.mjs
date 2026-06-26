@@ -30,3 +30,10 @@ test("overview resume renders reject attachment details under OK row", async () 
   assert.match(overview, /<RejectDetail row=\{row\} \/>/);
   assert.doesNotMatch(overview, /\$<RejectDetail/);
 });
+
+test("overview resume uses machineDisplay for the Mesin column", async () => {
+  const overview = await readFile(new URL("../src/app/overview/DashboardPageClient.tsx", import.meta.url), "utf8");
+  assert.match(overview, /machineDisplay\?: string \| null/);
+  assert.match(overview, /function resumeMachineDisplay/);
+  assert.match(overview, /<td title=\{row\.machineLabel\}>\{resumeMachineDisplay\(row\)\}<\/td>/);
+});

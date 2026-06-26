@@ -173,7 +173,25 @@ pnpm bc:target-coverage
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: production dashboard scope is `source_system = 'business-central'` and `entry_type = 'Output'`; other entry types remain stored for future panels; negative Output quantity is a correction; main output is net output; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps. Aggregate target coverage can reconcile while per-item resume rows still show `N/A` because aggregate achievement uses mapped entity-days and the resume keeps unmapped groups visible for mapping work.
 
-Business Central entity source priority is `Machine Description` (`machine_description`) first, then `Machine Center No`, then `Production Line Description`, then `Production Line No`. `Machine Center No` is not reliable as the primary key because it is often blank while `Machine Description` contains operational values such as `REPACKING` or `GILINGAN`. Existing `machine_center_no` aliases remain valid fallback aliases.
+Business Central entity source priority is `machine_description` when a true BC machine-description field exists, then `Machine Center No`, then `Production Line Description`, then `Production Line No`. The current profiled OData endpoint does not expose a true `Machine_Description`; it exposes `gProdOrRotLine_No` and `gProdOrRotLine_Description` as reliable production-line source fields. `gSrcDesc` is item/reject/sparepart description and must not be used as machine, line, or machine description.
+
+If diagnostics show many `source_field=blank` rows because historical Business Central rows have blank `prod_line_no` or `prod_line_description`, run the dry-run source-fields backfill. The legacy command remains available for compatibility:
+
+```bash
+pnpm bc:backfill-machine-description
+pnpm bc:backfill-source-fields
+```
+
+Review `Rows with missing source fields`, `Rows matched in Business Central`, `Rows updateable prod_line_no`, `Rows updateable prod_line_description`, `Rows updateable machine_description: 0`, `Rows without source values`, `Rows not found in BC`, `Pages fetched`, and the sample updates. Commit only after explicit approval and only when the sample updates are safe:
+
+```bash
+BC_MACHINE_DESCRIPTION_BACKFILL_COMMIT=true pnpm bc:backfill-machine-description
+BC_SOURCE_FIELDS_BACKFILL_COMMIT=true pnpm bc:backfill-source-fields
+```
+
+The backfill is non-destructive. It matches by `Entry_No`, fills only null/blank `prod_line_no <= gProdOrRotLine_No` and `prod_line_description <= gProdOrRotLine_Description`, and never writes `machine_description`, `gSrcDesc`, quantities, item/document fields, target fields, classification fields, or reject fields. It does not reload, truncate, delete, reclassify OK/reject rows, or overwrite non-blank production-line values. After commit, re-run `pnpm bc:daily-item-resume`, `pnpm bc:reconcile`, and `pnpm bc:target-coverage`; `source_field=blank` should decrease, production-line source usage should increase, and `UNMAPPED_ENTITY` may decrease if matching aliases already exist. OK output and reject KG should not change from this enrichment alone.
+
+`/overview` daily item resume keeps `machineLabel` as the canonical/entity/source label used for matching, target resolution, diagnostics, and grouping. The table `Mesin` column uses `machineDisplay` as a short UI-only label, for example `Borche 1 - Preform 19.0 / 19.1 gram` displays as `Borch 1`; target matching still uses the canonical label and reviewed aliases.
 
 `External_Document_No` uses the `SHIFT/HOURS/OPERATOR` convention when available. Example: `S1/8/RAHMAT` parses as shift `S1`, work hours `8`, and operator `RAHMAT`. Parsed hours drive per-row prorata target as `dailyTarget * workHours / 24`; malformed or missing values use the current fallback and are exposed as unparsed details.
 
@@ -194,7 +212,7 @@ Safe review flow:
 
 Mapping priority:
 
-1. Preferred raw source group: `machine_description`, then `machine_center_no`, then `prod_line_description`, then `prod_line_no`.
+1. Preferred raw source group: `machine_description` only when a true BC field exists, then `machine_center_no`, then `prod_line_description`, then `prod_line_no`.
 2. Active exact alias for `business-central` + source field + source value.
 3. Active normalized alias after trimming, uppercasing, collapsing whitespace, and removing common separators.
 4. Exact `master_entities.entity_code`.

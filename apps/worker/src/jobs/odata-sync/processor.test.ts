@@ -5,6 +5,7 @@ import type { ODataClient, SyncRunRepository } from "./types.js";
 
 test("ODataSyncProcessor commits successful mocked OData rows", async () => {
   let committedEntryNo: bigint | null = null;
+  let requiredSelectFields: readonly string[] = [];
   const repository: SyncRunRepository = {
     prepareRun: async () => ({
       id: "run_1",
@@ -34,6 +35,7 @@ test("ODataSyncProcessor commits successful mocked OData rows", async () => {
     sourceUrl: () => "mock://test",
     fetchProductionOutputs: async (request) => {
       assert.equal(request.lastEntryNo, 1000n);
+      requiredSelectFields = request.requiredSelectFields ?? [];
       return [
         {
           Entry_No: "1001",
@@ -54,6 +56,7 @@ test("ODataSyncProcessor commits successful mocked OData rows", async () => {
 
   assert.equal(result.status, "SUCCESS");
   assert.equal(committedEntryNo, 1001n);
+  assert.deepEqual(requiredSelectFields, ["gProdOrRotLine_No", "gProdOrRotLine_Description"]);
 });
 
 test("ODataSyncProcessor marks failed run and leaves commit untouched", async () => {
