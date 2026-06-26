@@ -353,3 +353,35 @@ For v2, record:
 - Whether rollback or restore was needed.
 
 Formal SLO/SLA, alert routing, and observability platforms are deferred to PRD v3.
+
+<!-- P0_2_MAPPING_ACCURACY_OPERATIONS -->
+## P0.2-P0.8 Business Central Mapping Accuracy Operations
+
+After P0.1, calculation correctness depends on safely reducing unmapped Business Central source groups without weakening target/reject safeguards.
+
+Primary roadmap:
+
+- `docs/P0_2_BC_MAPPING_ACCURACY_ROADMAP.md`
+- `docs/OPENCLAW_P0_2_MAPPING_ACCURACY_PROMPTS.md`
+
+Recommended operator loop:
+
+```bash
+pnpm bc:mapping-candidates
+pnpm bc:mapping-plan
+pnpm bc:mapping-plan-apply
+pnpm bc:daily-item-resume
+pnpm bc:reconcile
+pnpm bc:target-coverage
+```
+
+Rules:
+
+1. Treat `unmapped_ok_qty` impact as more important than raw unmapped row count.
+2. Do not auto-map LOW or ambiguous rows.
+3. Review `REPACKING`, `OMSO`, `POLYPRINT`, `HENGFENG`, and `LS1` variants with the data owner.
+4. Use source-specific reset/remap when a source value was mapped incorrectly.
+5. Keep missing target states as `N/A`; never force zero or fake targets.
+6. Keep reject rate as `N/A` while Reject PCS Eq is incomplete.
+7. Re-run diagnostics after every mapping commit.
+8. Record any UAT mapping decision in an ops note.

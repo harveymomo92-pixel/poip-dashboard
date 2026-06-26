@@ -27,3 +27,29 @@ Pending fix:
   - `git diff --check`
 
 Do not tag this patch as a completed milestone until the web smoke test passes.
+
+<!-- P0_2_KNOWN_ISSUES_UPDATE -->
+## P0.2-P0.8 Business Central Mapping Accuracy Improvements
+
+Status: planned.
+
+P0.1 calculation core is mostly correct, but remaining unmapped source groups still require safer review workflows.
+
+Tracked in:
+
+- `docs/P0_2_BC_MAPPING_ACCURACY_ROADMAP.md`
+- `docs/OPENCLAW_P0_2_MAPPING_ACCURACY_PROMPTS.md`
+
+Key remaining themes:
+
+- mapping impact ranking
+- source quality diagnostics
+- source-specific reset/remap UI
+- mapping review queue
+- conditional mapping by bucket
+- Data Quality automation for unmapped groups
+- reject attachment review queue
+
+Important safety rule:
+
+Do not hide N/A target states by forcing fake target values, and do not compute reject rate when Reject PCS Eq is incomplete.

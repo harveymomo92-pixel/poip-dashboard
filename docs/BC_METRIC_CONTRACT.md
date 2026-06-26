@@ -316,3 +316,67 @@ limit 10;
 2. Whether additional BC item/category fields should be included in OK/reject normalization after business sign-off.
 3. Whether reject-rate denominator should remain `OK Output + Reject PCS Eq` for every PPIC review.
 4. Which master-data load process will populate entities, aliases, approved targets, and gross-weight conversions for all active machines/items.
+
+<!-- P0_2_MAPPING_ACCURACY_EXTENSIONS -->
+## P0.2-P0.8 Mapping Accuracy Extensions
+
+P0.2-P0.8 improves mapping quality without changing the core metric formulas.
+
+### Mapping impact ranking
+
+Mapping candidates should be ranked by KPI impact, not only by row count.
+
+Suggested impact fields:
+
+- `unmapped_ok_qty`
+- `impact_severity`
+- `zero_qty_only`
+- `first_posting_date`
+- `last_posting_date`
+- `top_item_no`
+- `top_item_description`
+- `top_item_category_code`
+- `confidence_reason`
+- `source_quality_reason`
+
+Suggested severity:
+
+```text
+CRITICAL: unmapped_ok_qty >= 1,000,000
+HIGH:     unmapped_ok_qty >= 100,000
+MEDIUM:   unmapped_ok_qty > 0
+LOW:      unmapped_ok_qty = 0
+```
+
+### Source quality diagnostics
+
+When the preferred source is ambiguous, diagnostics should expose an alternate source candidate rather than silently choosing a weak source.
+
+Example:
+
+```text
+current preferred source: machine_center_no = LS1-25.8/42.3KALE
+alternate source: prod_line_description = LONGSUN 1 BOTOL 1000 ML
+reason: machine_center_no ambiguous; prod_line_description available
+```
+
+### Conditional mapping
+
+Ambiguous sources such as `OMSO 1-OZ`, `OMSO 2-OZ`, `POLYPRINT`, and `HENGFENG` variants must not be mapped by broad alias alone when product bucket affects target matching.
+
+Reviewed conditional mapping may use:
+
+- inferred target bucket
+- item category
+- item number pattern
+- gross weight range
+
+If zero or multiple conditional rules match, the row remains unmapped.
+
+### Reset/remap source
+
+Source-specific reset/remap is allowed only for one reviewed source value at a time. It may clear `production_outputs.entity_id` and deactivate matching aliases, but it must not modify raw quantities, item fields, document fields, targets, sync runs, or raw Business Central source fields.
+
+### Reject attachment review
+
+Reject attachment overrides must only be used when a reviewer selects one deterministic OK group. The system must not split reject KG automatically. Reject PCS Eq and reject rate remain incomplete or `N/A` until the required equivalent quantity is deterministic.
