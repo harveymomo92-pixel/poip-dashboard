@@ -112,6 +112,42 @@ export const masterEntityAliases = pgTable("master_entity_aliases", {
   index("idx_master_alias_entity").on(table.entityId, table.isActive)
 ]);
 
+export const masterEntityConditionalRules = pgTable("master_entity_conditional_rules", {
+  id,
+  entityId: uuid("entity_id")
+    .notNull()
+    .references(() => masterEntities.id),
+  sourceSystem: text("source_system").notNull().default("business-central"),
+  sourceField: text("source_field").notNull(),
+  sourceValue: text("source_value").notNull(),
+  sourceValueNormalized: text("source_value_normalized").notNull(),
+  conditionType: text("condition_type").notNull(),
+  conditionValue: text("condition_value").notNull(),
+  conditionValueNormalized: text("condition_value_normalized").notNull(),
+  source: text("source").notNull().default("manual"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  createdAt,
+  updatedAt
+}, (table) => [
+  unique("master_entity_conditional_rules_unique").on(
+    table.sourceSystem,
+    table.sourceField,
+    table.sourceValueNormalized,
+    table.conditionType,
+    table.conditionValueNormalized,
+    table.isActive
+  ),
+  index("idx_master_conditional_rule_lookup").on(
+    table.sourceSystem,
+    table.sourceField,
+    table.sourceValueNormalized,
+    table.isActive
+  ),
+  index("idx_master_conditional_rule_entity").on(table.entityId, table.isActive)
+]);
+
 export const itemConversionMappings = pgTable(
   "item_conversion_mappings",
   {

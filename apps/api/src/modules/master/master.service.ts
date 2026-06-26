@@ -3,6 +3,8 @@ import type { z } from "zod";
 import type {
   businessCentralMappingResetCommitSchema,
   businessCentralMappingResetSchema,
+  conditionalMappingCommitSchema,
+  conditionalMappingPreviewSchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -88,6 +90,14 @@ export class MasterService {
 
   commitBusinessCentralMappingReset(input: z.infer<typeof businessCentralMappingResetCommitSchema> & { readonly actorUserId?: string | null }) {
     return this.repository.commitBusinessCentralMappingReset(input);
+  }
+
+  previewConditionalMapping(input: z.infer<typeof conditionalMappingPreviewSchema>) {
+    return this.repository.previewConditionalMapping(input);
+  }
+
+  commitConditionalMapping(input: z.infer<typeof conditionalMappingCommitSchema> & { readonly actorUserId?: string | null }) {
+    return this.repository.commitConditionalMapping(input);
   }
 
   targetCoverage(filters: z.infer<typeof targetCoverageQuerySchema>) {

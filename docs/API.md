@@ -203,11 +203,29 @@ Read endpoints require `master_data.view`. Write endpoints require `master_data.
 | `POST` | `/master/mapping/apply/commit` | `master_data.manage` | Create/reuse alias and map matching unmapped `production_outputs` rows. |
 | `POST` | `/master/business-central/mapping-reset/preview` | `master_data.view` | Dry-run source-specific BC mapping reset preview for one whitelisted source field/value. |
 | `POST` | `/master/business-central/mapping-reset/commit` | `master_data.manage` | Reset matching BC `production_outputs.entity_id` values to null and deactivate matching aliases after explicit `RESET` confirmation. |
+| `POST` | `/master/business-central/conditional-mapping/preview` | `master_data.view` | Dry-run reviewed conditional rule for one whitelisted BC source field/value and item/product condition. |
+| `POST` | `/master/business-central/conditional-mapping/commit` | `master_data.manage` | Create/update reviewed conditional rule and map only currently unmapped rows matching both source and condition after explicit `COMMIT` confirmation. |
 | `GET` | `/master/mapping/target-coverage` | `master_data.view` | Target coverage grouped by month/entity/source group and reason. |
 | `GET` | `/master/mapping/conversion-gaps` | `master_data.view` | Reject conversion gaps grouped by item/UOM. |
 | `POST` | `/master/mapping/conversions` | `master_data.manage` | Create item/UOM gross-weight mapping. |
 | `POST` | `/master/mapping/conversions/apply/preview` | `master_data.view` | Dry-run conversion apply preview. |
 | `POST` | `/master/mapping/conversions/apply/commit` | `master_data.manage` | Recompute missing reject PCS equivalent for reviewed item/UOM mapping. |
+
+Conditional mapping bodies use `sourceField` (`machine_description`, `machine_center_no`, `prod_line_description`, or `prod_line_no`), `sourceValue`, `conditionType`, `conditionValue`, and `entityId`. Commit also requires `confirmation: "COMMIT"`. Supported condition types are `item_description_pattern`, `item_no_pattern`, `item_category_code`, `inferred_target_bucket`, and `gross_weight_range`.
+
+Example preview for an ambiguous OMSO bucket:
+
+```json
+{
+  "sourceField": "machine_center_no",
+  "sourceValue": "OMSO1 OZ",
+  "conditionType": "item_description_pattern",
+  "conditionValue": "22 OZ",
+  "entityId": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+Preview returns `totalMatchingRows`, `conditionMatchingRows`, `currentlyMappedRows`, `alreadyMappedDifferentEntityRows`, `eligibleRows`, `estimatedTargetEligibilityChange`, `samples`, and warnings. Commit never changes quantities and does not overwrite rows already mapped to a different entity; use Reset / Remap Source first when those rows need review.
 
 ## Audit
 

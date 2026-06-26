@@ -6,6 +6,13 @@ export type BusinessCentralMappingResetSourceField = Extract<
   "prod_line_description" | "prod_line_no" | "machine_center_no" | "machine_description"
 >;
 
+export type ConditionalMappingConditionType =
+  | "inferred_target_bucket"
+  | "item_category_code"
+  | "item_no_pattern"
+  | "item_description_pattern"
+  | "gross_weight_range";
+
 export interface Pagination {
   readonly page: number;
   readonly pageSize: number;
@@ -108,6 +115,59 @@ export interface BusinessCentralMappingResetDto {
   readonly aliasesActiveAfter: number;
   readonly affectedEntities: readonly BusinessCentralMappingResetAffectedEntityDto[];
   readonly warnings: readonly string[];
+}
+
+export interface ConditionalMappingTargetEntityDto {
+  readonly entityId: string;
+  readonly entityCode: string;
+  readonly displayName: string;
+}
+
+export interface ConditionalMappingSampleDto {
+  readonly entryNo: string | null;
+  readonly itemNo: string;
+  readonly itemDescription: string | null;
+  readonly documentNo: string | null;
+}
+
+export interface ConditionalMappingRuleDto {
+  readonly id: string;
+  readonly entityId: string;
+  readonly sourceSystem: string;
+  readonly sourceField: BusinessCentralMappingResetSourceField;
+  readonly sourceValue: string;
+  readonly sourceValueNormalized: string;
+  readonly conditionType: ConditionalMappingConditionType;
+  readonly conditionValue: string;
+  readonly conditionValueNormalized: string;
+  readonly source: string;
+  readonly isActive: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ConditionalMappingPreviewDto {
+  readonly sourceSystem: "business-central";
+  readonly sourceField: BusinessCentralMappingResetSourceField;
+  readonly sourceValue: string;
+  readonly conditionType: ConditionalMappingConditionType;
+  readonly conditionValue: string;
+  readonly targetEntity: ConditionalMappingTargetEntityDto;
+  readonly mode: "preview" | "commit";
+  readonly totalMatchingRows: number;
+  readonly conditionMatchingRows: number;
+  readonly currentlyMappedRows: number;
+  readonly alreadyMappedDifferentEntityRows: number;
+  readonly eligibleRows: number;
+  readonly estimatedTargetEligibilityChange: number;
+  readonly conditionMatchingOkQty: number;
+  readonly outputOkQtyBefore: number;
+  readonly outputOkQtyAfter: number;
+  readonly samples: readonly ConditionalMappingSampleDto[];
+  readonly warnings: readonly string[];
+  readonly rule?: ConditionalMappingRuleDto | undefined;
+  readonly updatedRows?: number | undefined;
+  readonly resolvedIssues?: number | undefined;
 }
 
 export interface TargetCoverageRowDto {

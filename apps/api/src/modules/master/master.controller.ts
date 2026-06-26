@@ -21,6 +21,8 @@ import type { AuthenticatedRequest } from "../auth/auth.types.js";
 import {
   businessCentralMappingResetCommitSchema,
   businessCentralMappingResetSchema,
+  conditionalMappingCommitSchema,
+  conditionalMappingPreviewSchema,
   conversionApplySchema,
   conversionGapsQuerySchema,
   createAliasSchema,
@@ -184,6 +186,31 @@ export class MasterController {
       actorUserId: request.user?.id ?? null
     });
     await this.logWrite(request, "master.mapping-reset.commit", "production_output_mapping", `${input.sourceField}:${input.sourceValue}`, null, result);
+    return result;
+  }
+
+  @Post("business-central/conditional-mapping/preview")
+  @RequirePermissions("master_data.view")
+  previewConditionalMapping(@Body() body: unknown) {
+    return this.masterService.previewConditionalMapping(parseBody(conditionalMappingPreviewSchema, body));
+  }
+
+  @Post("business-central/conditional-mapping/commit")
+  @RequirePermissions("master_data.manage")
+  async commitConditionalMapping(@Body() body: unknown, @Req() request: AuthenticatedRequest) {
+    const input = parseBody(conditionalMappingCommitSchema, body);
+    const result = await this.masterService.commitConditionalMapping({
+      ...input,
+      actorUserId: request.user?.id ?? null
+    });
+    await this.logWrite(
+      request,
+      "master.conditional-mapping.commit",
+      "master_entity_conditional_rule",
+      `${input.sourceField}:${input.sourceValue}:${input.conditionType}:${input.conditionValue}`,
+      null,
+      result
+    );
     return result;
   }
 

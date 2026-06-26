@@ -1,4 +1,4 @@
-import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
+import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, masterEntityConditionalRules, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
 import {
   createDuplicateEntryIssue,
   entitySourceCandidates,
@@ -6,7 +6,10 @@ import {
   normalizeAliasDisplay,
   normalizeAliasKey,
   preferredEntitySource,
+  resolveConditionalMapping,
   sourceAliasCandidates,
+  valueForSourceField,
+  type ConditionalMappingRuleInput,
   type DataQualitySignal
 } from "@poip/domain";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
@@ -24,7 +27,13 @@ import type {
 interface EntityLookup {
   readonly entityByCode: ReadonlyMap<string, string>;
   readonly entityByAlias: ReadonlyMap<string, string>;
+  readonly conditionalRules: readonly ConditionalMappingRuleInput[];
   readonly targetKeys: ReadonlySet<string>;
+}
+
+interface EntityResolution {
+  readonly entityId: string | null;
+  readonly conditionalReason: string | null;
 }
 
 function addEntityLookupKey(map: Map<string, string>, key: string | null | undefined, entityId: string): void {
@@ -189,7 +198,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
 
   async commitSuccessfulRun(input: SyncCommitInput): Promise<SyncCommitResult> {
     return this.database.db.transaction(async (tx) => {
-      const context = await this.loadEntityLookup(tx);
+      const context = await this.loadEntityLookup(tx, input.run.sourceSystem);
       const committedEntryNos = input.rows
         .map((row) => row.normalized.entryNo)
         .filter((entryNo): entryNo is bigint => entryNo !== null);
@@ -223,7 +232,8 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       }[] = [];
 
       for (const row of input.rows) {
-        const entityId = this.resolveEntityId(row, context);
+        const resolution = this.resolveEntity(row, context);
+        const entityId = resolution.entityId;
         const issues = [...row.issues];
         if (row.normalized.entryNo !== null && (!maxSeenEntryNo || row.normalized.entryNo > maxSeenEntryNo)) {
           maxSeenEntryNo = row.normalized.entryNo;
@@ -236,6 +246,13 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           seenHashByEntry.set(pendingEntryKey, row.rowHash);
         }
         const entitySource = preferredEntitySource(row.normalized);
+        if (resolution.conditionalReason) {
+          issues.push({
+            code: "CONDITIONAL_MAPPING_REVIEW",
+            severity: "WARNING",
+            description: resolution.conditionalReason
+          });
+        }
         if (entitySource && !entityId) {
           issues.push({
             code: "UNKNOWN_MACHINE",
@@ -435,7 +452,10 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
     };
   }
 
-  private async loadEntityLookup(tx: Parameters<Parameters<typeof this.database.db.transaction>[0]>[0]): Promise<EntityLookup> {
+  private async loadEntityLookup(
+    tx: Parameters<Parameters<typeof this.database.db.transaction>[0]>[0],
+    sourceSystem: string
+  ): Promise<EntityLookup> {
     const entities = await tx
       .select({
         id: masterEntities.id,
@@ -455,6 +475,21 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       })
       .from(masterEntityAliases)
       .where(eq(masterEntityAliases.isActive, true));
+    const conditionalRules = await tx
+      .select({
+        id: masterEntityConditionalRules.id,
+        entityId: masterEntityConditionalRules.entityId,
+        sourceField: masterEntityConditionalRules.sourceField,
+        sourceValue: masterEntityConditionalRules.sourceValue,
+        sourceValueNormalized: masterEntityConditionalRules.sourceValueNormalized,
+        conditionType: masterEntityConditionalRules.conditionType,
+        conditionValue: masterEntityConditionalRules.conditionValue
+      })
+      .from(masterEntityConditionalRules)
+      .where(and(
+        eq(masterEntityConditionalRules.sourceSystem, sourceSystem),
+        eq(masterEntityConditionalRules.isActive, true)
+      ));
     const targets = await tx
       .select({
         entityId: productionTargets.entityId,
@@ -482,20 +517,47 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
     return {
       entityByCode,
       entityByAlias,
+      conditionalRules: conditionalRules.map((rule): ConditionalMappingRuleInput => ({
+        id: rule.id,
+        entityId: rule.entityId,
+        sourceField: rule.sourceField as ConditionalMappingRuleInput["sourceField"],
+        sourceValue: rule.sourceValue,
+        sourceValueNormalized: rule.sourceValueNormalized,
+        conditionType: rule.conditionType as ConditionalMappingRuleInput["conditionType"],
+        conditionValue: rule.conditionValue
+      })),
       targetKeys: new Set(
         targets.map((target) => `${target.entityId}|${target.effectiveFrom}|${target.effectiveTo ?? ""}`)
       )
     };
   }
 
-  private resolveEntityId(row: StagedOutputRow, context: EntityLookup): string | null {
+  private resolveEntity(row: StagedOutputRow, context: EntityLookup): EntityResolution {
     const candidates = sourceAliasCandidates(row.normalized);
     for (const candidate of candidates) {
       const fieldExact = context.entityByAlias.get(fieldAliasKey(candidate.sourceField, candidate.sourceValue));
-      if (fieldExact) return fieldExact;
+      if (fieldExact) return { entityId: fieldExact, conditionalReason: null };
       const fieldNormalized = context.entityByAlias.get(fieldAliasKey(candidate.sourceField, candidate.normalizedValue));
-      if (fieldNormalized) return fieldNormalized;
+      if (fieldNormalized) return { entityId: fieldNormalized, conditionalReason: null };
     }
+
+    const sourceMatchedConditionalRules = context.conditionalRules.filter((rule) => {
+      const value = valueForSourceField(row.normalized, rule.sourceField);
+      return value ? normalizeAliasKey(value) === (rule.sourceValueNormalized ?? normalizeAliasKey(rule.sourceValue)) : false;
+    });
+    if (sourceMatchedConditionalRules.length > 0) {
+      const conditional = resolveConditionalMapping(row.normalized, sourceMatchedConditionalRules);
+      if (conditional.status === "matched") {
+        return { entityId: conditional.entityId, conditionalReason: null };
+      }
+      return {
+        entityId: null,
+        conditionalReason: conditional.status === "conflict"
+          ? `${conditional.reason}; row kept unmapped for ${sourceMatchedConditionalRules[0]?.sourceField ?? "source"} ${sourceMatchedConditionalRules[0]?.sourceValue ?? ""}`
+          : `No reviewed conditional mapping rule matched; row kept unmapped for ${sourceMatchedConditionalRules[0]?.sourceField ?? "source"} ${sourceMatchedConditionalRules[0]?.sourceValue ?? ""}`
+      };
+    }
+
     for (const candidate of entitySourceCandidates(row.normalized)) {
       const exact = normalizeAliasDisplay(candidate.sourceValue);
       const normalized = normalizeAliasKey(candidate.sourceValue);
@@ -505,9 +567,9 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
         context.entityByAlias.get(exact) ??
         (normalized ? context.entityByAlias.get(normalized) : null) ??
         null;
-      if (resolved) return resolved;
+      if (resolved) return { entityId: resolved, conditionalReason: null };
     }
-    return null;
+    return { entityId: null, conditionalReason: null };
   }
 
   private hasTarget(entityId: string, postingDate: string, context: EntityLookup): boolean {

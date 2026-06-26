@@ -268,6 +268,47 @@ pnpm bc:daily-item-resume
 pnpm bc:reconcile
 ```
 
+Reviewed conditional mapping is available for ambiguous Business Central source values that cannot safely become one broad alias, such as `machine_center_no = OMSO1 OZ`. This P0.5 patch exposes the workflow through API endpoints; use `/master-data` for source/entity review, then call the conditional preview/commit API with an authenticated admin session until a dedicated UI panel is added.
+
+Conditional mapping resolver order is exact reviewed alias first, exactly one matching conditional rule second, existing fallback only when no reviewed conditional rules exist for that source value, then unmapped. If no condition matches a source that has reviewed conditional rules, the row remains unmapped. If multiple rules match, the row remains unmapped and sync records a `CONDITIONAL_MAPPING_REVIEW` warning. Conditional commits update only currently unmapped rows matching both source and condition; they do not overwrite rows mapped to a different entity unless Reset / Remap Source is used first.
+
+Supported condition types are `item_description_pattern`, `item_no_pattern`, `item_category_code`, `inferred_target_bucket`, and `gross_weight_range`. For OMSO-style review, prefer narrow rules such as:
+
+- `item_description_pattern = 22 OZ` mapped to `OMSO 1-OZ - Printing 22 OZ`
+- `item_description_pattern = 12 OZ`, `14 OZ`, `16 OZ`, or `18 OZ`, or `inferred_target_bucket = target_printing_oz_lt_20`, mapped to `OMSO 1-OZ - Printing OZ < 20`
+- A non-OZ rule only when item/category evidence explicitly indicates printing with no OZ size, mapped to `OMSO 1-OZ - Printing non-OZ`
+
+Preview first:
+
+```bash
+curl -b /tmp/poip.cookies \
+  -H "content-type: application/json" \
+  -X POST http://localhost:4000/api/v1/master/business-central/conditional-mapping/preview \
+  --data '{
+    "sourceField": "machine_center_no",
+    "sourceValue": "OMSO1 OZ",
+    "conditionType": "item_description_pattern",
+    "conditionValue": "22 OZ",
+    "entityId": "00000000-0000-0000-0000-000000000000"
+  }'
+```
+
+Commit only after reviewing `totalMatchingRows`, `conditionMatchingRows`, `currentlyMappedRows`, `alreadyMappedDifferentEntityRows`, `eligibleRows`, `estimatedTargetEligibilityChange`, sample item/document rows, and warnings:
+
+```bash
+curl -b /tmp/poip.cookies \
+  -H "content-type: application/json" \
+  -X POST http://localhost:4000/api/v1/master/business-central/conditional-mapping/commit \
+  --data '{
+    "sourceField": "machine_center_no",
+    "sourceValue": "OMSO1 OZ",
+    "conditionType": "item_description_pattern",
+    "conditionValue": "22 OZ",
+    "entityId": "00000000-0000-0000-0000-000000000000",
+    "confirmation": "COMMIT"
+  }'
+```
+
 Remaining LOW-confidence or ambiguous mapping candidates still require data-owner review before any remap or alias commit.
 
 Rollback should use a PostgreSQL backup restore whenever possible. A targeted rollback must be reviewed from `audit_logs` and aliases with `source = 'mapping-plan'`; unmap only rows updated by the reviewed plan, deactivate or delete only the inserted aliases, then re-run:

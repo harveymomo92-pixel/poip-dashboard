@@ -266,6 +266,225 @@ function repositoryWithResetCommitFlow(options: {
   };
 }
 
+function conditionalRowsFixture() {
+  return [
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      entity_id: null,
+      entry_no: "100",
+      document_no: "DOC-22",
+      item_no: "FG-22",
+      item_description: "CUP 22 OZ PRINTING",
+      item_category_code: "JADI PRINTING",
+      machine_description: null,
+      machine_center_no: "OMSO1 OZ",
+      prod_line_no: null,
+      prod_line_description: null,
+      gross_weight_per_pcs: "0.014",
+      normalized_output_type: "OK",
+      quantity: "100"
+    },
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      entity_id: null,
+      entry_no: "101",
+      document_no: "DOC-14",
+      item_no: "FG-14",
+      item_description: "CUP 14 OZ PRINTING",
+      item_category_code: "JADI PRINTING",
+      machine_description: null,
+      machine_center_no: "OMSO1 OZ",
+      prod_line_no: null,
+      prod_line_description: null,
+      gross_weight_per_pcs: "0.010",
+      normalized_output_type: "OK",
+      quantity: "200"
+    },
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+      entity_id: null,
+      entry_no: "102",
+      document_no: "DOC-NON",
+      item_no: "FG-NON",
+      item_description: "CUP CUSTOM PRINTING",
+      item_category_code: "JADI PRINTING",
+      machine_description: null,
+      machine_center_no: "OMSO1 OZ",
+      prod_line_no: null,
+      prod_line_description: null,
+      gross_weight_per_pcs: null,
+      normalized_output_type: "OK",
+      quantity: "300"
+    },
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+      entity_id: OTHER_ENTITY_ID,
+      entry_no: "103",
+      document_no: "DOC-22-MAPPED",
+      item_no: "FG-22B",
+      item_description: "CUP 22 OZ PRINTING",
+      item_category_code: "JADI PRINTING",
+      machine_description: null,
+      machine_center_no: "OMSO1 OZ",
+      prod_line_no: null,
+      prod_line_description: null,
+      gross_weight_per_pcs: "0.014",
+      normalized_output_type: "OK",
+      quantity: "500"
+    }
+  ];
+}
+
+function repositoryWithConditionalPreview(rows: readonly Record<string, unknown>[] = conditionalRowsFixture()) {
+  const queries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
+  let transactionCalled = false;
+  const repository = new MasterRepository({
+    pool: {
+      query: async (text: string, values: readonly unknown[] = []) => {
+        queries.push({ text, values });
+        if (text.includes("from master_entities me")) {
+          return {
+            rows: [{
+              id: ENTITY_ID,
+              entity_code: "OMSO1-22",
+              display_name: "OMSO 1-OZ - Printing 22 OZ",
+              area: null,
+              line_code: null,
+              product_family: null,
+              report_group: null,
+              planned_runtime_hours: "24",
+              is_active: true,
+              alias_count: 0,
+              target_count: 1,
+              output_row_count: 0,
+              created_at: NOW,
+              updated_at: NOW
+            }]
+          };
+        }
+        if (text.includes("from production_targets pt")) return { rows: [{ exists: true }] };
+        if (text.includes("from production_outputs po")) return { rows };
+        return { rows: [] };
+      }
+    },
+    db: {
+      transaction: async () => {
+        transactionCalled = true;
+        throw new Error("Preview must not open a write transaction");
+      }
+    }
+  } as unknown as DatabaseConnection);
+  return { repository, queries, transactionCalled: () => transactionCalled };
+}
+
+function conditionalRuleFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    entityId: ENTITY_ID,
+    sourceSystem: "business-central",
+    sourceField: "machine_center_no",
+    sourceValue: "OMSO1 OZ",
+    sourceValueNormalized: "OMSO1OZ",
+    conditionType: "item_description_pattern",
+    conditionValue: "22 OZ",
+    conditionValueNormalized: "22 OZ",
+    source: "conditional-mapping-center",
+    isActive: true,
+    createdBy: ACTOR_ID,
+    updatedBy: ACTOR_ID,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides
+  };
+}
+
+function repositoryWithConditionalCommitFlow(options: {
+  readonly rows?: readonly Record<string, unknown>[];
+  readonly existingRule?: Record<string, unknown> | null;
+  readonly issueRowCount?: number;
+} = {}) {
+  const dialect = new PgDialect();
+  const rows = options.rows ?? conditionalRowsFixture();
+  const executed: { readonly sql: string; readonly params: readonly unknown[] }[] = [];
+  const insertedRules: unknown[] = [];
+  const updatedRules: unknown[] = [];
+  const poolQueries: { readonly text: string; readonly values: readonly unknown[] }[] = [];
+  const tx = {
+    execute: async (query: SQL) => {
+      const compiled = dialect.sqlToQuery(query);
+      executed.push({ sql: compiled.sql, params: compiled.params });
+      if (/^\s*select/i.test(compiled.sql) && compiled.sql.includes("from production_outputs")) {
+        return { rows, rowCount: rows.length };
+      }
+      if (compiled.sql.includes("update production_outputs")) {
+        return { rows: [{ entry_no: "100" }], rowCount: 1 };
+      }
+      if (compiled.sql.includes("data_quality_issues")) {
+        return { rows: [], rowCount: options.issueRowCount ?? 0 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => options.existingRule ? [options.existingRule] : []
+        })
+      })
+    }),
+    insert: () => ({
+      values: (values: unknown) => ({
+        returning: async () => {
+          insertedRules.push(values);
+          return [conditionalRuleFixture(values as Record<string, unknown>)];
+        }
+      })
+    }),
+    update: () => ({
+      set: (values: unknown) => ({
+        where: () => ({
+          returning: async () => {
+            updatedRules.push(values);
+            return [conditionalRuleFixture(values as Record<string, unknown>)];
+          }
+        })
+      })
+    })
+  };
+  const repository = new MasterRepository({
+    pool: {
+      query: async (text: string, values: readonly unknown[] = []) => {
+        poolQueries.push({ text, values });
+        if (text.includes("from master_entities me")) {
+          return {
+            rows: [{
+              id: ENTITY_ID,
+              entity_code: "OMSO1-22",
+              display_name: "OMSO 1-OZ - Printing 22 OZ",
+              area: null,
+              line_code: null,
+              product_family: null,
+              report_group: null,
+              planned_runtime_hours: "24",
+              is_active: true,
+              alias_count: 0,
+              target_count: 1,
+              output_row_count: 0,
+              created_at: NOW,
+              updated_at: NOW
+            }]
+          };
+        }
+        if (text.includes("from production_targets pt")) return { rows: [{ exists: true }] };
+        return { rows: [] };
+      }
+    },
+    db: {
+      transaction: async (callback: (transaction: typeof tx) => unknown) => callback(tx)
+    }
+  } as unknown as DatabaseConnection);
+  return { repository, executed, insertedRules, updatedRules, poolQueries };
+}
+
 test("previewMapping selected source uses a typed third parameter without skipping $3", async () => {
   const { repository, queries } = repositoryWithQueries();
 
@@ -387,6 +606,100 @@ test("commitBusinessCentralMappingReset does not reset unrelated mapped source f
   assert.doesNotMatch(outputUpdate.sql, /po\.prod_line_description/);
   assert.doesNotMatch(outputUpdate.sql, /po\.prod_line_no/);
   assert.doesNotMatch(outputUpdate.sql, /po\.machine_description/);
+});
+
+test("previewConditionalMapping is read-only and shows matching item samples", async () => {
+  const { repository, queries, transactionCalled } = repositoryWithConditionalPreview();
+
+  const result = await repository.previewConditionalMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "OMSO1 OZ",
+    conditionType: "item_description_pattern",
+    conditionValue: "22 OZ",
+    entityId: ENTITY_ID
+  });
+
+  assert.equal(transactionCalled(), false);
+  assert.equal(result.mode, "preview");
+  assert.equal(result.totalMatchingRows, 4);
+  assert.equal(result.conditionMatchingRows, 2);
+  assert.equal(result.currentlyMappedRows, 1);
+  assert.equal(result.alreadyMappedDifferentEntityRows, 1);
+  assert.equal(result.eligibleRows, 1);
+  assert.equal(result.estimatedTargetEligibilityChange, 1);
+  assert.equal(result.conditionMatchingOkQty, 600);
+  assert.equal(result.outputOkQtyBefore, result.outputOkQtyAfter);
+  assert.equal(result.samples[0]?.itemNo, "FG-22");
+  assert.match(result.warnings.join("\n"), /will not be overwritten/);
+  assert.equal(queries.some((query) => /\b(update|insert|delete)\b/i.test(query.text)), false);
+});
+
+test("commitConditionalMapping creates a reviewed rule and updates only eligible matching rows", async () => {
+  const { repository, executed, insertedRules } = repositoryWithConditionalCommitFlow({ issueRowCount: 1 });
+
+  const result = await repository.commitConditionalMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "OMSO1 OZ",
+    conditionType: "item_description_pattern",
+    conditionValue: "22 OZ",
+    entityId: ENTITY_ID,
+    actorUserId: ACTOR_ID
+  });
+
+  const outputUpdate = executed.find((query) => query.sql.includes("update production_outputs"));
+  assert.equal(result.mode, "commit");
+  assert.equal(result.updatedRows, 1);
+  assert.equal(result.resolvedIssues, 1);
+  assert.equal(result.outputOkQtyBefore, result.outputOkQtyAfter);
+  assert.equal(insertedRules.length, 1);
+  assert.equal((insertedRules[0] as { conditionValue?: unknown }).conditionValue, "22 OZ");
+  assert.ok(outputUpdate);
+  assert.match(outputUpdate.sql, /set entity_id = \$\d+::uuid/);
+  assert.match(outputUpdate.sql, /po\.entity_id is null/);
+  assert.doesNotMatch(outputUpdate.sql, /quantity\s*=/);
+  assert.ok(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
+  assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"), false);
+});
+
+test("commitConditionalMapping updates an existing active reviewed rule", async () => {
+  const { repository, insertedRules, updatedRules } = repositoryWithConditionalCommitFlow({
+    existingRule: conditionalRuleFixture({ entityId: OTHER_ENTITY_ID })
+  });
+
+  const result = await repository.commitConditionalMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "OMSO1 OZ",
+    conditionType: "item_description_pattern",
+    conditionValue: "22 OZ",
+    entityId: ENTITY_ID,
+    actorUserId: ACTOR_ID
+  });
+
+  assert.equal(result.rule?.entityId, ENTITY_ID);
+  assert.equal(insertedRules.length, 0);
+  assert.equal(updatedRules.length, 1);
+  assert.equal((updatedRules[0] as { entityId?: unknown }).entityId, ENTITY_ID);
+});
+
+test("commitConditionalMapping does not overwrite unrelated mapped rows", async () => {
+  const { repository, executed } = repositoryWithConditionalCommitFlow();
+
+  await repository.commitConditionalMapping({
+    sourceField: "machine_center_no",
+    sourceValue: "OMSO1 OZ",
+    conditionType: "item_description_pattern",
+    conditionValue: "22 OZ",
+    entityId: ENTITY_ID,
+    actorUserId: ACTOR_ID
+  });
+
+  const outputUpdate = executed.find((query) => query.sql.includes("update production_outputs"));
+  assert.ok(outputUpdate);
+  assert.match(outputUpdate.sql, /po\.id = any\(array\[\$\d+\]::uuid\[\]\)/);
+  assert.ok(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
+  assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"), false);
+  assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"), false);
+  assert.equal(outputUpdate.params.includes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"), false);
 });
 
 test("commitMapping skips data quality resolution when no source refs are updated", async () => {

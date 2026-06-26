@@ -2,13 +2,18 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import {
   dataQualityIssues,
   itemConversionMappings,
+  masterEntityConditionalRules,
   masterEntities,
   masterEntityAliases
 } from "@poip/db";
 import {
+  conditionalMappingRuleMatches,
+  normalizeConditionalMappingConditionValue,
   normalizeAliasDisplay,
   normalizeAliasKey,
   suggestMappingCandidates,
+  type ConditionalMappingConditionType,
+  type ConditionalMappingRuleInput,
   type CandidateEntityInput,
   type MasterSourceField
 } from "@poip/domain";
@@ -17,6 +22,10 @@ import { DATABASE, type DatabaseConnection } from "../database/database.module.j
 import type {
   BusinessCentralMappingResetDto,
   BusinessCentralMappingResetSourceField,
+  ConditionalMappingPreviewDto,
+  ConditionalMappingRuleDto,
+  ConditionalMappingSampleDto,
+  ConditionalMappingTargetEntityDto,
   ConversionGapDto,
   ConversionMappingDto,
   MappingCandidateDto,
@@ -50,6 +59,25 @@ const resettableSourceColumns: Record<BusinessCentralMappingResetSourceField, st
 const MAPPING_RESET_WARNINGS = [
   "KPI quantities are not changed. Output quantity, reject quantity, item fields, document fields, targets, sync runs, and raw Business Central source fields remain unchanged."
 ] as const;
+
+type ConditionalMappingSourceField = BusinessCentralMappingResetSourceField;
+
+interface ConditionalMappingOutputRow {
+  readonly id: string;
+  readonly entityId: string | null;
+  readonly entryNo: string | null;
+  readonly documentNo: string | null;
+  readonly itemNo: string;
+  readonly itemDescription: string | null;
+  readonly itemCategoryCode: string | null;
+  readonly machineDescription: string | null;
+  readonly machineCenterNo: string | null;
+  readonly prodLineNo: string | null;
+  readonly prodLineDescription: string | null;
+  readonly grossWeightPerPcs: number | null;
+  readonly normalizedOutputType: string;
+  readonly quantity: number;
+}
 
 function columnFor(sourceField: MasterSourceField): string {
   return sourceColumns[sourceField];
@@ -97,6 +125,12 @@ function sqlNumberValue(value: unknown): number {
   return numberValue(value as string | number | null | undefined);
 }
 
+function sqlNullableNumberValue(value: unknown): number | null {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function uniqueSourceRefs(values: readonly unknown[]): string[] {
   const refs = new Set<string>();
   for (const value of values) {
@@ -109,6 +143,10 @@ function uniqueSourceRefs(values: readonly unknown[]): string[] {
 
 function textArraySql(values: readonly string[]) {
   return sql`array[${sql.join(values.map((value) => sql`${value}`), sql`, `)}]::text[]`;
+}
+
+function uuidArraySql(values: readonly string[]) {
+  return sql`array[${sql.join(values.map((value) => sql`${value}`), sql`, `)}]::uuid[]`;
 }
 
 function timestampText(value: Date | string | null): string | null {
@@ -1021,6 +1059,172 @@ export class MasterRepository {
     });
   }
 
+  async previewConditionalMapping(input: {
+    readonly sourceField: ConditionalMappingSourceField;
+    readonly sourceValue: string;
+    readonly conditionType: ConditionalMappingConditionType;
+    readonly conditionValue: string;
+    readonly entityId: string;
+  }): Promise<ConditionalMappingPreviewDto> {
+    const [entity, rows, targetExists] = await Promise.all([
+      this.getEntityOrThrow(input.entityId),
+      this.fetchConditionalSourceRows(input.sourceField, input.sourceValue),
+      this.entityHasActiveTarget(input.entityId)
+    ]);
+    return this.buildConditionalMappingPreview({
+      input,
+      rows,
+      targetEntity: {
+        entityId: entity.id,
+        entityCode: entity.entityCode,
+        displayName: entity.displayName
+      },
+      targetExists,
+      mode: "preview"
+    });
+  }
+
+  async commitConditionalMapping(input: {
+    readonly sourceField: ConditionalMappingSourceField;
+    readonly sourceValue: string;
+    readonly conditionType: ConditionalMappingConditionType;
+    readonly conditionValue: string;
+    readonly entityId: string;
+    readonly actorUserId?: string | null | undefined;
+  }): Promise<ConditionalMappingPreviewDto> {
+    const entity = await this.getEntityOrThrow(input.entityId);
+    const targetEntity = {
+      entityId: entity.id,
+      entityCode: entity.entityCode,
+      displayName: entity.displayName
+    };
+    const targetExists = await this.entityHasActiveTarget(input.entityId);
+    const sourceValue = normalizeAliasDisplay(input.sourceValue);
+    const sourceValueNormalized = normalizeAliasKey(sourceValue);
+    const conditionValue = input.conditionValue.trim();
+    const conditionValueNormalized = normalizeConditionalMappingConditionValue(input.conditionType, conditionValue);
+    const column = resetColumnFor(input.sourceField);
+
+    return this.database.db.transaction(async (tx) => {
+      const sourceRowsResult = await tx.execute(sql`
+        select po.id::text,
+               po.entity_id::text,
+               po.entry_no::text,
+               po.document_no,
+               po.item_no,
+               po.item_description,
+               po.item_category_code,
+               po.machine_description,
+               po.machine_center_no,
+               po.prod_line_no,
+               po.prod_line_description,
+               po.gross_weight_per_pcs,
+               po.normalized_output_type,
+               po.quantity
+        from production_outputs po
+        where po.source_system = ${SOURCE_SYSTEM}
+          and ${sql.raw(sqlNormalizeExpression(`po.${column}`))} = ${sourceValueNormalized}
+        order by po.posting_date desc, po.entry_no desc nulls last
+      `);
+      const rows = sourceRowsResult.rows.map((row) => this.serializeConditionalOutputRow(row));
+      const preview = this.buildConditionalMappingPreview({
+        input: {
+          ...input,
+          sourceValue,
+          conditionValue
+        },
+        rows,
+        targetEntity,
+        targetExists,
+        mode: "commit"
+      });
+      const matchingRows = this.matchConditionalRows(rows, input);
+      const eligibleIds = matchingRows.flatMap((row) => (row.entityId === null ? [row.id] : []));
+
+      const [existingRule] = await tx
+        .select()
+        .from(masterEntityConditionalRules)
+        .where(and(
+          eq(masterEntityConditionalRules.sourceSystem, SOURCE_SYSTEM),
+          eq(masterEntityConditionalRules.sourceField, input.sourceField),
+          eq(masterEntityConditionalRules.sourceValueNormalized, sourceValueNormalized),
+          eq(masterEntityConditionalRules.conditionType, input.conditionType),
+          eq(masterEntityConditionalRules.conditionValueNormalized, conditionValueNormalized),
+          eq(masterEntityConditionalRules.isActive, true)
+        ))
+        .limit(1);
+
+      const ruleValues = {
+        entityId: input.entityId,
+        sourceSystem: SOURCE_SYSTEM,
+        sourceField: input.sourceField,
+        sourceValue,
+        sourceValueNormalized,
+        conditionType: input.conditionType,
+        conditionValue,
+        conditionValueNormalized,
+        source: "conditional-mapping-center",
+        isActive: true,
+        updatedBy: input.actorUserId ?? null,
+        updatedAt: sql`now()`
+      };
+      const [rule] = existingRule
+        ? await tx
+          .update(masterEntityConditionalRules)
+          .set(ruleValues)
+          .where(eq(masterEntityConditionalRules.id, existingRule.id))
+          .returning()
+        : await tx
+          .insert(masterEntityConditionalRules)
+          .values({
+            ...ruleValues,
+            createdBy: input.actorUserId ?? null
+          })
+          .returning();
+      if (!rule) throw new BadRequestException("Unable to create conditional mapping rule");
+
+      let updatedRows = 0;
+      let entryNos: string[] = [];
+      if (eligibleIds.length > 0) {
+        const updated = await tx.execute(sql`
+          update production_outputs po
+          set entity_id = ${input.entityId}::uuid,
+              updated_at = now()
+          where po.id = any(${uuidArraySql(eligibleIds)})
+            and po.source_system = ${SOURCE_SYSTEM}
+            and po.entity_id is null
+          returning po.entry_no::text
+        `);
+        entryNos = uniqueSourceRefs(updated.rows.map((row) => (row as { entry_no?: unknown }).entry_no));
+        updatedRows = updated.rowCount ?? entryNos.length;
+      }
+
+      let resolvedIssues = 0;
+      if (entryNos.length > 0) {
+        const issueUpdate = await tx.execute(sql`
+          update ${dataQualityIssues}
+          set status = 'RESOLVED',
+              resolved_by = ${input.actorUserId ?? null},
+              resolved_at = now(),
+              resolution_note = 'Resolved by reviewed conditional mapping rule'
+          where source_system = ${SOURCE_SYSTEM}
+            and status in ('OPEN', 'ACKNOWLEDGED')
+            and issue_code in ('UNKNOWN_MACHINE', 'UNMAPPED_ENTITY')
+            and source_ref = any(${textArraySql(entryNos)})
+        `);
+        resolvedIssues = issueUpdate.rowCount ?? 0;
+      }
+
+      return {
+        ...preview,
+        rule: this.serializeConditionalRule(rule),
+        updatedRows,
+        resolvedIssues,
+        outputOkQtyAfter: preview.outputOkQtyBefore
+      };
+    });
+  }
+
   async targetCoverage(filters: { readonly from?: string | undefined; readonly to?: string | undefined; readonly page: number; readonly pageSize: number }) {
     const params: unknown[] = [SOURCE_SYSTEM];
     const clauses = ["po.source_system = $1", "po.normalized_output_type = 'OK'", "po.quantity > 0"];
@@ -1299,6 +1503,214 @@ export class MasterRepository {
     if (existing && existing.id !== input.aliasId) {
       throw new ConflictException("Active alias already exists for this entity");
     }
+  }
+
+  private async fetchConditionalSourceRows(
+    sourceField: ConditionalMappingSourceField,
+    sourceValue: string
+  ): Promise<readonly ConditionalMappingOutputRow[]> {
+    const column = resetColumnFor(sourceField);
+    const result = await this.database.pool.query(
+      `
+        select po.id::text,
+               po.entity_id::text,
+               po.entry_no::text,
+               po.document_no,
+               po.item_no,
+               po.item_description,
+               po.item_category_code,
+               po.machine_description,
+               po.machine_center_no,
+               po.prod_line_no,
+               po.prod_line_description,
+               po.gross_weight_per_pcs,
+               po.normalized_output_type,
+               po.quantity
+        from production_outputs po
+        where po.source_system = $1
+          and ${sqlNormalizeExpression(`po.${column}`)} = $2
+        order by po.posting_date desc, po.entry_no desc nulls last
+      `,
+      [SOURCE_SYSTEM, normalizeAliasKey(sourceValue)]
+    );
+    return result.rows.map((row) => this.serializeConditionalOutputRow(row));
+  }
+
+  private async entityHasActiveTarget(entityId: string): Promise<boolean> {
+    const result = await this.database.pool.query<{ exists: boolean }>(
+      `
+        select exists (
+          select 1
+          from production_targets pt
+          where pt.entity_id = $1
+            and pt.status in ('APPROVED', 'ACTIVE')
+            and pt.daily_target_qty > 0
+        ) as exists
+      `,
+      [entityId]
+    );
+    return result.rows[0]?.exists ?? false;
+  }
+
+  private buildConditionalMappingPreview(input: {
+    readonly input: {
+      readonly sourceField: ConditionalMappingSourceField;
+      readonly sourceValue: string;
+      readonly conditionType: ConditionalMappingConditionType;
+      readonly conditionValue: string;
+      readonly entityId: string;
+    };
+    readonly rows: readonly ConditionalMappingOutputRow[];
+    readonly targetEntity: ConditionalMappingTargetEntityDto;
+    readonly targetExists: boolean;
+    readonly mode: "preview" | "commit";
+  }): ConditionalMappingPreviewDto {
+    const matchingRows = this.matchConditionalRows(input.rows, input.input);
+    const currentlyMappedRows = matchingRows.filter((row) => row.entityId !== null).length;
+    const alreadyMappedDifferentEntityRows = matchingRows.filter((row) => row.entityId !== null && row.entityId !== input.input.entityId).length;
+    const eligibleRows = matchingRows.filter((row) => row.entityId === null).length;
+    const conditionMatchingOkQty = matchingRows
+      .filter((row) => row.normalizedOutputType === "OK")
+      .reduce((total, row) => total + row.quantity, 0);
+    return {
+      sourceSystem: SOURCE_SYSTEM,
+      sourceField: input.input.sourceField,
+      sourceValue: normalizeAliasDisplay(input.input.sourceValue),
+      conditionType: input.input.conditionType,
+      conditionValue: input.input.conditionValue.trim(),
+      targetEntity: input.targetEntity,
+      mode: input.mode,
+      totalMatchingRows: input.rows.length,
+      conditionMatchingRows: matchingRows.length,
+      currentlyMappedRows,
+      alreadyMappedDifferentEntityRows,
+      eligibleRows,
+      estimatedTargetEligibilityChange: input.targetExists ? eligibleRows : 0,
+      conditionMatchingOkQty,
+      outputOkQtyBefore: conditionMatchingOkQty,
+      outputOkQtyAfter: conditionMatchingOkQty,
+      samples: matchingRows.slice(0, 8).map((row): ConditionalMappingSampleDto => ({
+        entryNo: row.entryNo,
+        itemNo: row.itemNo,
+        itemDescription: row.itemDescription,
+        documentNo: row.documentNo
+      })),
+      warnings: this.conditionalMappingWarnings({
+        totalRows: input.rows.length,
+        matchingRows: matchingRows.length,
+        alreadyMappedDifferentEntityRows,
+        targetExists: input.targetExists,
+        conditionType: input.input.conditionType,
+        conditionValue: input.input.conditionValue
+      })
+    };
+  }
+
+  private matchConditionalRows(
+    rows: readonly ConditionalMappingOutputRow[],
+    input: {
+      readonly sourceField: ConditionalMappingSourceField;
+      readonly sourceValue: string;
+      readonly conditionType: ConditionalMappingConditionType;
+      readonly conditionValue: string;
+      readonly entityId: string;
+    }
+  ): readonly ConditionalMappingOutputRow[] {
+    const rule: ConditionalMappingRuleInput = {
+      sourceField: input.sourceField,
+      sourceValue: normalizeAliasDisplay(input.sourceValue),
+      sourceValueNormalized: normalizeAliasKey(input.sourceValue),
+      conditionType: input.conditionType,
+      conditionValue: input.conditionValue,
+      entityId: input.entityId
+    };
+    return rows.filter((row) => conditionalMappingRuleMatches(this.conditionalRowInput(row), rule));
+  }
+
+  private conditionalRowInput(row: ConditionalMappingOutputRow) {
+    return {
+      machineDescription: row.machineDescription,
+      machineCenterNo: row.machineCenterNo,
+      prodLineNo: row.prodLineNo,
+      prodLineDescription: row.prodLineDescription,
+      itemNo: row.itemNo,
+      itemDescription: row.itemDescription,
+      itemCategoryCode: row.itemCategoryCode,
+      grossWeightPerPcs: row.grossWeightPerPcs
+    };
+  }
+
+  private conditionalMappingWarnings(input: {
+    readonly totalRows: number;
+    readonly matchingRows: number;
+    readonly alreadyMappedDifferentEntityRows: number;
+    readonly targetExists: boolean;
+    readonly conditionType: ConditionalMappingConditionType;
+    readonly conditionValue: string;
+  }): string[] {
+    const warnings = [
+      "KPI quantities are not changed. Output quantity, reject quantity, item fields, document fields, targets, sync runs, and raw Business Central source fields remain unchanged."
+    ];
+    if (input.matchingRows === 0) {
+      warnings.push("No rows match this condition. Commit would only save the reviewed rule; no output rows would be mapped.");
+    }
+    if (input.totalRows > 0 && input.matchingRows === input.totalRows) {
+      warnings.push("Condition matches every row for this source value. Review samples carefully so this does not become a broad alias.");
+    }
+    if (input.alreadyMappedDifferentEntityRows > 0) {
+      warnings.push("Rows already mapped to a different entity will not be overwritten. Use Reset / Remap Source first if those rows need review.");
+    }
+    if (!input.targetExists) {
+      warnings.push("Target entity has no approved active target yet, so target eligibility may still show N/A after mapping.");
+    }
+    const normalizedCondition = normalizeConditionalMappingConditionValue(input.conditionType, input.conditionValue);
+    if ((input.conditionType === "item_no_pattern" || input.conditionType === "item_description_pattern") && normalizeAliasKey(normalizedCondition).length < 3) {
+      warnings.push("Pattern condition is very short and may be broad.");
+    }
+    if (input.conditionType === "item_category_code" && input.matchingRows > 100) {
+      warnings.push("Item category condition affects many rows. Confirm the category is specific enough for this source value.");
+    }
+    if (input.conditionType === "inferred_target_bucket" && input.conditionValue.toLowerCase() === "target_printing_non_oz") {
+      warnings.push("Printing non-OZ inference requires item/category printing evidence, but still needs sample review before commit.");
+    }
+    return warnings;
+  }
+
+  private serializeConditionalOutputRow(row: Record<string, unknown>): ConditionalMappingOutputRow {
+    return {
+      id: String(row.id),
+      entityId: row.entity_id === null || typeof row.entity_id === "undefined" ? null : String(row.entity_id),
+      entryNo: row.entry_no === null || typeof row.entry_no === "undefined" ? null : String(row.entry_no),
+      documentNo: row.document_no === null || typeof row.document_no === "undefined" ? null : String(row.document_no),
+      itemNo: row.item_no === null || typeof row.item_no === "undefined" ? "" : String(row.item_no),
+      itemDescription: row.item_description === null || typeof row.item_description === "undefined" ? null : String(row.item_description),
+      itemCategoryCode: row.item_category_code === null || typeof row.item_category_code === "undefined" ? null : String(row.item_category_code),
+      machineDescription: row.machine_description === null || typeof row.machine_description === "undefined" ? null : String(row.machine_description),
+      machineCenterNo: row.machine_center_no === null || typeof row.machine_center_no === "undefined" ? null : String(row.machine_center_no),
+      prodLineNo: row.prod_line_no === null || typeof row.prod_line_no === "undefined" ? null : String(row.prod_line_no),
+      prodLineDescription: row.prod_line_description === null || typeof row.prod_line_description === "undefined" ? null : String(row.prod_line_description),
+      grossWeightPerPcs: sqlNullableNumberValue(row.gross_weight_per_pcs),
+      normalizedOutputType: row.normalized_output_type === null || typeof row.normalized_output_type === "undefined" ? "" : String(row.normalized_output_type),
+      quantity: sqlNumberValue(row.quantity)
+    };
+  }
+
+  private serializeConditionalRule(row: typeof masterEntityConditionalRules.$inferSelect): ConditionalMappingRuleDto {
+    return {
+      id: row.id,
+      entityId: row.entityId,
+      sourceSystem: row.sourceSystem,
+      sourceField: row.sourceField as ConditionalMappingSourceField,
+      sourceValue: row.sourceValue,
+      sourceValueNormalized: row.sourceValueNormalized,
+      conditionType: row.conditionType as ConditionalMappingConditionType,
+      conditionValue: row.conditionValue,
+      conditionValueNormalized: row.conditionValueNormalized,
+      source: row.source,
+      isActive: row.isActive,
+      createdAt: timestampText(row.createdAt) ?? new Date().toISOString(),
+      updatedAt: timestampText(row.updatedAt) ?? new Date().toISOString()
+    };
   }
 
   private async activeEntityCandidates() {

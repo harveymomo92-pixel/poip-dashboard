@@ -9,6 +9,13 @@ const businessCentralMappingResetSourceFieldSchema = z.enum([
   "machine_center_no",
   "machine_description"
 ]);
+const conditionalMappingConditionTypeSchema = z.enum([
+  "inferred_target_bucket",
+  "item_category_code",
+  "item_no_pattern",
+  "item_description_pattern",
+  "gross_weight_range"
+]);
 
 export const listEntitiesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -92,6 +99,19 @@ export const businessCentralMappingResetSchema = z.object({
 
 export const businessCentralMappingResetCommitSchema = businessCentralMappingResetSchema.extend({
   confirmation: z.literal("RESET")
+});
+
+export const conditionalMappingPreviewSchema = z.object({
+  sourceField: businessCentralMappingResetSourceFieldSchema,
+  sourceValue: z.string().trim().min(1).max(160),
+  conditionType: conditionalMappingConditionTypeSchema,
+  conditionValue: z.string().trim().min(1).max(220),
+  entityId: z.string().uuid()
+});
+
+export const conditionalMappingCommitSchema = conditionalMappingPreviewSchema.extend({
+  confirmation: z.literal("COMMIT"),
+  note: z.string().trim().min(3).max(500).optional()
 });
 
 export const createConversionSchema = z.object({

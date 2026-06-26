@@ -22,6 +22,7 @@ test("MasterController protects read routes with master_data.view", () => {
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.overview), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.unmappedSources), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.previewBusinessCentralMappingReset), ["master_data.view"]);
+  assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.previewConditionalMapping), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.targetCoverage), ["master_data.view"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.conversionGaps), ["master_data.view"]);
 });
@@ -31,6 +32,7 @@ test("MasterController protects write routes with master_data.manage", () => {
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.createAlias), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitMapping), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitBusinessCentralMappingReset), ["master_data.manage"]);
+  assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitConditionalMapping), ["master_data.manage"]);
   assert.deepEqual(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, MasterController.prototype.commitConversion), ["master_data.manage"]);
 });
 
@@ -168,4 +170,60 @@ test("MasterController audits Business Central mapping reset commit", async () =
   assert.equal(events.length, 1);
   assert.equal(events[0]?.action, "master.mapping-reset.commit");
   assert.equal(events[0]?.entityType, "production_output_mapping");
+});
+
+test("MasterController audits conditional mapping commit", async () => {
+  const events: AuditEvent[] = [];
+  const controller = new MasterController(
+    {
+      commitConditionalMapping: async () => ({
+        sourceSystem: "business-central",
+        sourceField: "machine_center_no",
+        sourceValue: "OMSO1 OZ",
+        conditionType: "item_description_pattern",
+        conditionValue: "22 OZ",
+        targetEntity: {
+          entityId: "11111111-1111-4111-8111-111111111111",
+          entityCode: "OMSO1-22",
+          displayName: "OMSO 1-OZ - Printing 22 OZ"
+        },
+        mode: "commit",
+        totalMatchingRows: 305,
+        conditionMatchingRows: 42,
+        currentlyMappedRows: 0,
+        alreadyMappedDifferentEntityRows: 0,
+        eligibleRows: 42,
+        estimatedTargetEligibilityChange: 42,
+        conditionMatchingOkQty: 1000,
+        outputOkQtyBefore: 1000,
+        outputOkQtyAfter: 1000,
+        samples: [],
+        warnings: [],
+        updatedRows: 42,
+        resolvedIssues: 0
+      })
+    } as unknown as MasterService,
+    {
+      log: async (event: AuditEvent) => {
+        events.push(event);
+      }
+    } as unknown as AuditService
+  );
+
+  const result = await controller.commitConditionalMapping(
+    {
+      sourceField: "machine_center_no",
+      sourceValue: "OMSO1 OZ",
+      conditionType: "item_description_pattern",
+      conditionValue: "22 OZ",
+      entityId: "11111111-1111-4111-8111-111111111111",
+      confirmation: "COMMIT"
+    },
+    request
+  );
+
+  assert.equal(result.updatedRows, 42);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.action, "master.conditional-mapping.commit");
+  assert.equal(events[0]?.entityType, "master_entity_conditional_rule");
 });

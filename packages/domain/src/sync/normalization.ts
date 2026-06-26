@@ -11,6 +11,7 @@ export interface DataQualitySignal {
     | "MISSING_DOCUMENT_NO"
     | "MISSING_ITEM_NO"
     | "UNKNOWN_MACHINE"
+    | "CONDITIONAL_MAPPING_REVIEW"
     | "MISSING_TARGET"
     | "MISSING_GROSS_WEIGHT"
     | "NEGATIVE_QUANTITY"
