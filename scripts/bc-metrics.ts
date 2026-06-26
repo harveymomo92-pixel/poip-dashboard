@@ -6,10 +6,14 @@ import { classifyOutputRow } from "../packages/domain/src/kpi/output-classificat
 import { createDatabase } from "../packages/db/src/client.js";
 import {
   buildDailyItemResume,
+  DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES,
+  isAttachedDailyItemResumeRejectAttachmentStatus,
+  summarizeDailyItemResumeRejectDocuments,
   DAILY_ITEM_RESUME_TARGET_REASONS,
   summarizeDailyItemResumeTargetReasons,
   type DailyItemResumeRow,
   type DailyItemResumeFilters,
+  type DailyItemResumeRejectAttachmentStatus,
   type DailyItemResumeSourceRow,
   type DailyItemResumeTarget
 } from "../apps/api/src/modules/dashboard/daily-item-resume.js";
@@ -132,6 +136,10 @@ function formatNumber(value: number, digits = 2): string {
 
 function formatPct(value: number | null): string {
   return value === null ? "N/A" : `${formatNumber(value, 2)}%`;
+}
+
+function formatTableField(value: unknown): string {
+  return String(value ?? "N/A").replace(/\s*\|\s*/g, " / ");
 }
 
 function dateText(value: unknown): string {
@@ -752,6 +760,44 @@ function sampleResumeRows(rows: readonly DailyItemResumeRow[], limit = 3): strin
   return samples.length ? samples.join(" | ") : "none";
 }
 
+function rejectAttachmentStatus(detail: Record<string, unknown>): DailyItemResumeRejectAttachmentStatus | null {
+  const status = typeof detail.attachmentStatus === "string" ? detail.attachmentStatus : "";
+  if (status === "NONE" || DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES.includes(status as Exclude<DailyItemResumeRejectAttachmentStatus, "NONE">)) {
+    return status as DailyItemResumeRejectAttachmentStatus;
+  }
+  return null;
+}
+
+function rejectAttachmentCandidates(detail: Record<string, unknown>): readonly Record<string, unknown>[] {
+  return Array.isArray(detail.attachmentCandidates)
+    ? detail.attachmentCandidates.filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === "object")
+    : [];
+}
+
+function buildRejectAttachmentStatusBreakdown(rows: readonly DailyItemResumeRow[]) {
+  const breakdown = new Map<Exclude<DailyItemResumeRejectAttachmentStatus, "NONE">, { rejectRows: number; groups: number; rejectKg: number }>();
+  for (const status of DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES) {
+    breakdown.set(status, { rejectRows: 0, groups: 0, rejectKg: 0 });
+  }
+  for (const row of rows) {
+    const groupStatuses = new Set<Exclude<DailyItemResumeRejectAttachmentStatus, "NONE">>();
+    for (const detail of row.rejectDetails) {
+      const status = rejectAttachmentStatus(detail);
+      if (!status || status === "NONE") continue;
+      const current = breakdown.get(status);
+      if (!current) continue;
+      current.rejectRows += 1;
+      current.rejectKg += numberValue(detail.rejectKg as string | number | null | undefined);
+      groupStatuses.add(status);
+    }
+    for (const status of groupStatuses) {
+      const current = breakdown.get(status);
+      if (current) current.groups += 1;
+    }
+  }
+  return breakdown;
+}
+
 function printDailyItemResumeTargetBreakdown(rows: readonly DailyItemResumeRow[]) {
   console.log("");
   console.log("Target reason breakdown:");
@@ -909,7 +955,10 @@ async function runDailyItemResume(pool: DatabasePool) {
       netOutput: acc.netOutput + row.netOutputQty,
       positiveOutput: acc.positiveOutput + row.positiveOutputQty,
       correctionOutput: acc.correctionOutput + row.correctionOutputQty,
-      rejectAttachedCount: acc.rejectAttachedCount + (row.rejectAttachmentStatus === "ATTACHED" ? row.rejectDetails.length : 0),
+      rejectAttachedCount: acc.rejectAttachedCount + row.rejectDetails.filter((detail) => {
+        const status = rejectAttachmentStatus(detail);
+        return status ? isAttachedDailyItemResumeRejectAttachmentStatus(status) : false;
+      }).length,
       rejectOnlyGroupCount: acc.rejectOnlyGroupCount + (row.rejectAttachmentStatus === "REJECT_ONLY" ? 1 : 0),
       ambiguousRejectAttachmentCount: acc.ambiguousRejectAttachmentCount + (row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT" ? 1 : 0),
       totalRejectKg: acc.totalRejectKg + row.rejectKg,
@@ -920,6 +969,7 @@ async function runDailyItemResume(pool: DatabasePool) {
     }),
     { netOutput: 0, positiveOutput: 0, correctionOutput: 0, rejectAttachedCount: 0, rejectOnlyGroupCount: 0, ambiguousRejectAttachmentCount: 0, totalRejectKg: 0, conversionCompleteCount: 0, conversionGaps: 0, targetMissingCount: 0, targetNonMatchedCount: 0 }
   );
+  const rejectAttachmentBreakdown = buildRejectAttachmentStatusBreakdown(allRows);
 
   console.log("Business Central daily item resume");
   console.log(`Window: ${baseFilters.from} to ${baseFilters.to}`);
@@ -936,42 +986,66 @@ async function runDailyItemResume(pool: DatabasePool) {
   console.log(`Ambiguous reject attachment count: ${totals.ambiguousRejectAttachmentCount}`);
   console.log(`Total reject kg: ${formatNumber(totals.totalRejectKg, 4)}`);
   console.log(`Reject PCS Eq complete/incomplete count: ${totals.conversionCompleteCount}/${totals.conversionGaps}`);
+  console.log("Reject attachment status breakdown:");
+  for (const status of DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES) {
+    const value = rejectAttachmentBreakdown.get(status) ?? { rejectRows: 0, groups: 0, rejectKg: 0 };
+    console.log(`- ${status}: reject_rows=${value.rejectRows}; groups=${value.groups}; reject_kg=${formatNumber(value.rejectKg, 4)}`);
+  }
   console.log(`Target missing count: ${totals.targetMissingCount}`);
   console.log(`Target non-matched count: ${totals.targetNonMatchedCount}`);
   await printEntitySourceUsage(pool);
   printDailyItemResumeTargetBreakdown(allRows);
-  const rejectDocuments = new Map<string, { rejectKg: number; rows: number; okItems: Set<string>; rejectItems: Set<string> }>();
-  for (const row of allRows) {
-    for (const detail of row.rejectDetails) {
-      const documentNo = String(detail.documentNo ?? "(blank)");
-      const current = rejectDocuments.get(documentNo) ?? { rejectKg: 0, rows: 0, okItems: new Set<string>(), rejectItems: new Set<string>() };
-      current.rejectKg += numberValue(detail.rejectKg as string | number | null | undefined);
-      current.rows += 1;
-      current.okItems.add(row.itemNo);
-      current.rejectItems.add(String(detail.itemNo ?? "N/A"));
-      rejectDocuments.set(documentNo, current);
-    }
-  }
   console.log("Top reject documents:");
-  const topRejectDocuments = [...rejectDocuments.entries()]
-    .sort((left, right) => right[1].rejectKg - left[1].rejectKg || right[1].rows - left[1].rows)
+  const topRejectDocuments = [...summarizeDailyItemResumeRejectDocuments(allRows)]
+    .sort((left, right) => right.rejectKg - left.rejectKg || right.rows - left.rows)
     .slice(0, 5);
   if (topRejectDocuments.length === 0) console.log("- none");
-  for (const [documentNo, value] of topRejectDocuments) {
-    console.log(`- ${documentNo}: reject_kg=${formatNumber(value.rejectKg, 4)}; rows=${value.rows}; ok_items=${[...value.okItems].join(", ")}; reject_items=${[...value.rejectItems].join(", ")}`);
+  for (const value of topRejectDocuments) {
+    console.log(`- ${value.documentNo}: reject_kg=${formatNumber(value.rejectKg, 4)}; rows=${value.rows}; ok_items=${value.okItems.join(", ") || "none"}; reject_items=${value.rejectItems.join(", ") || "none"}`);
   }
   const attachedSample = allRows.flatMap((row) =>
-    row.rejectAttachmentStatus === "ATTACHED"
-      ? row.rejectDetails.map((detail) => ({ row, detail }))
-      : []
+    row.rejectDetails
+      .filter((detail) => {
+        const status = rejectAttachmentStatus(detail);
+        return status ? isAttachedDailyItemResumeRejectAttachmentStatus(status) : false;
+      })
+      .map((detail) => ({ row, detail }))
   )[0];
   console.log("Sample attached reject:");
   if (attachedSample) {
+    const status = rejectAttachmentStatus(attachedSample.detail) ?? "N/A";
     console.log(
-      `- ${String(attachedSample.detail.documentNo ?? "N/A")}: OK item ${attachedSample.row.itemNo}; Reject item ${String(attachedSample.detail.itemNo ?? "N/A")}; reject_kg=${formatNumber(numberValue(attachedSample.detail.rejectKg as string | number | null | undefined), 4)}; attached to OK group`
+      `- ${String(attachedSample.detail.documentNo ?? "N/A")}: OK item ${attachedSample.row.itemNo}; Reject item ${String(attachedSample.detail.itemNo ?? "N/A")}; reject_kg=${formatNumber(numberValue(attachedSample.detail.rejectKg as string | number | null | undefined), 4)}; status=${status}`
     );
   } else {
     console.log("- none");
+  }
+  console.log("Ambiguous reject examples:");
+  const ambiguousExamples = allRows.flatMap((row) =>
+    row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT"
+      ? row.rejectDetails.map((detail) => ({ row, detail }))
+      : []
+  ).slice(0, 3);
+  if (ambiguousExamples.length === 0) {
+    console.log("- none");
+  }
+  for (const example of ambiguousExamples) {
+    const candidates = rejectAttachmentCandidates(example.detail);
+    console.log(`- document_no=${String(example.detail.documentNo ?? "N/A")}`);
+    console.log(`  reject_item=${String(example.detail.itemNo ?? "N/A")}`);
+    console.log(`  reject_kg=${formatNumber(numberValue(example.detail.rejectKg as string | number | null | undefined), 4)}`);
+    console.log(`  candidate_count=${candidates.length}`);
+    console.log("  candidates=");
+    if (candidates.length === 0) {
+      console.log("    none");
+      continue;
+    }
+    console.log("    posting_date | machine | item_no | item_description | net_output | operator | shift | work_hours");
+    for (const candidate of candidates.slice(0, 5)) {
+      console.log(
+        `    ${formatTableField(candidate.postingDate)} | ${formatTableField(candidate.machine)} | ${formatTableField(candidate.itemNo)} | ${formatTableField(candidate.itemDescription)} | ${formatNumber(numberValue(candidate.netOutput as string | number | null | undefined), 4)} | ${formatTableField(candidate.operator)} | ${formatTableField(candidate.shift)} | ${formatTableField(candidate.workHours)}`
+      );
+    }
   }
   console.log("Sample grouped rows:");
   for (const row of resume.rows.slice(0, 5)) {

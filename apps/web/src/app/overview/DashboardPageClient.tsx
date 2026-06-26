@@ -161,6 +161,33 @@ const formatPct = (value: number | null) => value === null ? "N/A" : `${formatNu
 const formatDateTime = (value: string | null) =>
   value ? new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Belum pernah sync";
 
+function isAttachedRejectStatus(status: string): boolean {
+  return status.startsWith("ATTACHED_BY_");
+}
+
+function rejectAttachmentLabel(status: string): string {
+  if (status === "ATTACHED_BY_DOCUMENT") return "Attached: doc";
+  if (status === "ATTACHED_BY_DOCUMENT_DATE") return "Attached: doc+date";
+  if (status === "ATTACHED_BY_DOCUMENT_DATE_MACHINE") return "Attached: doc+date+machine";
+  if (status === "ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR") return "Attached: doc+date+shift";
+  return "Attached";
+}
+
+function formatResumeNote(note: string): string {
+  if (note === "AMBIGUOUS_REJECT_ATTACHMENT") return "Reject belum ditempel: beberapa kandidat OK";
+  if (note === "NO_MATCHING_OK_ROW_FOR_REJECT_DOCUMENT") return "Reject tanpa output OK terkait";
+  if (note === "REJECT_CONVERSION_INCOMPLETE") return "Konversi reject belum lengkap";
+  if (note === "WORK_HOURS_DEFAULT_24") return "Jam kerja memakai default 24";
+  if (note === "EXTERNAL_DOCUMENT_UNPARSED") return "External document belum terbaca";
+  if (note === "HAS_NEGATIVE_OUTPUT_CORRECTION") return "Ada koreksi output negatif";
+  return note;
+}
+
+function formatDetailValue(value: unknown): string {
+  if (Array.isArray(value) || (value !== null && typeof value === "object")) return JSON.stringify(value);
+  return String(value ?? "N/A");
+}
+
 function DetailList({ summary, rows }: Readonly<{ summary: string; rows: readonly Record<string, unknown>[] }>) {
   if (rows.length === 0) return <span>{summary}</span>;
   return (
@@ -168,7 +195,7 @@ function DetailList({ summary, rows }: Readonly<{ summary: string; rows: readonl
       <summary>{summary}</summary>
       <div>
         {rows.map((row, index) => (
-          <pre key={index}>{Object.entries(row).map(([key, value]) => `${key}: ${String(value ?? "N/A")}`).join("\n")}</pre>
+          <pre key={index}>{Object.entries(row).map(([key, value]) => `${key}: ${formatDetailValue(value)}`).join("\n")}</pre>
         ))}
       </div>
     </details>
@@ -183,9 +210,12 @@ function TargetDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
 }
 
 function RejectDetail({ row }: Readonly<{ row: DailyItemResumeRow }>) {
+  const candidateCount = row.rejectDetails.reduce((total, detail) => (
+    total + (Array.isArray(detail.attachmentCandidates) ? detail.attachmentCandidates.length : 0)
+  ), 0);
   const summary = row.rejectDetails.length === 0
     ? `${formatNumber(row.rejectKg, 1)} kg`
-    : `${formatNumber(row.rejectKg, 1)} kg · ${row.rejectDetails.length} detail`;
+    : `${formatNumber(row.rejectKg, 1)} kg · ${row.rejectDetails.length} detail${candidateCount > 0 ? ` · ${candidateCount} kandidat` : ""}`;
 
   return <DetailList summary={summary} rows={row.rejectDetails} />;
 }
@@ -495,7 +525,8 @@ export function DashboardPageClient() {
                     <td className={row.correctionOutputQty < 0 ? "negative-number" : ""}>{formatNumber(row.correctionOutputQty, 1)}</td>
                     <td>
                       <RejectDetail row={row} />
-                      {row.rejectAttachmentStatus === "ATTACHED" ? <StatusBadge status="COVERED" label="Attached" /> : null}
+                      {isAttachedRejectStatus(row.rejectAttachmentStatus) ? <StatusBadge status="COVERED" label={rejectAttachmentLabel(row.rejectAttachmentStatus)} /> : null}
+                      {row.rejectAttachmentStatus === "AMBIGUOUS_REJECT_ATTACHMENT" ? <StatusBadge status="WARNING" label="Unresolved candidates" /> : null}
                     </td>
                     <td>{row.rejectPcsEq === null ? "N/A" : formatNumber(row.rejectPcsEq, 1)} {row.rejectConversionStatus === "INCOMPLETE" ? <StatusBadge status="WARNING" label="INCOMPLETE" /> : null}</td>
                     <td>{formatPct(row.achievementPct)} <StatusBadge status={row.achievementStatus} /> {row.targetReason !== "TARGET_MATCHED" ? <StatusBadge status={row.targetReason} /> : null}</td>
@@ -503,7 +534,7 @@ export function DashboardPageClient() {
                     <td>{row.grossWeight === null ? "N/A" : formatNumber(row.grossWeight, 4)}</td>
                     <td>{row.inputCount}</td>
                     <td><DetailList summary={row.externalDocumentSummary || "—"} rows={row.externalDocumentDetails} /></td>
-                    <td>{row.notes.length ? row.notes.join(" | ") : "—"}</td>
+                    <td>{row.notes.length ? row.notes.map(formatResumeNote).join(" | ") : "—"}</td>
                     <td><button className="table-icon-button" title="Copy grouped row reference" onClick={() => void copyOutputReference(row)}><Icons.copy /></button></td>
                   </tr>
                 ))}

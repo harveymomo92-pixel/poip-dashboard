@@ -131,7 +131,18 @@ reject rate = reject PCS equivalent / (OK Output + reject PCS equivalent) * 100
 
 If `reject_kg > 0` and `gross_weight_per_pcs` is missing/zero, `reject_pcs_eq` is `null`, the conversion gap is counted, and the dashboard marks reject conversion as incomplete.
 
-Daily item resume reject rows are scoped to the same Business Central Output rows and attach v1-style: same posting date, same resolved machine/entity label, exact document number when available, otherwise same posting date plus same resolved machine/entity. If no OK group exists for that date/machine, a reject-only group is created. Reject PCS equivalent uses the matching OK document gross weight where available; missing or non-positive gross weight is `INCOMPLETE`, never a trustworthy zero.
+Daily item resume reject rows are scoped to the same Business Central Output rows and attach document-first. Reject candidates are non-RJ `PCS` OK rows with the same `document_no`. The resolver attaches only when one OK group is deterministic: same document, then same posting date, then the preferred machine/entity sources (`machine_description`, `machine_center_no`, `prod_line_description`, `prod_line_no`, mapped entity fallback), then parsed `External_Document_No` context. It never splits reject kg across multiple OK rows.
+
+Reject attachment statuses:
+
+1. `ATTACHED_BY_DOCUMENT`
+2. `ATTACHED_BY_DOCUMENT_DATE`
+3. `ATTACHED_BY_DOCUMENT_DATE_MACHINE`
+4. `ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR`
+5. `AMBIGUOUS_REJECT_ATTACHMENT`
+6. `REJECT_ONLY`
+
+`AMBIGUOUS_REJECT_ATTACHMENT` means multiple OK candidates remain after deterministic narrowing; reject kg stays on the unresolved reject row and is not double-counted. `REJECT_ONLY` means no same-document OK candidate exists. Reject PCS equivalent uses the matched OK document gross weight where available; missing or non-positive gross weight is `INCOMPLETE`, never a trustworthy zero.
 
 ## Machine and Entity Mapping
 

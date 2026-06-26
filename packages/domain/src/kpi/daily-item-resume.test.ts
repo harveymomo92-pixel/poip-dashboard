@@ -107,8 +107,79 @@ test("buildDailyItemResumeRows attaches RJ KG reject by same document", () => {
   assert.equal(rows[0]?.rejectKg, 5);
   assert.equal(rows[0]?.rejectPcsEq, 10);
   assert.equal(rows[0]?.rejectConversionStatus, "COMPLETE");
-  assert.equal(rows[0]?.rejectAttachmentStatus, "ATTACHED");
+  assert.equal(rows[0]?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT");
   assert.equal(rows[0]?.rejectDetails[0]?.itemNo, "RJ015");
+});
+
+test("buildDailyItemResumeRows attaches reject by document and posting date when document has multiple OK candidates", () => {
+  const rows = buildDailyItemResumeRows([
+    base,
+    { ...base, postingDate: "2026-06-24", itemNo: "PF27CLJB82", itemDescription: "PREFORM 27.5 GR", quantity: 40 },
+    {
+      ...base,
+      postingDate: "2026-06-24",
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      itemDescription: "REJECT GUMPALAN PET",
+      quantity: 2,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null
+    }
+  ]);
+
+  const attached = rows.find((row) => row.itemNo === "PF27CLJB82");
+  assert.equal(attached?.rejectKg, 2);
+  assert.equal(attached?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT_DATE");
+  assert.equal(rows.find((row) => row.itemNo === "PF192CL12")?.rejectKg, 0);
+});
+
+test("buildDailyItemResumeRows attaches reject by document, posting date, and machine source", () => {
+  const rows = buildDailyItemResumeRows([
+    { ...base, itemNo: "PF192CL12", machineCenterNo: "MC-1" },
+    { ...base, itemNo: "PF27CLJB82", itemDescription: "PREFORM 27.5 GR", quantity: 40, machineCenterNo: "MC-2" },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      itemDescription: "REJECT GUMPALAN PET",
+      quantity: 2,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null,
+      machineCenterNo: "MC-2"
+    }
+  ]);
+
+  const attached = rows.find((row) => row.itemNo === "PF27CLJB82");
+  assert.equal(attached?.rejectKg, 2);
+  assert.equal(attached?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT_DATE_MACHINE");
+  assert.equal(rows.find((row) => row.itemNo === "PF192CL12")?.rejectKg, 0);
+});
+
+test("buildDailyItemResumeRows attaches reject by parsed shift operator context after document date machine", () => {
+  const rows = buildDailyItemResumeRows([
+    { ...base, itemNo: "PF192CL12", externalDocumentNo: "S1/8/ADI", operatorName: null, shiftCode: null },
+    { ...base, itemNo: "PF27CLJB82", itemDescription: "PREFORM 27.5 GR", quantity: 40, externalDocumentNo: "S2/12/BUDI", operatorName: null, shiftCode: null },
+    {
+      ...base,
+      normalizedOutputType: "REJECT",
+      itemNo: "RJ015",
+      itemDescription: "REJECT GUMPALAN PET",
+      quantity: 2,
+      uom: "KG",
+      rejectKg: 0,
+      grossWeightPerPcs: null,
+      externalDocumentNo: "S2/12/BUDI",
+      operatorName: null,
+      shiftCode: null
+    }
+  ]);
+
+  const attached = rows.find((row) => row.itemNo === "PF27CLJB82");
+  assert.equal(attached?.rejectKg, 2);
+  assert.equal(attached?.rejectAttachmentStatus, "ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR");
+  assert.equal(rows.find((row) => row.itemNo === "PF192CL12")?.rejectKg, 0);
 });
 
 test("buildDailyItemResumeRows creates reject-only when document does not match an OK group", () => {

@@ -13,7 +13,31 @@ export type DailyItemResumeTargetReason =
 
 export type DailyItemResumeTargetSource = "NONE" | "ENTITY_DAILY_TARGET" | "BUCKET_DAILY_TARGET";
 export type DailyItemResumeWorkHoursSource = "EXTERNAL_DOCUMENT" | "FALLBACK" | "UNKNOWN";
-export type DailyItemResumeRejectAttachmentStatus = "NONE" | "ATTACHED" | "REJECT_ONLY" | "AMBIGUOUS_REJECT_ATTACHMENT";
+export type DailyItemResumeAttachedRejectAttachmentStatus =
+  | "ATTACHED_BY_DOCUMENT"
+  | "ATTACHED_BY_DOCUMENT_DATE"
+  | "ATTACHED_BY_DOCUMENT_DATE_MACHINE"
+  | "ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR";
+export type DailyItemResumeRejectAttachmentStatus =
+  | "NONE"
+  | DailyItemResumeAttachedRejectAttachmentStatus
+  | "REJECT_ONLY"
+  | "AMBIGUOUS_REJECT_ATTACHMENT";
+
+export const DAILY_ITEM_RESUME_REJECT_ATTACHMENT_STATUSES = [
+  "ATTACHED_BY_DOCUMENT",
+  "ATTACHED_BY_DOCUMENT_DATE",
+  "ATTACHED_BY_DOCUMENT_DATE_MACHINE",
+  "ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR",
+  "AMBIGUOUS_REJECT_ATTACHMENT",
+  "REJECT_ONLY"
+] as const satisfies readonly Exclude<DailyItemResumeRejectAttachmentStatus, "NONE">[];
+
+export function isAttachedDailyItemResumeRejectAttachmentStatus(
+  status: DailyItemResumeRejectAttachmentStatus
+): status is DailyItemResumeAttachedRejectAttachmentStatus {
+  return status.startsWith("ATTACHED_BY_");
+}
 
 export const DAILY_ITEM_RESUME_TARGET_REASONS: readonly DailyItemResumeTargetReason[] = [
   "TARGET_MATCHED",
@@ -117,6 +141,17 @@ export interface DailyItemResumeRow {
   readonly drilldown: Record<string, unknown>;
 }
 
+export interface DailyItemResumeRejectAttachmentCandidate {
+  readonly postingDate: string;
+  readonly machine: string;
+  readonly itemNo: string;
+  readonly itemDescription: string | null;
+  readonly netOutput: number;
+  readonly operator: string;
+  readonly shift: string;
+  readonly workHours: number | null;
+}
+
 interface GroupState {
   readonly key: string;
   readonly postingDate: string;
@@ -131,6 +166,14 @@ interface GroupState {
   rejectRows: DailyItemResumeSourceRow[];
   rejectAttachmentStatus: DailyItemResumeRejectAttachmentStatus;
   attachmentWarnings: string[];
+  rejectAttachmentStatusByRowId: Record<string, DailyItemResumeRejectAttachmentStatus>;
+  rejectAttachmentCandidatesByRowId: Record<string, readonly DailyItemResumeRejectAttachmentCandidate[]>;
+}
+
+interface RejectAttachmentResolution {
+  readonly group: GroupState | null;
+  readonly status: DailyItemResumeRejectAttachmentStatus;
+  readonly candidates: readonly GroupState[];
 }
 
 export interface DailyItemResumeResult {
@@ -149,6 +192,14 @@ export interface DailyItemResumeTargetReasonSummary {
   readonly netOutputQty: number;
 }
 
+export interface DailyItemResumeRejectDocumentSummary {
+  readonly documentNo: string;
+  readonly rejectKg: number;
+  readonly rows: number;
+  readonly okItems: readonly string[];
+  readonly rejectItems: readonly string[];
+}
+
 export function summarizeDailyItemResumeTargetReasons(
   rows: readonly DailyItemResumeRow[]
 ): readonly DailyItemResumeTargetReasonSummary[] {
@@ -160,6 +211,40 @@ export function summarizeDailyItemResumeTargetReasons(
       netOutputQty: reasonRows.reduce((total, row) => total + row.netOutputQty, 0)
     };
   });
+}
+
+export function summarizeDailyItemResumeRejectDocuments(
+  rows: readonly DailyItemResumeRow[]
+): readonly DailyItemResumeRejectDocumentSummary[] {
+  const summaries = new Map<string, { rejectKg: number; rows: number; okItems: Set<string>; rejectItems: Set<string> }>();
+  for (const row of rows) {
+    const rowIsOk = classifyOutputRow({ entryType: "Output", itemNo: row.itemNo, uom: row.uom }) === "OK";
+    for (const detail of row.rejectDetails) {
+      const documentNo = String(detail.documentNo ?? "(blank)");
+      const current = summaries.get(documentNo) ?? {
+        rejectKg: 0,
+        rows: 0,
+        okItems: new Set<string>(),
+        rejectItems: new Set<string>()
+      };
+      current.rejectKg += Number(detail.rejectKg ?? 0);
+      current.rows += 1;
+      if (rowIsOk) current.okItems.add(row.itemNo);
+      const rejectItemNo = String(detail.itemNo ?? "");
+      const rejectUom = typeof detail.uom === "string" ? detail.uom : null;
+      if (classifyOutputRow({ entryType: "Output", itemNo: rejectItemNo, uom: rejectUom }) === "REJECT") {
+        current.rejectItems.add(rejectItemNo);
+      }
+      summaries.set(documentNo, current);
+    }
+  }
+  return [...summaries.entries()].map(([documentNo, value]) => ({
+    documentNo,
+    rejectKg: value.rejectKg,
+    rows: value.rows,
+    okItems: [...value.okItems],
+    rejectItems: [...value.rejectItems]
+  }));
 }
 
 export function normalizeDailyItemResumeValue(value: string | null | undefined): string {
@@ -267,6 +352,141 @@ function isRejectOutput(row: DailyItemResumeSourceRow): boolean {
 
 function rejectKgForRow(row: DailyItemResumeSourceRow): number {
   return row.quantity !== 0 ? Math.abs(row.quantity) : Math.max(row.rejectKg, 0);
+}
+
+function normalizedValues(...values: readonly (string | null | undefined)[]): readonly string[] {
+  return [...new Set(values.map((value) => normalizeDailyItemResumeValue(value)).filter(Boolean))];
+}
+
+function machineDescriptionValues(row: DailyItemResumeSourceRow): readonly string[] {
+  return normalizedValues(row.machineDescription);
+}
+
+function machineCenterValues(row: DailyItemResumeSourceRow): readonly string[] {
+  return normalizedValues(row.machineCenterNo);
+}
+
+function prodLineDescriptionValues(row: DailyItemResumeSourceRow): readonly string[] {
+  return normalizedValues(row.prodLineDescription);
+}
+
+function prodLineNoValues(row: DailyItemResumeSourceRow): readonly string[] {
+  return normalizedValues(row.prodLineNo);
+}
+
+function mappedEntityValues(row: DailyItemResumeSourceRow): readonly string[] {
+  return normalizedValues(row.entityId, row.entityCode, row.entityDisplayName);
+}
+
+function groupMatchesRowValues(
+  row: DailyItemResumeSourceRow,
+  group: GroupState,
+  valuesForRow: (value: DailyItemResumeSourceRow) => readonly string[]
+): boolean {
+  const rowValues = new Set(valuesForRow(row));
+  if (rowValues.size === 0) return false;
+  return group.okRows.some((okRow) => valuesForRow(okRow).some((value) => rowValues.has(value)));
+}
+
+function narrowByMachine(row: DailyItemResumeSourceRow, candidates: readonly GroupState[]): readonly GroupState[] {
+  let narrowed = candidates;
+  const valueSources = [
+    machineDescriptionValues,
+    machineCenterValues,
+    prodLineDescriptionValues,
+    prodLineNoValues,
+    mappedEntityValues
+  ] as const;
+  for (const valueSource of valueSources) {
+    if (valueSource(row).length === 0) continue;
+    const matches = narrowed.filter((group) => groupMatchesRowValues(row, group, valueSource));
+    if (matches.length === 0) continue;
+    narrowed = matches;
+    if (narrowed.length <= 1) break;
+  }
+  return narrowed;
+}
+
+function workHoursKey(value: number | null): string {
+  return value === null || !Number.isFinite(value) ? "" : String(value);
+}
+
+function narrowByExternalContext(row: DailyItemResumeSourceRow, candidates: readonly GroupState[]): readonly GroupState[] {
+  const rejectShift = normalizeDailyItemResumeValue(resolveShiftCode(row));
+  const rejectOperator = normalizeDailyItemResumeValue(resolveOperatorName(row));
+  const rejectWorkHours = workHoursKey(resolveRowWorkHours(row));
+  const fields = [
+    {
+      rejectValue: rejectShift,
+      candidateValue: (candidate: DailyItemResumeSourceRow) => normalizeDailyItemResumeValue(resolveShiftCode(candidate))
+    },
+    {
+      rejectValue: rejectOperator,
+      candidateValue: (candidate: DailyItemResumeSourceRow) => normalizeDailyItemResumeValue(resolveOperatorName(candidate))
+    },
+    {
+      rejectValue: rejectWorkHours,
+      candidateValue: (candidate: DailyItemResumeSourceRow) => workHoursKey(resolveRowWorkHours(candidate))
+    }
+  ].filter((field) => field.rejectValue);
+  if (fields.length < 2) return candidates;
+  const matches = candidates.filter((group) =>
+    group.okRows.some((okRow) => fields.every((field) => field.candidateValue(okRow) === field.rejectValue))
+  );
+  return matches.length > 0 ? matches : candidates;
+}
+
+function resolveRejectAttachment(
+  row: DailyItemResumeSourceRow,
+  documentCandidates: readonly GroupState[]
+): RejectAttachmentResolution {
+  if (documentCandidates.length === 0) {
+    return { group: null, status: "REJECT_ONLY", candidates: [] };
+  }
+  if (documentCandidates.length === 1) {
+    return { group: documentCandidates[0] ?? null, status: "ATTACHED_BY_DOCUMENT", candidates: documentCandidates };
+  }
+
+  const dateCandidates = documentCandidates.filter((group) => group.postingDate === row.postingDate);
+  if (dateCandidates.length === 0) {
+    return { group: null, status: "AMBIGUOUS_REJECT_ATTACHMENT", candidates: documentCandidates };
+  }
+  if (dateCandidates.length === 1) {
+    return { group: dateCandidates[0] ?? null, status: "ATTACHED_BY_DOCUMENT_DATE", candidates: dateCandidates };
+  }
+
+  const machineCandidates = narrowByMachine(row, dateCandidates);
+  if (machineCandidates.length === 1) {
+    return {
+      group: machineCandidates[0] ?? null,
+      status: "ATTACHED_BY_DOCUMENT_DATE_MACHINE",
+      candidates: machineCandidates
+    };
+  }
+
+  const contextCandidates = narrowByExternalContext(row, machineCandidates);
+  if (contextCandidates.length === 1) {
+    return {
+      group: contextCandidates[0] ?? null,
+      status: "ATTACHED_BY_DOCUMENT_DATE_MACHINE_SHIFT_OPERATOR",
+      candidates: contextCandidates
+    };
+  }
+
+  return { group: null, status: "AMBIGUOUS_REJECT_ATTACHMENT", candidates: contextCandidates };
+}
+
+function attachmentCandidateSummary(group: GroupState): DailyItemResumeRejectAttachmentCandidate {
+  return {
+    postingDate: group.postingDate,
+    machine: group.machineLabel,
+    itemNo: group.itemNo,
+    itemDescription: group.itemDescription,
+    netOutput: group.okRows.reduce((total, row) => total + row.quantity, 0),
+    operator: summarize(unique(group.okRows.map((row) => resolveOperatorName(row))), "N/A"),
+    shift: summarize(unique(group.okRows.map((row) => resolveShiftCode(row))), "N/A"),
+    workHours: resolveGroupWorkHours(group.okRows, group.plannedRuntimeHours && group.plannedRuntimeHours > 0 ? group.plannedRuntimeHours : 0).workHours || null
+  };
 }
 
 interface TargetResolutionInput {
@@ -618,7 +838,7 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
       rejectKg: kg,
       uom: row.uom,
       postingDate: row.postingDate,
-      attachmentStatus: group.rejectAttachmentStatus,
+      attachmentStatus: group.rejectAttachmentStatusByRowId[row.id] ?? group.rejectAttachmentStatus,
       grossWeight: docGrossWeight ?? null,
       rejectPcsEq: pcsEq,
       conversionStatus: pcsEq === null ? "INCOMPLETE" : "COMPLETE",
@@ -626,7 +846,8 @@ function toResumeRow(group: GroupState, targets: readonly DailyItemResumeTarget[
       parsedExternalDocument: parseExternalDocument(row.externalDocumentNo),
       operatorName: resolveOperatorName(row),
       shiftCode: resolveShiftCode(row),
-      workHours: resolveRowWorkHours(row)
+      workHours: resolveRowWorkHours(row),
+      attachmentCandidates: group.rejectAttachmentCandidatesByRowId[row.id] ?? []
     };
   });
   const rejectConversionStatus =
@@ -746,9 +967,7 @@ export function buildDailyItemResume(
   filters: DailyItemResumeFilters
 ): DailyItemResumeResult {
   const groups = new Map<string, GroupState>();
-  const docDateMachineIndex = new Map<string, Set<string>>();
   const docIndex = new Map<string, Set<string>>();
-  const machineDateIndex = new Map<string, Set<string>>();
 
   for (const row of rows) {
     if (!isOkOutput(row)) continue;
@@ -766,23 +985,17 @@ export function buildDailyItemResume(
       okRows: [],
       rejectRows: [],
       rejectAttachmentStatus: "NONE",
-      attachmentWarnings: []
+      attachmentWarnings: [],
+      rejectAttachmentStatusByRowId: {},
+      rejectAttachmentCandidatesByRowId: {}
     };
     group.okRows.push(row);
     groups.set(key, group);
-    const dateMachineKey = [row.postingDate, normalizeDailyItemResumeValue(group.machineLabel)].join("|");
-    const machineGroups = machineDateIndex.get(dateMachineKey) ?? new Set<string>();
-    machineGroups.add(key);
-    machineDateIndex.set(dateMachineKey, machineGroups);
     const document = normalizeDailyItemResumeValue(row.documentNo);
     if (document) {
       const documentGroups = docIndex.get(document) ?? new Set<string>();
       documentGroups.add(key);
       docIndex.set(document, documentGroups);
-      const exactDocumentKey = [document, row.postingDate, normalizeDailyItemResumeValue(group.machineLabel)].join("|");
-      const exactDocumentGroups = docDateMachineIndex.get(exactDocumentKey) ?? new Set<string>();
-      exactDocumentGroups.add(key);
-      docDateMachineIndex.set(exactDocumentKey, exactDocumentGroups);
     }
   }
 
@@ -790,26 +1003,16 @@ export function buildDailyItemResume(
     if (!isRejectOutput(row)) continue;
     const machineLabel = resolveMachineLabel(row);
     const document = normalizeDailyItemResumeValue(row.documentNo);
-    const exact = document ? docDateMachineIndex.get([document, row.postingDate, normalizeDailyItemResumeValue(machineLabel)].join("|")) : null;
-    const documentOnly = document ? docIndex.get(document) : null;
-    const noDocumentFallback = !document ? machineDateIndex.get([row.postingDate, normalizeDailyItemResumeValue(machineLabel)].join("|")) : null;
-    const candidateKeys = exact && exact.size > 0
-      ? exact
-      : documentOnly && documentOnly.size === 1
-        ? documentOnly
-        : noDocumentFallback;
-    const ambiguous = Boolean(
-      (exact && exact.size > 1)
-      || (!exact?.size && documentOnly && documentOnly.size > 1)
-      || (!document && noDocumentFallback && noDocumentFallback.size > 1)
-    );
+    const candidateKeys = document ? docIndex.get(document) : null;
     const candidateGroups = candidateKeys
       ? [...candidateKeys].map((key) => groups.get(key)).filter((value): value is GroupState => Boolean(value))
       : [];
-    const group = !ambiguous && candidateGroups.length === 1 ? candidateGroups[0] ?? null : null;
-    if (group) {
+    const resolution = resolveRejectAttachment(row, candidateGroups);
+    if (resolution.group) {
+      const group = resolution.group;
       group.rejectRows.push(row);
-      group.rejectAttachmentStatus = "ATTACHED";
+      group.rejectAttachmentStatus = resolution.status;
+      group.rejectAttachmentStatusByRowId[row.id] = resolution.status;
       continue;
     }
     const key = groupKey(row, true);
@@ -825,10 +1028,16 @@ export function buildDailyItemResume(
       plannedRuntimeHours: row.plannedRuntimeHours,
       okRows: [],
       rejectRows: [],
-      rejectAttachmentStatus: ambiguous ? "AMBIGUOUS_REJECT_ATTACHMENT" : "REJECT_ONLY",
-      attachmentWarnings: []
+      rejectAttachmentStatus: resolution.status,
+      attachmentWarnings: [],
+      rejectAttachmentStatusByRowId: {},
+      rejectAttachmentCandidatesByRowId: {}
     };
-    if (ambiguous) rejectOnly.attachmentWarnings.push("AMBIGUOUS_REJECT_ATTACHMENT");
+    rejectOnly.rejectAttachmentStatusByRowId[row.id] = resolution.status;
+    if (resolution.status === "AMBIGUOUS_REJECT_ATTACHMENT") {
+      rejectOnly.attachmentWarnings.push("AMBIGUOUS_REJECT_ATTACHMENT");
+      rejectOnly.rejectAttachmentCandidatesByRowId[row.id] = resolution.candidates.map(attachmentCandidateSummary);
+    }
     rejectOnly.rejectRows.push(row);
     groups.set(key, rejectOnly);
   }
