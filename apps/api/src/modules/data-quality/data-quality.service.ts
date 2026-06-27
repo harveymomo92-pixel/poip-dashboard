@@ -25,6 +25,10 @@ export class DataQualityService {
     return this.repository.getByIdOrThrow(id);
   }
 
+  generateBusinessCentralIssues(input: { readonly actorUserId?: string | null | undefined }) {
+    return this.repository.generateBusinessCentralIssues(input);
+  }
+
   async updateStatus(id: string, input: DataQualityStatusInput) {
     if (["RESOLVED", "IGNORED"].includes(input.status) && !input.note?.trim()) {
       throw new BadRequestException("Resolution note is required");

@@ -28,8 +28,10 @@ interface IssueSummary {
   readonly resolvedIssues: number;
   readonly ignoredIssues: number;
   readonly criticalIssues: number;
+  readonly highIssues: number;
   readonly warningIssues: number;
   readonly mediumIssues: number;
+  readonly lowIssues: number;
   readonly infoIssues: number;
   readonly byCode: readonly { issueCode: string; issueCount: number }[];
 }
@@ -50,6 +52,16 @@ interface DataQualityIssue {
   readonly resolvedAt: string | null;
   readonly resolutionNote: string | null;
   readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+interface BusinessCentralGenerateSummary {
+  readonly created: number;
+  readonly updated: number;
+  readonly unchanged: number;
+  readonly resolved: number;
+  readonly byType: Record<string, unknown>;
+  readonly bySeverity: Record<string, unknown>;
 }
 
 interface IssueList {
@@ -103,6 +115,30 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
+function formatNumber(value: unknown, digits = 0) {
+  const numberValue = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(numberValue)
+    ? new Intl.NumberFormat("id-ID", { maximumFractionDigits: digits }).format(numberValue)
+    : "—";
+}
+
+function payloadRecord(issue: DataQualityIssue): Record<string, unknown> {
+  return issue.payload && typeof issue.payload === "object" && !Array.isArray(issue.payload)
+    ? issue.payload as Record<string, unknown>
+    : {};
+}
+
+function payloadText(issue: DataQualityIssue, key: string) {
+  const value = payloadRecord(issue)[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function payloadNumber(issue: DataQualityIssue, key: string) {
+  const value = payloadRecord(issue)[key];
+  const numberValue = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
 export function DataQualityPageClient() {
   const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -117,9 +153,14 @@ export function DataQualityPageClient() {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const query = useMemo(() => buildQuery(filters, page), [filters, page]);
   const canManage = currentUser?.permissions.includes("settings.manage") ?? false;
+  const businessCentralIssues = useMemo(
+    () => issues?.rows.filter((issue) => issue.sourceSystem === "business-central" && issue.issueCode.startsWith("BC_")).slice(0, 8) ?? [],
+    [issues]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,6 +243,33 @@ export function DataQualityPageClient() {
     }
   }
 
+  async function generateBusinessCentralIssues() {
+    if (generating) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/data-quality/business-central/generate`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const payload = (await response.json()) as ApiResult<BusinessCentralGenerateSummary>;
+      if (!payload.ok) {
+        setError(payload.error.message);
+        return;
+      }
+      const totalChanged = payload.data.created + payload.data.updated + payload.data.resolved;
+      toast(`Business Central DQ generated: ${totalChanged} berubah, ${payload.data.unchanged} tetap.`);
+      setDraftFilters((value) => ({ ...value, source: "business-central", issueCode: "" }));
+      setFilters((value) => ({ ...value, source: "business-central", issueCode: "" }));
+      setPage(1);
+      await load();
+    } catch {
+      setError("Generate issue Business Central gagal. Coba lagi setelah koneksi API normal.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (!loaded) return <div className="page"><LoadingSkeleton rows={7} /></div>;
 
   return (
@@ -212,7 +280,7 @@ export function DataQualityPageClient() {
           title="Data Quality Cockpit"
           description="Tinjau anomali sumber, pahami dampaknya, dan kelola status penyelesaian dengan jejak audit."
           meta={<><SourceBadge>OData + Import Center</SourceBadge>{summary ? <StatusBadge status={summary.criticalIssues ? "CRITICAL" : summary.openIssues ? "WARNING" : "HEALTHY"} /> : null}</>}
-          actions={<button className="secondary-button" disabled={loading} onClick={() => void load()}><Icons.refresh />{loading ? "Memuat…" : "Refresh"}</button>}
+          actions={<><button className="secondary-button" disabled={loading || generating} onClick={() => void load()}><Icons.refresh />{loading ? "Memuat…" : "Refresh"}</button>{canManage ? <button disabled={generating} onClick={() => void generateBusinessCentralIssues()}><Icons.sync />{generating ? "Generating…" : "Generate BC issues"}</button> : null}</>}
         />
 
         {summary ? (
@@ -227,8 +295,10 @@ export function DataQualityPageClient() {
             <section className="insight-grid">
               <InsightCard icon={<Icons.quality />} title="Severity distribution" value={`${summary.openIssues + summary.acknowledgedIssues} active`} description="Active berarti issue OPEN atau ACKNOWLEDGED." rows={[
                 { label: "Critical", value: summary.criticalIssues, tone: "danger" },
+                { label: "High", value: summary.highIssues, tone: "danger" },
                 { label: "Warning", value: summary.warningIssues, tone: "warning" },
                 { label: "Medium", value: summary.mediumIssues, tone: "warning" },
+                { label: "Low", value: summary.lowIssues, tone: "info" },
                 { label: "Info", value: summary.infoIssues, tone: "info" }
               ]} />
               <InsightCard icon={<Icons.filter />} title="Top issue categories" value={`${summary.byCode.length} categories`} description="Kategori berdasarkan issue aktual yang tersimpan." rows={summary.byCode.slice(0, 5).map((row) => ({
@@ -242,7 +312,7 @@ export function DataQualityPageClient() {
 
         <FilterBar compact actions={<><button className="secondary-button" onClick={() => { const next = defaultFilters(); setDraftFilters(next); setFilters(next); setPage(1); }}>Reset</button><button onClick={() => { setFilters(draftFilters); setPage(1); }}>Apply</button></>}>
           <Field label="Status"><select value={draftFilters.status} onChange={(event) => setDraftFilters((value) => ({ ...value, status: event.target.value }))}><option value="">All</option><option value="OPEN">Open</option><option value="ACKNOWLEDGED">Acknowledged</option><option value="RESOLVED">Resolved</option><option value="IGNORED">Ignored</option></select></Field>
-          <Field label="Severity"><select value={draftFilters.severity} onChange={(event) => setDraftFilters((value) => ({ ...value, severity: event.target.value }))}><option value="">All</option><option value="CRITICAL">Critical</option><option value="WARNING">Warning</option><option value="INFO">Info</option><option value="MEDIUM">Medium</option></select></Field>
+          <Field label="Severity"><select value={draftFilters.severity} onChange={(event) => setDraftFilters((value) => ({ ...value, severity: event.target.value }))}><option value="">All</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option><option value="WARNING">Warning</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option><option value="INFO">Info</option></select></Field>
           <Field label="Source"><input placeholder="business-central" value={draftFilters.source} onChange={(event) => setDraftFilters((value) => ({ ...value, source: event.target.value }))} /></Field>
           <Field label="Issue type"><input placeholder="UNKNOWN_MACHINE" value={draftFilters.issueCode} onChange={(event) => setDraftFilters((value) => ({ ...value, issueCode: event.target.value }))} /></Field>
           <Field label="From"><input type="date" value={draftFilters.from} onChange={(event) => setDraftFilters((value) => ({ ...value, from: event.target.value }))} /></Field>
@@ -251,6 +321,35 @@ export function DataQualityPageClient() {
 
         {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
 
+        {businessCentralIssues.length ? (
+          <section>
+            <SectionHeader title="Business Central generated issues" description="Issue otomatis dari mapping, target, dan reject diagnostics." />
+            <DataTable headers={["Issue type", "Severity", "Source / entity", "Rows", "OK qty", "Recommended action", "Updated"]}>
+              {businessCentralIssues.map((issue) => {
+                const sourceValue = payloadText(issue, "sourceValue") ?? issue.sourceRef ?? "—";
+                const entityName = payloadText(issue, "entityName") ?? payloadText(issue, "entityCode");
+                const recommendedAction = payloadText(issue, "recommendedAction") ?? issue.description;
+                return (
+                  <tr
+                    key={`bc-${issue.id}`}
+                    onClick={() => void openIssue(issue.id)}
+                    style={{ cursor: "pointer" }}
+                    tabIndex={0}
+                  >
+                    <td><strong>{issue.issueCode.replaceAll("_", " ")}</strong><small>{payloadText(issue, "targetReason") ?? payloadText(issue, "conversionGapReason") ?? issue.status}</small></td>
+                    <td><StatusBadge status={issue.severity} /></td>
+                    <td>{sourceValue}<small>{entityName ?? issue.sourceRef ?? "business-central"}</small></td>
+                    <td>{formatNumber(payloadNumber(issue, "rowCount"))}</td>
+                    <td>{formatNumber(payloadNumber(issue, "okQty"), 1)}</td>
+                    <td>{recommendedAction}</td>
+                    <td>{formatDate(issue.updatedAt)}</td>
+                  </tr>
+                );
+              })}
+            </DataTable>
+          </section>
+        ) : null}
+
         <section className={`master-detail-layout${selectedIssue ? " has-detail" : ""}`}>
           <div>
             <SectionHeader title="Issue register" description="Klik baris untuk melihat penjelasan dan konteks sumber." />
@@ -258,7 +357,7 @@ export function DataQualityPageClient() {
               <EmptyState title="Tidak ada issue" description="Tidak ada data quality issue yang sesuai dengan filter." />
             ) : (
               <>
-                <DataTable headers={["Severity", "Issue", "Source", "Entity", "Status", "Created"]}>
+                <DataTable headers={["Severity", "Issue", "Source", "Entity", "Status", "Updated"]}>
                   {issues.rows.map((issue) => (
                     <tr
                       className={selectedIssue?.id === issue.id ? "selected-row" : ""}
@@ -278,7 +377,7 @@ export function DataQualityPageClient() {
                       <td>{issue.sourceSystem ?? "—"}<small>{issue.sourceRef ?? "No source ref"}</small></td>
                       <td>{issue.entityType.replaceAll("_", " ")}<small>{issue.entityId ?? "No entity ID"}</small></td>
                       <td><StatusBadge status={issue.status} /></td>
-                      <td>{formatDate(issue.createdAt)}</td>
+                      <td>{formatDate(issue.updatedAt)}</td>
                     </tr>
                   ))}
                 </DataTable>
@@ -296,6 +395,7 @@ export function DataQualityPageClient() {
                 <div><dt>Source reference</dt><dd>{selectedIssue.sourceRef ?? "—"}</dd></div>
                 <div><dt>Entity</dt><dd>{selectedIssue.entityType} · {selectedIssue.entityId ?? "unmapped"}</dd></div>
                 <div><dt>Created</dt><dd>{formatDate(selectedIssue.createdAt)}</dd></div>
+                <div><dt>Updated</dt><dd>{formatDate(selectedIssue.updatedAt)}</dd></div>
                 <div><dt>Last status update</dt><dd>{formatDate(selectedIssue.resolvedAt)}</dd></div>
               </dl>
               <div className="detail-section"><h3>Source context</h3><pre className="json-view">{JSON.stringify(selectedIssue.payload, null, 2)}</pre></div>

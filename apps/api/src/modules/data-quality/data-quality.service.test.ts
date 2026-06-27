@@ -55,3 +55,19 @@ test("DataQualityService blocks unsafe status transitions", async () => {
     BadRequestException
   );
 });
+
+test("DataQualityService delegates Business Central issue generation", async () => {
+  const calls: unknown[] = [];
+  const repository = {
+    generateBusinessCentralIssues: async (input: unknown) => {
+      calls.push(input);
+      return { created: 1, updated: 0, unchanged: 0, resolved: 0, byType: {}, bySeverity: {} };
+    }
+  } as unknown as DataQualityRepository;
+  const service = new DataQualityService(repository);
+
+  const result = await service.generateBusinessCentralIssues({ actorUserId: "user-1" });
+
+  assert.equal(result.created, 1);
+  assert.deepEqual(calls, [{ actorUserId: "user-1" }]);
+});

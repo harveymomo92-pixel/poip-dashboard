@@ -21,6 +21,16 @@ test("Milestone 10 navigation entries are present", async () => {
   assert.match(shell, /System Health/);
 });
 
+test("data quality cockpit exposes Business Central generation workflow", async () => {
+  const dataQuality = await readFile(new URL("../src/app/data-quality/DataQualityPageClient.tsx", import.meta.url), "utf8");
+  assert.match(dataQuality, /\/data-quality\/business-central\/generate/);
+  assert.match(dataQuality, /Generate BC issues/);
+  assert.match(dataQuality, /Business Central generated issues/);
+  assert.match(dataQuality, /okQty/);
+  assert.match(dataQuality, /recommendedAction/);
+  assert.match(dataQuality, /updatedAt/);
+});
+
 test("overview resume renders reject attachment details under OK row", async () => {
   const overview = await readFile(new URL("../src/app/overview/DashboardPageClient.tsx", import.meta.url), "utf8");
   assert.match(overview, /rejectAttachmentStatus/);

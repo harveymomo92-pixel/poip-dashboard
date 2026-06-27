@@ -62,6 +62,26 @@ export class DataQualityController {
     return issue;
   }
 
+  @Post("business-central/generate")
+  @RequirePermissions("settings.manage")
+  async generateBusinessCentralIssues(@Req() request: AuthenticatedRequest) {
+    const summary = await this.dataQualityService.generateBusinessCentralIssues({
+      actorUserId: request.user?.id ?? null
+    });
+    await this.auditService.log({
+      requestId: getRequestId(request),
+      actorUserId: request.user?.id ?? null,
+      action: "data_quality.business_central.generate",
+      entityType: "data_quality_issue",
+      entityId: "business-central",
+      beforeValue: null,
+      afterValue: summary,
+      ipAddress: request.ip ?? null,
+      userAgent: userAgent(request)
+    });
+    return summary;
+  }
+
   @Post("issues/:id/acknowledge")
   @RequirePermissions("settings.manage")
   acknowledge(@Param("id") id: string, @Body() body: unknown, @Req() request: AuthenticatedRequest) {
