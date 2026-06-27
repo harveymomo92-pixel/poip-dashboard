@@ -12,11 +12,11 @@ export interface SourceAliasCandidate {
   readonly normalizedValue: string;
 }
 
-export const BC_ENTITY_SOURCE_FIELD_PRIMARY = "machine_description" as const satisfies MasterSourceField;
+export const BC_ENTITY_SOURCE_FIELD_PRIMARY = "prod_line_description" as const satisfies MasterSourceField;
 export const BC_ENTITY_SOURCE_FIELD_FALLBACKS = [
+  "prod_line_no",
   "machine_center_no",
-  "prod_line_description",
-  "prod_line_no"
+  "machine_description"
 ] as const satisfies readonly MasterSourceField[];
 export const BC_ENTITY_SOURCE_FIELDS = [
   BC_ENTITY_SOURCE_FIELD_PRIMARY,
@@ -65,10 +65,10 @@ export function sourceAliasCandidates(row: {
   readonly uom?: string | null;
 }): SourceAliasCandidate[] {
   const entries: Array<[MasterSourceField, string | null | undefined]> = [
-    ["machine_description", row.machineDescription],
-    ["machine_center_no", row.machineCenterNo],
     ["prod_line_description", row.prodLineDescription],
     ["prod_line_no", row.prodLineNo],
+    ["machine_center_no", row.machineCenterNo],
+    ["machine_description", row.machineDescription],
     ["item_no", row.itemNo],
     ["uom", row.uom]
   ];

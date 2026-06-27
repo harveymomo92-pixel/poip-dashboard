@@ -190,6 +190,15 @@ pnpm bc:target-coverage
 pnpm bc:entity-v2-dry-run
 ```
 
+For field interpretation, see `docs/BC_ODATA_OUTPUT_COLUMN_MAP.md`. That reference records how the current Business Central `Entry_Type = Output` OData columns should be used for entity resolution, target bucket inference, target profiles, reject attachment, and KPI safety.
+
+Patch priority after review:
+
+1. Fix item-description sourcing so `gItem_Description` wins over `Description`.
+2. Add `gItem_Description` to the worker `$select` set for OData output sync.
+3. Keep resolver priority as `gProdOrRotLine_Description` -> `gProdOrRotLine_No` -> `Machine_Center_No`.
+4. Add tests for the field precedence and the worker select list before any KPI or dashboard work.
+
 `pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, preferred entity source usage, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
 
 `pnpm bc:reconcile` compares the dashboard KPI contract against raw SQL aggregates for the same date window. It explains why achievement is `N/A` when targets are missing, why reject PCS equivalent is incomplete when the matched OK item has no safe gross-weight conversion or reject attachment is unresolved, and whether OK output exists without mapped entities. Reject rate is `N/A` while any reject PCS conversion remains incomplete.

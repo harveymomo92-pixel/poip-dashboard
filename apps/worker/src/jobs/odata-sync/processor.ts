@@ -8,6 +8,7 @@ const knownSecretValues = [
 ].filter((value): value is string => Boolean(value && value.length >= 3));
 
 const REQUIRED_OUTPUT_SELECT_FIELDS = [
+  "gItem_Description",
   "gProdOrRotLine_No",
   "gProdOrRotLine_Description"
 ] as const;

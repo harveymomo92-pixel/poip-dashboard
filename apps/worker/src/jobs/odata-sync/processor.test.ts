@@ -56,7 +56,7 @@ test("ODataSyncProcessor commits successful mocked OData rows", async () => {
 
   assert.equal(result.status, "SUCCESS");
   assert.equal(committedEntryNo, 1001n);
-  assert.deepEqual(requiredSelectFields, ["gProdOrRotLine_No", "gProdOrRotLine_Description"]);
+  assert.deepEqual(requiredSelectFields, ["gItem_Description", "gProdOrRotLine_No", "gProdOrRotLine_Description"]);
 });
 
 test("ODataSyncProcessor marks failed run and leaves commit untouched", async () => {

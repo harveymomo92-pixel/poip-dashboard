@@ -13,6 +13,7 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
     Document_No: "  prod-1 ",
     Entry_Type: " output ",
     Item_No: " fg-001 ",
+    gItem_Description: " finished item ",
     Machine_Description: " repacking ",
     Machine_Center_No: " mc-01 ",
     gProdOrRotLine_No: "OMSO-1-OZ",
@@ -26,6 +27,7 @@ test("normalizeODataOutputRow trims strings and maps OData fields", () => {
   assert.equal(result.canCommit, true);
   assert.equal(result.normalized.entryNo, 42n);
   assert.equal(result.normalized.itemNo, "FG-001");
+  assert.equal(result.normalized.itemDescription, "finished item");
   assert.equal(result.normalized.machineDescription, "REPACKING");
   assert.equal(result.normalized.machineCenterNo, "MC-01");
   assert.equal(result.normalized.prodLineNo, "OMSO-1-OZ");
@@ -40,6 +42,7 @@ test("normalizeODataOutputRow reads machine description aliases and tolerates mi
     Document_No: "DOC-47",
     Entry_Type: "Output",
     Item_No: "FG-001",
+    gItem_Description: " item from gitem ",
     "Machine Description": " illig 1 ",
     Quantity: "12",
     Unit_of_Measure_Code: "PCS"
@@ -50,6 +53,7 @@ test("normalizeODataOutputRow reads machine description aliases and tolerates mi
     Document_No: "DOC-48",
     Entry_Type: "Output",
     Item_No: "FG-001",
+    gItem_Description: " item from gitem 2 ",
     MachineDescription: " cai 2 ",
     Quantity: "12",
     Unit_of_Measure_Code: "PCS"
@@ -77,6 +81,7 @@ test("normalizeODataOutputRow maps profiled Business Central line fields and doe
     Document_No: "DOC-50",
     Entry_Type: "Output",
     Item_No: "RJ008",
+    gItem_Description: "REJECT CUP PRINTING (PP)",
     Machine_Center_No: "",
     gProdOrRotLine_No: "OMSO-1-OZ",
     gProdOrRotLine_Description: "OMSO 1-OZ",

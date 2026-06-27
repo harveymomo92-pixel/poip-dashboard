@@ -257,7 +257,9 @@ export function normalizeODataOutputRow(row: ODataOutputRawRow): NormalizationRe
     entryType,
     normalizedOutputType,
     itemNo,
-    itemDescription: cleanString(readField(row, "Description", "gSrcDesc", "GSrcDesc", "item_description")),
+    itemDescription: cleanString(
+      readField(row, "gItem_Description", "gItemDescription", "Description", "gSrcDesc", "GSrcDesc", "item_description")
+    ),
     itemCategoryCode: cleanString(
       readField(row, "Item_Category_Code", "ItemCategoryCode", "item_category_code"),
       true
