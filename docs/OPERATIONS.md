@@ -350,7 +350,9 @@ Review decisions:
 
 P1.0 gate rules:
 
-- Any unresolved high-risk entity or target profile group keeps `p10Gate.status = BLOCKED`.
+- Any unresolved high-risk entity or target profile group with `blocks_p10_after_scope=true` keeps `p10Gate.status = BLOCKED`.
+- `OUT_OF_CURRENT_KPI_SCOPE` rows stay visible in CSV/JSON reports and are counted as retained future-use rows, but do not block P1.0 by themselves.
+- `UNKNOWN_SCOPE_REVIEW`, `OUTPUT_KPI_OK_SCOPE`, and `OUTPUT_KPI_REJECT_SCOPE` high-risk rows can still block P1.0.
 - Zero active approved `target_profiles` keeps the gate blocked.
 - `NO_ACTIVE_TARGET_PROFILE` for most resolver-v2 resolved rows keeps the gate blocked.
 - KPI comparison must exist and be reviewed before the gate can pass.
@@ -410,6 +412,7 @@ Safety:
 - Do not delete/deactivate aliases or conditional rules from the package.
 - Do not create broad/global aliases to clear blockers.
 - Do not switch dashboard behavior while `summary.json` reports P1.0 readiness as blocked.
+- Use `p10BlockingRowsBeforeScope` and `p10BlockingRowsAfterScope` together; do not delete the pre-scope blocker signal.
 
 Safety notes:
 
@@ -420,7 +423,7 @@ Safety notes:
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: production dashboard scope is `source_system = 'business-central'` and `entry_type = 'Output'`; other entry types remain stored for future panels; negative Output quantity is a correction; main output is net output; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps. Aggregate target coverage can reconcile while per-item resume rows still show `N/A` because aggregate achievement uses mapped entity-days and the resume keeps unmapped groups visible for mapping work.
 
-Business Central entity source priority is `machine_description` when a true BC machine-description field exists, then `Machine Center No`, then `Production Line Description`, then `Production Line No`. The current profiled OData endpoint does not expose a true `Machine_Description`; it exposes `gProdOrRotLine_No` and `gProdOrRotLine_Description` as reliable production-line source fields. `gSrcDesc` is item/reject/sparepart description and must not be used as machine, line, or machine description.
+Business Central entity source priority is `gProdOrRotLine_Description`, then `gProdOrRotLine_No`, then `Machine_Center_No` only as fallback. The current profiled OData endpoint does not expose a true `Machine_Description`; it exposes `gProdOrRotLine_No` and `gProdOrRotLine_Description` as reliable production-line source fields. `gSrcDesc` is item/reject/sparepart description and must not be used as machine, line, or machine description.
 
 If diagnostics show many `source_field=blank` rows because historical Business Central rows have blank `prod_line_no` or `prod_line_description`, run the dry-run source-fields backfill. The legacy command remains available for compatibility:
 
@@ -743,6 +746,7 @@ docs/BC_ENTITY_TARGET_RELEASE_NOTES.md
 P0.7 Entity Resolver V2 Dry Run
 P0.8 Target Profile Model Design
 P0.9 Backfill Plan & Migration Dry Run
+P0.9c Business Central Data Scope + Future Use Classifier
 P1.0 Controlled Switch to Resolver V2 + Target Profiles
 ```
 
@@ -798,6 +802,17 @@ Expected outputs:
 .tmp/bc-entity-v2-backfill-dry-run.json
 .tmp/bc-target-profile-backfill-dry-run.csv
 .tmp/bc-target-profile-backfill-dry-run.json
+```
+
+P0.9c adds scope columns and summaries to the P0.7/P0.8/P0.9/P0.9a/P0.9b reports:
+
+```text
+bc_current_kpi_scope
+bc_future_use_domain
+bc_scope_reason
+bc_scope_evidence_fields
+bc_entity_source_status
+blocks_p10_after_scope
 ```
 
 ### P1.0 planned comparison command

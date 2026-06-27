@@ -28,6 +28,12 @@ const highRiskAliasGroup: HighRiskReviewPlanGroup = {
   reviewDecision: "NEEDS_ALIAS_CLEANUP",
   recommendedAction: "Review aliases/catalog manually; do not migrate automatically.",
   p10Blocker: true,
+  blocksP10AfterScope: true,
+  bcCurrentKpiScope: "OUTPUT_KPI_OK_SCOPE",
+  bcFutureUseDomain: "PRODUCTION_OUTPUT_DASHBOARD",
+  bcScopeReason: "Current KPI scoped high-risk row.",
+  bcScopeEvidenceFields: ["entryType", "locationCode", "gProdOrRotLineDescription"],
+  bcEntitySourceStatus: "HAS_PRIMARY_ENTITY_SOURCE",
   sampleDocuments: ["DOC-1"],
   sampleItems: ["ITEM-1"]
 };
@@ -131,6 +137,18 @@ test("resolution package summary safety flags remain false", () => {
     targetProfileSeedDraftCandidates: 1,
     manualApprovalItems: 1,
     blockedGroups: 1,
+    scopeSummary: {
+      outputKpiOkScopeRows: 1,
+      outputKpiRejectScopeRows: 0,
+      outOfCurrentKpiScopeRows: 0,
+      unknownScopeReviewRows: 0,
+      futureUseDomainCounts: [{ value: "PRODUCTION_OUTPUT_DASHBOARD", rows: 1 }],
+      entitySourceBlankButClassifiedRows: 0,
+      entitySourceBlankUnknownRows: 0,
+      p10BlockingRowsBeforeScope: 1,
+      p10BlockingRowsAfterScope: 1,
+      excludedFromP10ButRetainedRows: 0
+    },
     p10Gate: blockedGate
   });
 

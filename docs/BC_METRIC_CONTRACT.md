@@ -48,6 +48,32 @@ All SQL, dashboard, sync, health, and reconciliation logic should use this canon
 
 This rule must be validated with `pnpm bc:reconcile`.
 
+## Business Central Data Scope
+
+P0.9c adds read-only scope classification to dry-run reports. It does not discard rows.
+
+`bc_current_kpi_scope` separates current dashboard impact from future-use value:
+
+- `OUTPUT_KPI_OK_SCOPE`: current OK production dashboard candidate.
+- `OUTPUT_KPI_REJECT_SCOPE`: current reject/reject-attachment candidate.
+- `OUT_OF_CURRENT_KPI_SCOPE`: retained row for a future domain; it must not block P1.0 by itself.
+- `UNKNOWN_SCOPE_REVIEW`: insufficient evidence; can block P1.0 when material.
+
+`bc_future_use_domain` records where retained rows should be reviewed next, including production dashboard, reject attachment, downtime/sparepart/material, sales, purchase/receiving, transfer/inventory movement, consumption/material usage, scrap/waste/avalan, master-data quality review, or unknown review.
+
+Every P0.9c CSV keeps:
+
+```text
+bc_current_kpi_scope
+bc_future_use_domain
+bc_scope_reason
+bc_scope_evidence_fields
+bc_entity_source_status
+blocks_p10_after_scope
+```
+
+P1.0 gating uses `blocks_p10_after_scope` while preserving the original pre-scope blocker signal for traceability. `OUT_OF_CURRENT_KPI_SCOPE` rows remain visible in reports and are counted in `excludedFromP10ButRetainedRows`.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

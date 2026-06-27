@@ -142,6 +142,8 @@ Outputs:
 
 The gate must remain `BLOCKED` while any high-risk entity or target profile groups remain unresolved, while `target_profiles` has zero active approved profiles, while most resolver-v2 rows have no active target profile, or while KPI comparison is not ready and reviewed.
 
+P0.9c adds Business Central data scope to every dry-run and review report. P1.0 blockers use `blocks_p10_after_scope`, while the original blocker is retained as `p10Blocker`/pre-scope counts for traceability. Rows classified as `OUT_OF_CURRENT_KPI_SCOPE` remain exported for future-use review but do not block the dashboard switch by themselves. Rows classified as `UNKNOWN_SCOPE_REVIEW`, `OUTPUT_KPI_OK_SCOPE`, or `OUTPUT_KPI_REJECT_SCOPE` can still block P1.0 when their risk is material.
+
 P0.9a is still export-only. It does not update rows, insert target profiles, create canonical entities, alter aliases, alter conditional rules, or switch dashboard lookup.
 
 Do not fix P0.9a blockers by creating broad/global aliases. Resolve them through reviewed canonical entity planning, alias cleanup, source-data fixes, target profile draft creation, and later manual approval.
@@ -175,6 +177,8 @@ README.md
 ```
 
 The package is not SQL and must not be applied directly to production. It is a review template for canonical entity planning, alias cleanup review, target profile draft preparation, manual approval, and blocker tracking.
+
+The package includes scope columns in the manual review queue and summarizes retained future-use rows with `futureUseDomainCounts`, `p10BlockingRowsBeforeScope`, `p10BlockingRowsAfterScope`, and `excludedFromP10ButRetainedRows`.
 
 P1.0 remains blocked until the checklist is resolved, target profiles have reviewed active approved coverage, P0.9/P0.9a are rerun, and KPI comparison is reviewed.
 

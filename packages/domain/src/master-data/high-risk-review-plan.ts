@@ -1,4 +1,9 @@
 import type { BackfillRiskLevel } from "./entity-target-backfill-plan.js";
+import type {
+  BusinessCentralCurrentKpiScope,
+  BusinessCentralEntitySourceStatus,
+  BusinessCentralFutureUseDomain
+} from "./bc-data-scope.js";
 
 export type HighRiskReviewDecision =
   | "BLOCK_P1_SWITCH"
@@ -27,14 +32,20 @@ export interface HighRiskReviewPlanGroup {
   readonly reviewDecision: HighRiskReviewDecision;
   readonly recommendedAction: string;
   readonly p10Blocker: boolean;
+  readonly blocksP10AfterScope: boolean;
+  readonly bcCurrentKpiScope: BusinessCentralCurrentKpiScope;
+  readonly bcFutureUseDomain: BusinessCentralFutureUseDomain;
+  readonly bcScopeReason: string;
+  readonly bcScopeEvidenceFields: readonly string[];
+  readonly bcEntitySourceStatus: BusinessCentralEntitySourceStatus;
   readonly sampleDocuments: readonly string[];
   readonly sampleItems: readonly string[];
 }
 
 export interface P10GateInput {
-  readonly entityHighRiskRows: number;
-  readonly targetProfileHighRiskRows: number;
-  readonly unresolvedHighRiskGroups: number;
+  readonly entityHighRiskRowsAfterScope: number;
+  readonly targetProfileHighRiskRowsAfterScope: number;
+  readonly unresolvedHighRiskGroupsAfterScope: number;
   readonly targetProfilesTableAvailable: boolean;
   readonly approvedTargetProfileCount: number;
   readonly resolverV2ResolvedRows: number;
@@ -54,6 +65,8 @@ export interface P10Gate {
 
 export interface HighRiskReviewPlanSummaryInput extends P10GateInput {
   readonly generatedAt?: string;
+  readonly entityHighRiskRows: number;
+  readonly targetProfileHighRiskRows: number;
   readonly groups: readonly HighRiskReviewPlanGroup[];
 }
 
@@ -61,13 +74,26 @@ export interface HighRiskReviewPlanSummary {
   readonly generatedAt: string;
   readonly entityHighRiskRows: number;
   readonly targetProfileHighRiskRows: number;
+  readonly blockedGroupsBeforeScope: number;
+  readonly blockedGroupsAfterScope: number;
   readonly blockedGroups: number;
   readonly manualApprovalGroups: number;
   readonly safeAutoMigrationGroups: number;
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly { readonly value: string; readonly rows: number }[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
   readonly p10Gate: P10Gate;
   readonly topBlockedGroups: readonly HighRiskReviewPlanGroup[];
   readonly topManualApprovalGroups: readonly HighRiskReviewPlanGroup[];
   readonly topSafeAutoMigrationGroups: readonly HighRiskReviewPlanGroup[];
+  readonly topExcludedFromP10ButRetainedGroups: readonly HighRiskReviewPlanGroup[];
   readonly safety: {
     readonly databaseUpdated: false;
     readonly productionOutputsUpdated: false;
@@ -97,9 +123,9 @@ export interface KpiCompareV1V2Summary {
 export function evaluateP10Gate(input: P10GateInput): P10Gate {
   const blockers: string[] = [];
 
-  if (input.entityHighRiskRows > 0 || input.targetProfileHighRiskRows > 0 || input.unresolvedHighRiskGroups > 0) {
+  if (input.entityHighRiskRowsAfterScope > 0 || input.targetProfileHighRiskRowsAfterScope > 0 || input.unresolvedHighRiskGroupsAfterScope > 0) {
     blockers.push(
-      `Unresolved high-risk review remains: entityHighRiskRows=${input.entityHighRiskRows}, targetProfileHighRiskRows=${input.targetProfileHighRiskRows}, blockedGroups=${input.unresolvedHighRiskGroups}.`
+      `Unresolved high-risk review remains after scope filtering: entityHighRiskRows=${input.entityHighRiskRowsAfterScope}, targetProfileHighRiskRows=${input.targetProfileHighRiskRowsAfterScope}, blockedGroups=${input.unresolvedHighRiskGroupsAfterScope}.`
     );
   }
 
@@ -146,19 +172,45 @@ export function evaluateP10Gate(input: P10GateInput): P10Gate {
 }
 
 export function buildHighRiskReviewPlanSummary(input: HighRiskReviewPlanSummaryInput): HighRiskReviewPlanSummary {
-  const blockedGroups = input.groups.filter((group) => group.p10Blocker);
+  const blockedGroupsBeforeScope = input.groups.filter((group) => group.p10Blocker);
+  const blockedGroups = input.groups.filter((group) => group.blocksP10AfterScope);
   const manualApprovalGroups = input.groups.filter((group) => (
-    !group.p10Blocker
+    !group.blocksP10AfterScope
     && group.reviewDecision !== "CAN_AUTO_COLLAPSE_IN_FUTURE"
     && group.reviewDecision !== "IGNORE_FOR_NOW"
   ));
   const safeAutoMigrationGroups = input.groups.filter((group) => (
-    !group.p10Blocker && group.reviewDecision === "CAN_AUTO_COLLAPSE_IN_FUTURE"
+    !group.blocksP10AfterScope && group.reviewDecision === "CAN_AUTO_COLLAPSE_IN_FUTURE"
   ));
+  const topExcludedFromP10ButRetainedGroups = sortReviewGroups(input.groups.filter((group) => (
+    group.p10Blocker && !group.blocksP10AfterScope
+  ))).slice(0, 20);
+  const futureUseDomainCounts = countGroupRowsByValue(input.groups, (group) => group.bcFutureUseDomain);
+  const outputKpiOkScopeRows = countScopeRows(input.groups, "OUTPUT_KPI_OK_SCOPE");
+  const outputKpiRejectScopeRows = countScopeRows(input.groups, "OUTPUT_KPI_REJECT_SCOPE");
+  const outOfCurrentKpiScopeRows = countScopeRows(input.groups, "OUT_OF_CURRENT_KPI_SCOPE");
+  const unknownScopeReviewRows = countScopeRows(input.groups, "UNKNOWN_SCOPE_REVIEW");
+  const entitySourceBlankButClassifiedRows = input.groups
+    .filter((group) => group.bcEntitySourceStatus === "ENTITY_SOURCE_BLANK_BUT_CLASSIFIED")
+    .reduce((sum, group) => sum + group.rows, 0);
+  const entitySourceBlankUnknownRows = input.groups
+    .filter((group) => group.bcEntitySourceStatus === "ENTITY_SOURCE_BLANK_UNKNOWN")
+    .reduce((sum, group) => sum + group.rows, 0);
+  const p10BlockingRowsBeforeScope = input.groups.filter((group) => group.p10Blocker).reduce((sum, group) => sum + group.rows, 0);
+  const p10BlockingRowsAfterScope = input.groups.filter((group) => group.blocksP10AfterScope).reduce((sum, group) => sum + group.rows, 0);
+  const entityHighRiskRowsAfterScope = input.groups
+    .filter((group) => group.reviewGroupType.startsWith("ENTITY") && group.blocksP10AfterScope)
+    .reduce((sum, group) => sum + group.rows, 0);
+  const targetProfileHighRiskRowsAfterScope = input.groups
+    .filter((group) => group.reviewGroupType.startsWith("TARGET_PROFILE") && group.blocksP10AfterScope)
+    .reduce((sum, group) => sum + group.rows, 0);
+  const excludedFromP10ButRetainedRows = input.groups
+    .filter((group) => group.p10Blocker && !group.blocksP10AfterScope)
+    .reduce((sum, group) => sum + group.rows, 0);
   const p10Gate = evaluateP10Gate({
-    entityHighRiskRows: input.entityHighRiskRows,
-    targetProfileHighRiskRows: input.targetProfileHighRiskRows,
-    unresolvedHighRiskGroups: input.unresolvedHighRiskGroups,
+    entityHighRiskRowsAfterScope,
+    targetProfileHighRiskRowsAfterScope,
+    unresolvedHighRiskGroupsAfterScope: blockedGroups.length,
     targetProfilesTableAvailable: input.targetProfilesTableAvailable,
     approvedTargetProfileCount: input.approvedTargetProfileCount,
     resolverV2ResolvedRows: input.resolverV2ResolvedRows,
@@ -171,13 +223,26 @@ export function buildHighRiskReviewPlanSummary(input: HighRiskReviewPlanSummaryI
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     entityHighRiskRows: input.entityHighRiskRows,
     targetProfileHighRiskRows: input.targetProfileHighRiskRows,
+    blockedGroupsBeforeScope: blockedGroupsBeforeScope.length,
+    blockedGroupsAfterScope: blockedGroups.length,
     blockedGroups: blockedGroups.length,
     manualApprovalGroups: manualApprovalGroups.length,
     safeAutoMigrationGroups: safeAutoMigrationGroups.length,
+    outputKpiOkScopeRows,
+    outputKpiRejectScopeRows,
+    outOfCurrentKpiScopeRows,
+    unknownScopeReviewRows,
+    futureUseDomainCounts,
+    entitySourceBlankButClassifiedRows,
+    entitySourceBlankUnknownRows,
+    p10BlockingRowsBeforeScope,
+    p10BlockingRowsAfterScope,
+    excludedFromP10ButRetainedRows,
     p10Gate,
     topBlockedGroups: sortReviewGroups(blockedGroups).slice(0, 20),
     topManualApprovalGroups: sortReviewGroups(manualApprovalGroups).slice(0, 20),
     topSafeAutoMigrationGroups: sortReviewGroups(safeAutoMigrationGroups).slice(0, 20),
+    topExcludedFromP10ButRetainedGroups,
     safety: {
       databaseUpdated: false,
       productionOutputsUpdated: false,
@@ -210,7 +275,8 @@ export function buildKpiCompareV1V2Summary(input: {
 
 function sortReviewGroups(groups: readonly HighRiskReviewPlanGroup[]): readonly HighRiskReviewPlanGroup[] {
   return [...groups].sort((left, right) => (
-    Number(right.p10Blocker) - Number(left.p10Blocker)
+    Number(right.blocksP10AfterScope) - Number(left.blocksP10AfterScope)
+    || Number(right.p10Blocker) - Number(left.p10Blocker)
     || riskSort(right.riskLevel) - riskSort(left.riskLevel)
     || right.rows - left.rows
     || left.reviewGroupType.localeCompare(right.reviewGroupType)
@@ -222,4 +288,25 @@ function riskSort(value: BackfillRiskLevel): number {
   if (value === "HIGH") return 3;
   if (value === "MEDIUM") return 2;
   return 1;
+}
+
+function countScopeRows(
+  groups: readonly HighRiskReviewPlanGroup[],
+  scope: BusinessCentralCurrentKpiScope
+): number {
+  return groups.filter((group) => group.bcCurrentKpiScope === scope).reduce((sum, group) => sum + group.rows, 0);
+}
+
+function countGroupRowsByValue(
+  groups: readonly HighRiskReviewPlanGroup[],
+  selectValue: (group: HighRiskReviewPlanGroup) => string
+): readonly { readonly value: string; readonly rows: number }[] {
+  const counts = new Map<string, number>();
+  for (const group of groups) {
+    const value = selectValue(group);
+    counts.set(value, (counts.get(value) ?? 0) + group.rows);
+  }
+  return [...counts.entries()]
+    .map(([value, rows]) => ({ value, rows }))
+    .sort((left, right) => right.rows - left.rows || left.value.localeCompare(right.value));
 }

@@ -80,6 +80,30 @@ Before any broader entity or target work, apply source-alignment fixes in this o
 
 ## Recommended Interpretation
 
+BC data scope classification must keep two separate labels:
+
+```text
+bc_current_kpi_scope:
+- OUTPUT_KPI_OK_SCOPE
+- OUTPUT_KPI_REJECT_SCOPE
+- OUT_OF_CURRENT_KPI_SCOPE
+- UNKNOWN_SCOPE_REVIEW
+
+bc_future_use_domain:
+- PRODUCTION_OUTPUT_DASHBOARD
+- REJECT_ATTACHMENT
+- DOWNTIME_SPAREPART_OR_MATERIAL
+- SALES_REPORT
+- PURCHASE_OR_RECEIVING
+- TRANSFER_OR_INVENTORY_MOVEMENT
+- CONSUMPTION_OR_MATERIAL_USAGE
+- SCRAP_WASTE_OR_AVALAN
+- MASTER_DATA_QUALITY_REVIEW
+- UNKNOWN_REVIEW
+```
+
+`OUT_OF_CURRENT_KPI_SCOPE` does not mean the row is useless. It means the row is retained and exported for future domains, but it should not block the P1.0 dashboard switch by itself. `UNKNOWN_SCOPE_REVIEW` remains a manual review bucket and can still block P1.0 when material.
+
 Entity resolution priority:
 
 ```text
@@ -124,6 +148,17 @@ gProdOrRotLine_Description
 gProdOrRotLine_No
 Machine_Center_No
 ```
+
+Blank entity source handling:
+
+```text
+HAS_PRIMARY_ENTITY_SOURCE: gProdOrRotLine_Description is present.
+HAS_FALLBACK_ENTITY_SOURCE: gProdOrRotLine_No or Machine_Center_No is present.
+ENTITY_SOURCE_BLANK_BUT_CLASSIFIED: entity source is blank, but other OData evidence safely classifies the future-use domain.
+ENTITY_SOURCE_BLANK_UNKNOWN: entity source is blank and remaining evidence is insufficient.
+```
+
+Rows with blank entity source must not collapse into a generic `(blank)` decision only. Classify with `Entry_Type`, `Location_Code`, `Item_No`, `gItem_Description`, `Description`, `Item_Category_Code`, `Document_No`, `Quantity`, `Unit_of_Measure_Code`, and `Gross_Weight` before deciding whether they are future-use rows or true unknown review rows.
 
 ## Practical Warnings
 

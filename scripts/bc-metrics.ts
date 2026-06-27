@@ -79,6 +79,13 @@ import {
   type BusinessCentralTargetBucketCandidate
 } from "../packages/domain/src/master-data/entity-resolver-v2.js";
 import {
+  businessCentralBlocksP10AfterScope,
+  classifyBusinessCentralDataScope,
+  type BusinessCentralCurrentKpiScope,
+  type BusinessCentralEntitySourceStatus,
+  type BusinessCentralFutureUseDomain
+} from "../packages/domain/src/master-data/bc-data-scope.js";
+import {
   normalizeMachineCenterNo,
   resolveBusinessCentralTargetProfile,
   type TargetProfile,
@@ -158,6 +165,7 @@ interface EntityV2SourceRow {
   readonly itemDescription: string | null;
   readonly itemCategoryCode: string | null;
   readonly quantity: number;
+  readonly uom: string | null;
   readonly grossWeight: number | null;
   readonly entryType: string | null;
   readonly locationCode: string | null;
@@ -169,7 +177,16 @@ interface EntityV2SourceRow {
   readonly currentEntityDisplayName: string | null;
 }
 
-interface EntityV2ReportRow {
+interface BusinessCentralScopeReportFields {
+  readonly bc_current_kpi_scope: BusinessCentralCurrentKpiScope;
+  readonly bc_future_use_domain: BusinessCentralFutureUseDomain;
+  readonly bc_scope_reason: string;
+  readonly bc_scope_evidence_fields: string;
+  readonly bc_entity_source_status: BusinessCentralEntitySourceStatus;
+  readonly blocks_p10_after_scope: "true" | "false";
+}
+
+interface EntityV2ReportRow extends BusinessCentralScopeReportFields {
   readonly posting_date: string;
   readonly document_no: string;
   readonly entry_no: string;
@@ -208,6 +225,16 @@ interface EntityV2ReportRow {
 interface EntityV2Summary {
   readonly generatedAt: string;
   readonly totalRows: number;
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly TopCount[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
   readonly resolvedRows: number;
   readonly unresolvedRows: number;
   readonly sameEntityRows: number;
@@ -330,7 +357,7 @@ interface EntityV2Example {
   readonly targetBucketCandidate: BusinessCentralTargetBucketCandidate;
 }
 
-interface TargetProfileDryRunReportRow {
+interface TargetProfileDryRunReportRow extends BusinessCentralScopeReportFields {
   readonly posting_date: string;
   readonly document_no: string;
   readonly entry_no: string;
@@ -363,6 +390,16 @@ interface TargetProfileDryRunReportRow {
 interface TargetProfileDryRunSummary {
   readonly generatedAt: string;
   readonly totalRows: number;
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly TopCount[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
   readonly resolverV2ResolvedRows: number;
   readonly resolverV2UnresolvedRows: number;
   readonly targetProfileMatchedRows: number;
@@ -411,7 +448,7 @@ interface TargetProfileDryRunMatchedGroup {
   readonly rows: number;
 }
 
-interface EntityV2BackfillDryRunReportRow {
+interface EntityV2BackfillDryRunReportRow extends BusinessCentralScopeReportFields {
   readonly posting_date: string;
   readonly document_no: string;
   readonly entry_no: string;
@@ -437,6 +474,16 @@ interface EntityV2BackfillDryRunReportRow {
 interface EntityV2BackfillDryRunSummary {
   readonly generatedAt: string;
   readonly totalRows: number;
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly TopCount[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
   readonly proposedEntityBackfillRows: number;
   readonly noChangeRows: number;
   readonly highRiskRows: number;
@@ -492,7 +539,7 @@ interface ProductionTargetSource {
   readonly status: string;
 }
 
-interface TargetProfileBackfillDryRunReportRow {
+interface TargetProfileBackfillDryRunReportRow extends BusinessCentralScopeReportFields {
   readonly canonical_entity_code: string;
   readonly canonical_entity_display_name: string;
   readonly current_entity_code: string;
@@ -516,6 +563,17 @@ interface TargetProfileBackfillDryRunReportRow {
 
 interface TargetProfileBackfillDryRunSummary {
   readonly generatedAt: string;
+  readonly totalRows: number;
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly TopCount[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
   readonly proposedTargetProfileRows: number;
   readonly lowRiskRows: number;
   readonly mediumRiskRows: number;
@@ -564,6 +622,12 @@ interface HighRiskReviewPlanCsvRow {
   readonly review_decision: HighRiskReviewDecision;
   readonly recommended_action: string;
   readonly p10_blocker: "TRUE" | "FALSE";
+  readonly bc_current_kpi_scope: BusinessCentralCurrentKpiScope;
+  readonly bc_future_use_domain: BusinessCentralFutureUseDomain;
+  readonly bc_scope_reason: string;
+  readonly bc_scope_evidence_fields: string;
+  readonly bc_entity_source_status: BusinessCentralEntitySourceStatus;
+  readonly blocks_p10_after_scope: "TRUE" | "FALSE";
   readonly sample_documents: string;
   readonly sample_items: string;
 }
@@ -638,6 +702,11 @@ interface ManualApprovalQueueCsvRow {
   readonly decision_needed: HighRiskReviewDecision;
   readonly recommended_action: string;
   readonly blocks_p10: "true" | "false";
+  readonly bc_current_kpi_scope: BusinessCentralCurrentKpiScope;
+  readonly bc_future_use_domain: BusinessCentralFutureUseDomain;
+  readonly bc_scope_reason: string;
+  readonly bc_entity_source_status: BusinessCentralEntitySourceStatus;
+  readonly blocks_p10_after_scope: "true" | "false";
   readonly sample_documents: string;
   readonly sample_items: string;
 }
@@ -707,7 +776,13 @@ const entityV2CsvHeaders = [
   "v2_suggested_canonical_entity_display_name",
   "v2_mismatch_review_type",
   "v2_mismatch_review_reason",
-  "v2_mismatch_recommended_action"
+  "v2_mismatch_recommended_action",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope"
 ] as const satisfies readonly (keyof EntityV2ReportRow)[];
 
 const targetProfileDryRunCsvHeaders = [
@@ -737,7 +812,13 @@ const targetProfileDryRunCsvHeaders = [
   "target_profile_effective_to",
   "target_profile_machine_center_no",
   "target_profile_reason",
-  "recommended_action"
+  "recommended_action",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope"
 ] as const satisfies readonly (keyof TargetProfileDryRunReportRow)[];
 
 const entityV2BackfillDryRunCsvHeaders = [
@@ -760,7 +841,13 @@ const entityV2BackfillDryRunCsvHeaders = [
   "backfill_action",
   "risk_level",
   "risk_reason",
-  "recommended_action"
+  "recommended_action",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope"
 ] as const satisfies readonly (keyof EntityV2BackfillDryRunReportRow)[];
 
 const targetProfileBackfillDryRunCsvHeaders = [
@@ -780,7 +867,13 @@ const targetProfileBackfillDryRunCsvHeaders = [
   "risk_level",
   "risk_reason",
   "recommended_action",
-  "sample_rows"
+  "sample_rows",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope"
 ] as const satisfies readonly (keyof TargetProfileBackfillDryRunReportRow)[];
 
 const highRiskReviewPlanCsvHeaders = [
@@ -798,6 +891,12 @@ const highRiskReviewPlanCsvHeaders = [
   "review_decision",
   "recommended_action",
   "p10_blocker",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope",
   "sample_documents",
   "sample_items"
 ] as const satisfies readonly (keyof HighRiskReviewPlanCsvRow)[];
@@ -872,6 +971,11 @@ const manualApprovalQueueCsvHeaders = [
   "decision_needed",
   "recommended_action",
   "blocks_p10",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_entity_source_status",
+  "blocks_p10_after_scope",
   "sample_documents",
   "sample_items"
 ] as const satisfies readonly (keyof ManualApprovalQueueCsvRow)[];
@@ -1340,6 +1444,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
     item_description: string | null;
     item_category_code: string | null;
     quantity: string | number;
+    uom: string | null;
     gross_weight: string | number | null;
     entry_type: string | null;
     location_code: string | null;
@@ -1358,6 +1463,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
              po.item_description,
              po.item_category_code,
              po.quantity,
+             po.uom,
              po.gross_weight_per_pcs as gross_weight,
              po.entry_type,
              coalesce(
@@ -1388,6 +1494,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
     itemDescription: row.item_description,
     itemCategoryCode: row.item_category_code,
     quantity: numberValue(row.quantity),
+    uom: row.uom,
     grossWeight: row.gross_weight === null ? null : numberValue(row.gross_weight),
     entryType: row.entry_type,
     locationCode: row.location_code,
@@ -1429,6 +1536,21 @@ function buildEntityV2ReportRows(
       v2EntityCode: resolution.resolvedEntityCode,
       v2EntityDisplayName: resolution.resolvedEntityDisplayName
     });
+    const scope = businessCentralScopeFields({
+      entryType: row.entryType,
+      locationCode: row.locationCode,
+      itemNo: row.itemNo,
+      itemDescription: row.itemDescription,
+      itemCategoryCode: row.itemCategoryCode,
+      documentNo: row.documentNo,
+      quantity: row.quantity,
+      unitOfMeasureCode: row.uom,
+      grossWeight: row.grossWeight,
+      gProdOrRotLineDescription: row.gProdOrRotLineDescription,
+      gProdOrRotLineNo: row.gProdOrRotLineNo,
+      machineCenterNo: row.machineCenterNo,
+      blocksP10BeforeScope: false
+    });
     return {
       posting_date: row.postingDate,
       document_no: row.documentNo ?? "",
@@ -1462,7 +1584,8 @@ function buildEntityV2ReportRows(
       v2_suggested_canonical_entity_display_name: review.suggestedCanonicalEntityDisplayName ?? "",
       v2_mismatch_review_type: "",
       v2_mismatch_review_reason: "",
-      v2_mismatch_recommended_action: ""
+      v2_mismatch_recommended_action: "",
+      ...scope
     };
   });
   return addEntityV2MismatchReviews(rows);
@@ -1472,9 +1595,11 @@ function summarizeEntityV2ReportRows(
   rows: readonly EntityV2ReportRow[],
   outputFiles: EntityV2Summary["outputFiles"]
 ): EntityV2Summary {
+  const scopeSummary = summarizeBusinessCentralScopeRows({ rows });
   return {
     generatedAt: new Date().toISOString(),
     totalRows: rows.length,
+    ...scopeSummary,
     resolvedRows: rows.filter((row) => row.v2_entity_code).length,
     unresolvedRows: rows.filter((row) => !row.v2_entity_code).length,
     sameEntityRows: rows.filter((row) => row.comparison_status === "SAME_ENTITY").length,
@@ -1598,6 +1723,63 @@ function entityV2RowsToCsv(rows: readonly EntityV2ReportRow[]): string {
 function csvField(value: unknown): string {
   const text = String(value ?? "");
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
+}
+
+function businessCentralScopeFields(input: {
+  readonly entryType?: string | null;
+  readonly locationCode?: string | null;
+  readonly itemNo?: string | null;
+  readonly itemDescription?: string | null;
+  readonly itemCategoryCode?: string | null;
+  readonly documentNo?: string | null;
+  readonly quantity?: number | null;
+  readonly unitOfMeasureCode?: string | null;
+  readonly grossWeight?: number | null;
+  readonly gProdOrRotLineDescription?: string | null;
+  readonly gProdOrRotLineNo?: string | null;
+  readonly machineCenterNo?: string | null;
+  readonly blocksP10BeforeScope?: boolean | null;
+}): BusinessCentralScopeReportFields {
+  const scope = classifyBusinessCentralDataScope(input);
+  return {
+    bc_current_kpi_scope: scope.bcCurrentKpiScope,
+    bc_future_use_domain: scope.bcFutureUseDomain,
+    bc_scope_reason: scope.bcScopeReason,
+    bc_scope_evidence_fields: scope.bcScopeEvidenceFields.join("|"),
+    bc_entity_source_status: scope.bcEntitySourceStatus,
+    blocks_p10_after_scope: scope.blocksP10AfterScope ? "true" : "false"
+  };
+}
+
+function summarizeBusinessCentralScopeRows<T extends BusinessCentralScopeReportFields>(input: {
+  readonly rows: readonly T[];
+  readonly isP10BlockingBeforeScope?: (row: T) => boolean;
+}): {
+  readonly outputKpiOkScopeRows: number;
+  readonly outputKpiRejectScopeRows: number;
+  readonly outOfCurrentKpiScopeRows: number;
+  readonly unknownScopeReviewRows: number;
+  readonly futureUseDomainCounts: readonly TopCount[];
+  readonly entitySourceBlankButClassifiedRows: number;
+  readonly entitySourceBlankUnknownRows: number;
+  readonly p10BlockingRowsBeforeScope: number;
+  readonly p10BlockingRowsAfterScope: number;
+  readonly excludedFromP10ButRetainedRows: number;
+} {
+  const rows = input.rows;
+  const isP10BlockingBeforeScope = input.isP10BlockingBeforeScope ?? (() => false);
+  return {
+    outputKpiOkScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUTPUT_KPI_OK_SCOPE").length,
+    outputKpiRejectScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUTPUT_KPI_REJECT_SCOPE").length,
+    outOfCurrentKpiScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUT_OF_CURRENT_KPI_SCOPE").length,
+    unknownScopeReviewRows: rows.filter((row) => row.bc_current_kpi_scope === "UNKNOWN_SCOPE_REVIEW").length,
+    futureUseDomainCounts: topCounts(rows.map((row) => row.bc_future_use_domain), 20),
+    entitySourceBlankButClassifiedRows: rows.filter((row) => row.bc_entity_source_status === "ENTITY_SOURCE_BLANK_BUT_CLASSIFIED").length,
+    entitySourceBlankUnknownRows: rows.filter((row) => row.bc_entity_source_status === "ENTITY_SOURCE_BLANK_UNKNOWN").length,
+    p10BlockingRowsBeforeScope: rows.filter(isP10BlockingBeforeScope).length,
+    p10BlockingRowsAfterScope: rows.filter((row) => isP10BlockingBeforeScope(row) && row.blocks_p10_after_scope === "true").length,
+    excludedFromP10ButRetainedRows: rows.filter((row) => isP10BlockingBeforeScope(row) && row.blocks_p10_after_scope === "false").length
+  };
 }
 
 function topCounts(values: readonly string[], limit = 10): readonly TopCount[] {
@@ -2930,6 +3112,21 @@ function buildTargetProfileDryRunReportRows(input: {
       profiles: input.targetProfiles
     });
     const targetProfile = lookup.targetProfile;
+    const scope = businessCentralScopeFields({
+      entryType: row.entryType,
+      locationCode: row.locationCode,
+      itemNo: row.itemNo,
+      itemDescription: row.itemDescription,
+      itemCategoryCode: row.itemCategoryCode,
+      documentNo: row.documentNo,
+      quantity: row.quantity,
+      unitOfMeasureCode: row.uom,
+      grossWeight: row.grossWeight,
+      gProdOrRotLineDescription: row.gProdOrRotLineDescription,
+      gProdOrRotLineNo: row.gProdOrRotLineNo,
+      machineCenterNo: row.machineCenterNo,
+      blocksP10BeforeScope: false
+    });
 
     return {
       posting_date: row.postingDate,
@@ -2958,7 +3155,8 @@ function buildTargetProfileDryRunReportRows(input: {
       target_profile_effective_to: targetProfile?.effectiveTo ? dateText(targetProfile.effectiveTo) : "",
       target_profile_machine_center_no: targetProfile?.machineCenterNo ?? "",
       target_profile_reason: lookup.reason,
-      recommended_action: targetProfileRecommendedAction(lookup.status, input.targetProfilesTableAvailable)
+      recommended_action: targetProfileRecommendedAction(lookup.status, input.targetProfilesTableAvailable),
+      ...scope
     };
   });
 }
@@ -3000,9 +3198,11 @@ function summarizeTargetProfileDryRunRows(input: {
   readonly targetProfilesLoaded: number;
 }): TargetProfileDryRunSummary {
   const rows = input.rows;
+  const scopeSummary = summarizeBusinessCentralScopeRows({ rows });
   return {
     generatedAt: new Date().toISOString(),
     totalRows: rows.length,
+    ...scopeSummary,
     resolverV2ResolvedRows: rows.filter((row) => row.resolver_v2_entity_code).length,
     resolverV2UnresolvedRows: rows.filter((row) => !row.resolver_v2_entity_code).length,
     targetProfileMatchedRows: rows.filter((row) => (
@@ -3235,6 +3435,19 @@ function buildEntityV2BackfillDryRunReportRows(
       reviewClassification: row.v2_review_classification,
       mismatchReviewType: row.v2_mismatch_review_type
     });
+    const scope = businessCentralScopeFields({
+      entryType: row.entry_type,
+      locationCode: row.location_code,
+      itemNo: row.item_no,
+      itemDescription: row.item_description,
+      itemCategoryCode: row.item_category_code,
+      documentNo: row.document_no,
+      quantity: row.quantity,
+      gProdOrRotLineDescription: row.g_prod_or_rot_line_description,
+      gProdOrRotLineNo: row.g_prod_or_rot_line_no,
+      machineCenterNo: row.machine_center_no,
+      blocksP10BeforeScope: plan.riskLevel === "HIGH"
+    });
 
     return {
       posting_date: row.posting_date,
@@ -3256,7 +3469,8 @@ function buildEntityV2BackfillDryRunReportRows(
       backfill_action: plan.backfillAction,
       risk_level: plan.riskLevel,
       risk_reason: plan.riskReason,
-      recommended_action: plan.recommendedAction
+      recommended_action: plan.recommendedAction,
+      ...scope
     };
   });
 }
@@ -3274,9 +3488,14 @@ function summarizeEntityV2BackfillDryRunRows(input: {
   readonly outputFiles: EntityV2BackfillDryRunSummary["outputFiles"];
 }): EntityV2BackfillDryRunSummary {
   const rows = input.rows;
+  const scopeSummary = summarizeBusinessCentralScopeRows({
+    rows,
+    isP10BlockingBeforeScope: (row) => row.risk_level === "HIGH"
+  });
   return {
     generatedAt: new Date().toISOString(),
     totalRows: rows.length,
+    ...scopeSummary,
     proposedEntityBackfillRows: rows.filter((row) => row.backfill_action === "PROPOSE_CANONICAL_ENTITY_COLLAPSE" || row.backfill_action === "PROPOSE_CANONICAL_ENTITY_CREATION").length,
     noChangeRows: rows.filter((row) => row.backfill_action === "NO_CHANGE").length,
     highRiskRows: rows.filter((row) => row.risk_level === "HIGH").length,
@@ -3505,6 +3724,19 @@ function targetProfileBackfillRow(
     entityBackfillAction: group.entityRow.backfill_action,
     hasMultipleTargetQtySources
   });
+  const scope = businessCentralScopeFields({
+    entryType: group.v2Row.entry_type,
+    locationCode: group.v2Row.location_code,
+    itemNo: group.v2Row.item_no,
+    itemDescription: group.v2Row.item_description,
+    itemCategoryCode: group.v2Row.item_category_code,
+    documentNo: group.v2Row.document_no,
+    quantity: group.v2Row.quantity,
+    gProdOrRotLineDescription: group.v2Row.g_prod_or_rot_line_description,
+    gProdOrRotLineNo: group.v2Row.g_prod_or_rot_line_no,
+    machineCenterNo: group.v2Row.machine_center_no,
+    blocksP10BeforeScope: plan.riskLevel === "HIGH"
+  });
 
   return {
     canonical_entity_code: group.entityRow.proposed_canonical_entity_code,
@@ -3525,7 +3757,8 @@ function targetProfileBackfillRow(
     recommended_action: plan.recommendedAction,
     sample_rows: group.sampleRows,
     sample_documents: [...group.sampleDocuments],
-    sample_items: [...group.sampleItems]
+    sample_items: [...group.sampleItems],
+    ...scope
   };
 }
 
@@ -3542,8 +3775,14 @@ function summarizeTargetProfileBackfillDryRunRows(input: {
   readonly outputFiles: TargetProfileBackfillDryRunSummary["outputFiles"];
 }): TargetProfileBackfillDryRunSummary {
   const rows = input.rows;
+  const scopeSummary = summarizeBusinessCentralScopeRows({
+    rows,
+    isP10BlockingBeforeScope: (row) => row.risk_level === "HIGH"
+  });
   return {
     generatedAt: new Date().toISOString(),
+    totalRows: rows.length,
+    ...scopeSummary,
     proposedTargetProfileRows: rows.length,
     lowRiskRows: rows.filter((row) => row.risk_level === "LOW").length,
     mediumRiskRows: rows.filter((row) => row.risk_level === "MEDIUM").length,
@@ -3650,7 +3889,10 @@ function buildEntityHighRiskReviewGroups(
       normalizeAliasKey(row.source_value),
       row.proposed_canonical_entity_code,
       row.backfill_action,
-      row.risk_level
+      row.risk_level,
+      row.bc_current_kpi_scope,
+      row.bc_future_use_domain,
+      row.blocks_p10_after_scope
     ].join(":");
     const current = groups.get(key) ?? {
       row,
@@ -3684,6 +3926,12 @@ function buildEntityHighRiskReviewGroups(
       reviewDecision: decision,
       recommendedAction: group.row.recommended_action,
       p10Blocker,
+      blocksP10AfterScope: group.row.blocks_p10_after_scope === "true",
+      bcCurrentKpiScope: group.row.bc_current_kpi_scope,
+      bcFutureUseDomain: group.row.bc_future_use_domain,
+      bcScopeReason: group.row.bc_scope_reason,
+      bcScopeEvidenceFields: group.row.bc_scope_evidence_fields.split("|").filter(Boolean),
+      bcEntitySourceStatus: group.row.bc_entity_source_status,
       sampleDocuments: [...group.sampleDocuments],
       sampleItems: [...group.sampleItems]
     };
@@ -3711,6 +3959,12 @@ function buildTargetProfileHighRiskReviewGroups(
       reviewDecision: targetProfileReviewDecision(row),
       recommendedAction: row.recommended_action,
       p10Blocker,
+      blocksP10AfterScope: row.blocks_p10_after_scope === "true",
+      bcCurrentKpiScope: row.bc_current_kpi_scope,
+      bcFutureUseDomain: row.bc_future_use_domain,
+      bcScopeReason: row.bc_scope_reason,
+      bcScopeEvidenceFields: row.bc_scope_evidence_fields.split("|").filter(Boolean),
+      bcEntitySourceStatus: row.bc_entity_source_status,
       sampleDocuments: row.sample_documents,
       sampleItems: row.sample_items
     };
@@ -3956,6 +4210,12 @@ function highRiskReviewPlanRowsToCsv(groups: readonly HighRiskReviewPlanGroup[])
     review_decision: group.reviewDecision,
     recommended_action: group.recommendedAction,
     p10_blocker: group.p10Blocker ? "TRUE" : "FALSE",
+    bc_current_kpi_scope: group.bcCurrentKpiScope,
+    bc_future_use_domain: group.bcFutureUseDomain,
+    bc_scope_reason: group.bcScopeReason,
+    bc_scope_evidence_fields: group.bcScopeEvidenceFields.join("|"),
+    bc_entity_source_status: group.bcEntitySourceStatus,
+    blocks_p10_after_scope: group.blocksP10AfterScope ? "TRUE" : "FALSE",
     sample_documents: group.sampleDocuments.join("|"),
     sample_items: group.sampleItems.join("|")
   }));
@@ -4305,6 +4565,11 @@ function buildManualApprovalQueueRows(
       decision_needed: item.decisionNeeded,
       recommended_action: item.recommendedAction,
       blocks_p10: item.blocksP10 ? "true" : "false",
+      bc_current_kpi_scope: item.bcCurrentKpiScope,
+      bc_future_use_domain: item.bcFutureUseDomain,
+      bc_scope_reason: item.bcScopeReason,
+      bc_entity_source_status: item.bcEntitySourceStatus,
+      blocks_p10_after_scope: item.blocksP10AfterScope ? "true" : "false",
       sample_documents: item.sampleDocuments.join("|"),
       sample_items: item.sampleItems.join("|")
     };
@@ -4315,7 +4580,7 @@ function buildBlockedGroupsChecklistRows(
   groups: readonly HighRiskReviewPlanGroup[]
 ): readonly BlockedGroupsChecklistCsvRow[] {
   return groups
-    .filter((group) => group.p10Blocker)
+    .filter((group) => group.blocksP10AfterScope)
     .sort(reviewGroupSort)
     .map((group, index) => {
       const item = buildBlockedGroupsChecklistItem(group, index);
@@ -4452,6 +4717,18 @@ async function runResolutionPackage(pool: DatabasePool) {
     targetProfileSeedDraftCandidates: targetProfileSeedRows.length,
     manualApprovalItems: manualQueueRows.length,
     blockedGroups: blockedChecklistRows.length,
+    scopeSummary: {
+      outputKpiOkScopeRows: highRiskSummary.outputKpiOkScopeRows,
+      outputKpiRejectScopeRows: highRiskSummary.outputKpiRejectScopeRows,
+      outOfCurrentKpiScopeRows: highRiskSummary.outOfCurrentKpiScopeRows,
+      unknownScopeReviewRows: highRiskSummary.unknownScopeReviewRows,
+      futureUseDomainCounts: highRiskSummary.futureUseDomainCounts,
+      entitySourceBlankButClassifiedRows: highRiskSummary.entitySourceBlankButClassifiedRows,
+      entitySourceBlankUnknownRows: highRiskSummary.entitySourceBlankUnknownRows,
+      p10BlockingRowsBeforeScope: highRiskSummary.p10BlockingRowsBeforeScope,
+      p10BlockingRowsAfterScope: highRiskSummary.p10BlockingRowsAfterScope,
+      excludedFromP10ButRetainedRows: highRiskSummary.excludedFromP10ButRetainedRows
+    },
     p10Gate: highRiskSummary.p10Gate
   });
 

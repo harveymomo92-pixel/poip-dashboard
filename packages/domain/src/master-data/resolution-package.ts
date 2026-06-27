@@ -1,5 +1,10 @@
 import type { BackfillRiskLevel } from "./entity-target-backfill-plan.js";
 import type { HighRiskReviewDecision, HighRiskReviewPlanGroup, P10Gate } from "./high-risk-review-plan.js";
+import type {
+  BusinessCentralCurrentKpiScope,
+  BusinessCentralEntitySourceStatus,
+  BusinessCentralFutureUseDomain
+} from "./bc-data-scope.js";
 
 export type ResolutionPackageApprovalStatus = "needs_review" | "draft" | "pending";
 export type ManualApprovalPriority = "P1" | "P2" | "P3" | "P4";
@@ -84,6 +89,11 @@ export interface ManualApprovalQueueItem {
   readonly decisionNeeded: HighRiskReviewDecision;
   readonly recommendedAction: string;
   readonly blocksP10: boolean;
+  readonly blocksP10AfterScope: boolean;
+  readonly bcCurrentKpiScope: BusinessCentralCurrentKpiScope;
+  readonly bcFutureUseDomain: BusinessCentralFutureUseDomain;
+  readonly bcScopeReason: string;
+  readonly bcEntitySourceStatus: BusinessCentralEntitySourceStatus;
   readonly sampleDocuments: readonly string[];
   readonly sampleItems: readonly string[];
 }
@@ -114,6 +124,18 @@ export interface ResolutionPackageSummary {
     readonly targetProfileSeedDraftCandidates: number;
     readonly manualApprovalItems: number;
     readonly blockedGroups: number;
+  };
+  readonly scopeSummary: {
+    readonly outputKpiOkScopeRows: number;
+    readonly outputKpiRejectScopeRows: number;
+    readonly outOfCurrentKpiScopeRows: number;
+    readonly unknownScopeReviewRows: number;
+    readonly futureUseDomainCounts: readonly { readonly value: string; readonly rows: number }[];
+    readonly entitySourceBlankButClassifiedRows: number;
+    readonly entitySourceBlankUnknownRows: number;
+    readonly p10BlockingRowsBeforeScope: number;
+    readonly p10BlockingRowsAfterScope: number;
+    readonly excludedFromP10ButRetainedRows: number;
   };
   readonly p10Readiness: {
     readonly status: P10Gate["status"];
@@ -173,6 +195,11 @@ export function buildManualApprovalQueueItem(group: HighRiskReviewPlanGroup): Ma
     decisionNeeded: group.reviewDecision,
     recommendedAction: group.recommendedAction,
     blocksP10: group.p10Blocker,
+    blocksP10AfterScope: group.blocksP10AfterScope,
+    bcCurrentKpiScope: group.bcCurrentKpiScope,
+    bcFutureUseDomain: group.bcFutureUseDomain,
+    bcScopeReason: group.bcScopeReason,
+    bcEntitySourceStatus: group.bcEntitySourceStatus,
     sampleDocuments: group.sampleDocuments,
     sampleItems: group.sampleItems
   };
@@ -204,6 +231,7 @@ export function buildResolutionPackageSummary(input: {
   readonly targetProfileSeedDraftCandidates: number;
   readonly manualApprovalItems: number;
   readonly blockedGroups: number;
+  readonly scopeSummary: ResolutionPackageSummary["scopeSummary"];
   readonly p10Gate: P10Gate;
 }): ResolutionPackageSummary {
   return {
@@ -216,6 +244,7 @@ export function buildResolutionPackageSummary(input: {
       manualApprovalItems: input.manualApprovalItems,
       blockedGroups: input.blockedGroups
     },
+    scopeSummary: input.scopeSummary,
     p10Readiness: {
       status: input.p10Gate.status,
       reason: input.p10Gate.reason,
@@ -258,8 +287,8 @@ export function inferAliasCleanupConflictType(
 }
 
 export function manualApprovalPriority(group: HighRiskReviewPlanGroup): ManualApprovalPriority {
-  if (group.p10Blocker && group.rows >= 500) return "P1";
-  if (group.p10Blocker) return "P2";
+  if (group.blocksP10AfterScope && group.rows >= 500) return "P1";
+  if (group.blocksP10AfterScope) return "P2";
   if (group.reviewDecision !== "IGNORE_FOR_NOW") return "P3";
   return "P4";
 }

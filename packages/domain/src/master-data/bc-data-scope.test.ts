@@ -1,0 +1,90 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { classifyBusinessCentralDataScope } from "./bc-data-scope.js";
+
+test("Output and JADI classify as KPI OK scope for production dashboard", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "JADI",
+    itemNo: "PF192CL12",
+    itemDescription: "CUP 12 OZ PRINTING",
+    itemCategoryCode: "FG",
+    unitOfMeasureCode: "PCS",
+    gProdOrRotLineDescription: "OMSO 1-OZ",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUTPUT_KPI_OK_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "PRODUCTION_OUTPUT_DASHBOARD");
+  assert.equal(result.bcEntitySourceStatus, "HAS_PRIMARY_ENTITY_SOURCE");
+  assert.equal(result.blocksP10AfterScope, true);
+});
+
+test("Output reject evidence classifies as reject attachment scope", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "REJECT",
+    itemNo: "RJ015",
+    itemDescription: "REJECT CUP 12 OZ",
+    itemCategoryCode: "REJECT",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUTPUT_KPI_REJECT_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "REJECT_ATTACHMENT");
+  assert.equal(result.blocksP10AfterScope, true);
+});
+
+test("blank entity source with sparepart evidence stays retained out of current KPI scope", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "",
+    itemNo: "SP-001",
+    itemDescription: "SPAREPART GEAR BOX",
+    itemCategoryCode: "SPAREPART",
+    documentNo: "MAT-001",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "DOWNTIME_SPAREPART_OR_MATERIAL");
+  assert.equal(result.bcEntitySourceStatus, "ENTITY_SOURCE_BLANK_BUT_CLASSIFIED");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("sales-like evidence classifies to sales report future-use domain", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "SALES",
+    itemNo: "FG-001",
+    itemDescription: "CUSTOMER SALES ITEM",
+    itemCategoryCode: "FG-SALES",
+    documentNo: "SO-2026-001",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "SALES_REPORT");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("unknown blank source with insufficient evidence stays unknown review", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "",
+    itemNo: "",
+    itemDescription: "",
+    itemCategoryCode: "",
+    documentNo: "",
+    unitOfMeasureCode: "",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "UNKNOWN_SCOPE_REVIEW");
+  assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
+  assert.equal(result.bcEntitySourceStatus, "ENTITY_SOURCE_BLANK_UNKNOWN");
+  assert.equal(result.blocksP10AfterScope, true);
+});
