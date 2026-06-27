@@ -1,5 +1,31 @@
 # Operations Guide
 
+<!-- LEGACY_BC_ROADMAP_ID_WARNING_START -->
+
+> **Legacy milestone ID warning**
+>
+> This document may mention old Business Central roadmap IDs.
+>
+> Current active meaning:
+>
+> ```text
+> P0.7 = Entity Resolver V2 Dry Run
+> P0.8 = Target Profile Model
+> P0.9 = Backfill / Migration Dry Run
+> P1.0 = Controlled Switch
+> ```
+>
+> Legacy meanings from older mapping/reject roadmap:
+>
+> ```text
+> Legacy P0.7 Reject Attachment Review Queue -> BC-RJ-1
+> Legacy P0.8 V1 parity closeout -> BC-V1-CLOSEOUT
+> ```
+>
+> See `docs/BC_MILESTONE_NAMESPACE.md`.
+
+<!-- LEGACY_BC_ROADMAP_ID_WARNING_END -->
+
 This guide covers the v2 operations runbook for an internal deployment.
 
 ## Daily checks
@@ -587,3 +613,32 @@ git diff --check
 
 <!-- BC_ENTITY_TARGET_REDESIGN_ROADMAP_END -->
 
+<!-- BC_MILESTONE_CONFLICT_RESOLUTION_START -->
+
+## Business Central Milestone Conflict Resolution
+
+Use `docs/BC_MILESTONE_NAMESPACE.md` as the source of truth for Business Central milestone IDs.
+
+Active roadmap:
+
+```text
+P0.7 = Entity Resolver V2 Dry Run
+P0.8 = Target Profile Model
+P0.9 = Backfill / Migration Dry Run
+P1.0 = Controlled Switch to Resolver V2 + Target Profiles
+```
+
+Legacy roadmap references:
+
+```text
+Legacy P0.7 Reject Attachment Review Queue -> BC-RJ-1
+Legacy P0.8 V1 parity closeout -> BC-V1-CLOSEOUT
+```
+
+Operational rule:
+
+```text
+When a prompt says P0.7, implement Entity Resolver V2 Dry Run, not the legacy reject attachment queue.
+```
+
+<!-- BC_MILESTONE_CONFLICT_RESOLUTION_END -->

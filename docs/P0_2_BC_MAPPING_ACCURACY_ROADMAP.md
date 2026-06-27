@@ -1,5 +1,31 @@
 # P0.2-P0.8 Business Central Mapping Accuracy Roadmap
 
+<!-- LEGACY_BC_ROADMAP_ID_WARNING_START -->
+
+> **Legacy milestone ID warning**
+>
+> This document may mention old Business Central roadmap IDs.
+>
+> Current active meaning:
+>
+> ```text
+> P0.7 = Entity Resolver V2 Dry Run
+> P0.8 = Target Profile Model
+> P0.9 = Backfill / Migration Dry Run
+> P1.0 = Controlled Switch
+> ```
+>
+> Legacy meanings from older mapping/reject roadmap:
+>
+> ```text
+> Legacy P0.7 Reject Attachment Review Queue -> BC-RJ-1
+> Legacy P0.8 V1 parity closeout -> BC-V1-CLOSEOUT
+> ```
+>
+> See `docs/BC_MILESTONE_NAMESPACE.md`.
+
+<!-- LEGACY_BC_ROADMAP_ID_WARNING_END -->
+
 Status: planning and execution document for Business Central calculation-accuracy improvements after P0.1.
 
 ## Current baseline

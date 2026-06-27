@@ -844,3 +844,38 @@ P0.7 Entity Resolver V2 Dry Run
 ```
 
 Do not proceed to P0.8 until P0.7 dry-run report is reviewed.
+
+<!-- BC_MILESTONE_NAMESPACE_NOTE_START -->
+
+## Milestone Namespace Note
+
+Current active meaning:
+
+```text
+P0.7 = Entity Resolver V2 Dry Run
+P0.8 = Target Profile Model
+P0.9 = Backfill / Migration Dry Run
+P1.0 = Controlled Switch
+```
+
+Legacy mapping accuracy roadmap conflict:
+
+```text
+Legacy P0.7 = Reject Attachment Review Queue
+Legacy P0.8 = V1 parity closeout
+```
+
+Those legacy meanings are renamed for traceability:
+
+```text
+Legacy P0.7 -> BC-RJ-1
+Legacy P0.8 -> BC-V1-CLOSEOUT
+```
+
+See:
+
+```text
+docs/BC_MILESTONE_NAMESPACE.md
+```
+
+<!-- BC_MILESTONE_NAMESPACE_NOTE_END -->
