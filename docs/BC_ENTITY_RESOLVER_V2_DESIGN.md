@@ -174,6 +174,39 @@ source aliases. Duplicate aliases remain ambiguous and do not force a match. The
 does not create canonical entities or aliases when a source value has no exact safe match.
 ```
 
+Review classification note:
+
+```text
+CURRENT_MAPPED_V2_UNMAPPED is not always a resolver error. If current rows map to a
+legacy/detailed entity such as "THERMO HENGFENG-2-OZ - Thermoforming" but resolver v2
+cannot find "THERMO HENGFENG-2-OZ" as a canonical catalog entity, classify the row as
+CANONICAL_CATALOG_GAP. If current rows map to target-variant entities such as
+"OMSO 1-OZ - Printing 22 OZ" and "OMSO 1-OZ - Printing OZ < 20", classify the row as
+LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED.
+```
+
+These P0.7 findings are expected input for P0.8/P0.9 planning. Do not reduce the count by
+creating broad aliases or by forcing resolver v2 to match legacy target-variant entities.
+Resolve them later through canonical entity, target profile, and migration dry-run planning.
+
+Dry-run CSV adds:
+
+```text
+v2_review_classification
+v2_review_reason
+v2_recommended_action
+v2_suggested_canonical_entity_code
+v2_suggested_canonical_entity_display_name
+```
+
+Dry-run JSON adds:
+
+```text
+reviewSummary
+canonicalCatalogGaps
+legacyTargetVariantCollapseNeeded
+```
+
 ---
 
 ## 7. Required Test Cases

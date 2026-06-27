@@ -208,8 +208,8 @@ pnpm bc:entity-v2-dry-run
 
 Outputs:
 
-- `.tmp/bc-entity-v2-dry-run.csv`: row-level comparison with current entity, v2 entity candidate, source field used, confidence, target bucket candidate, routing evidence, and comparison status.
-- `.tmp/bc-entity-v2-dry-run.json`: summary counts, top source fields, top target buckets, top mismatch source values, examples by family, and safety flags.
+- `.tmp/bc-entity-v2-dry-run.csv`: row-level comparison with current entity, v2 entity candidate, source field used, confidence, target bucket candidate, routing evidence, comparison status, and v2 review classification.
+- `.tmp/bc-entity-v2-dry-run.json`: summary counts, review summary, canonical catalog gaps, legacy target-variant collapse groups, top source fields, top target buckets, top mismatch source values, examples by family, and safety flags.
 
 Interpret comparison statuses as follows:
 
@@ -218,6 +218,18 @@ Interpret comparison statuses as follows:
 - `CURRENT_UNMAPPED_V2_RESOLVED`: current row is unmapped, but resolver v2 found a canonical entity candidate.
 - `CURRENT_MAPPED_V2_UNMAPPED`: current row is mapped, but resolver v2 found no exact canonical match; this usually means canonical entities or safe aliases must be reviewed before P0.8+.
 - `BOTH_UNMAPPED`: neither current mapping nor resolver v2 resolved an entity.
+
+Review classifications:
+
+- `OK_SAME_ENTITY`: current and resolver v2 agree.
+- `OK_BOTH_UNMAPPED`: both current and resolver v2 are unmapped; keep this visible for source review.
+- `CANONICAL_CATALOG_GAP`: current row maps to a legacy/detailed entity for the same source value, but resolver v2 cannot find the canonical entity in the catalog. Example: `THERMO HENGFENG-2-OZ` currently maps to `THERMO HENGFENG-2-OZ - Thermoforming`.
+- `LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED`: current rows map to entity names that encode target variants, such as `OMSO 1-OZ - Printing 22 OZ` and `OMSO 1-OZ - Printing OZ < 20`; those should become target profiles later, not separate entities.
+- `POSSIBLE_RESOLVER_MISMATCH`: current and resolver v2 both resolve, but to unrelated entities.
+- `POSSIBLE_DATA_SOURCE_GAP`: current row is mapped, but resolver v2 has no usable BC source field/value.
+- `UNKNOWN_REVIEW_NEEDED`: manual review is needed before categorizing safely.
+
+`CURRENT_MAPPED_V2_UNMAPPED` is not automatically an error. Canonical catalog gaps are expected P0.7 findings when master data still exposes legacy/detailed entities instead of canonical machine entities. Do not fix these by creating broad aliases. Resolve them in P0.8/P0.9 through canonical entity, target profile, and migration dry-run planning.
 
 Safety notes:
 

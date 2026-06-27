@@ -38,11 +38,14 @@ import {
 } from "../packages/domain/src/master-data/mapping-candidates.js";
 import {
   buildBusinessCentralCanonicalEntityCatalog,
+  classifyBusinessCentralEntityV2Review,
   resolveBusinessCentralEntityV2,
   type BusinessCentralCanonicalEntityAliasInput,
   type BusinessCentralCanonicalEntityCatalog,
   type BusinessCentralCanonicalEntityInput,
   type BusinessCentralEntityV2Confidence,
+  type BusinessCentralEntityV2ComparisonStatus,
+  type BusinessCentralEntityV2ReviewClassification,
   type BusinessCentralEntityV2SourceField,
   type BusinessCentralTargetBucketCandidate
 } from "../packages/domain/src/master-data/entity-resolver-v2.js";
@@ -63,13 +66,6 @@ type Command =
   | "entity-v2-dry-run";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
-
-type EntityV2ComparisonStatus =
-  | "SAME_ENTITY"
-  | "DIFFERENT_ENTITY"
-  | "CURRENT_UNMAPPED_V2_RESOLVED"
-  | "CURRENT_MAPPED_V2_UNMAPPED"
-  | "BOTH_UNMAPPED";
 
 interface Filters {
   readonly from: string;
@@ -155,7 +151,12 @@ interface EntityV2ReportRow {
   readonly v2_reason: string;
   readonly v2_target_bucket_candidate: BusinessCentralTargetBucketCandidate;
   readonly v2_target_routing_evidence: string;
-  readonly comparison_status: EntityV2ComparisonStatus;
+  readonly comparison_status: BusinessCentralEntityV2ComparisonStatus;
+  readonly v2_review_classification: BusinessCentralEntityV2ReviewClassification;
+  readonly v2_review_reason: string;
+  readonly v2_recommended_action: string;
+  readonly v2_suggested_canonical_entity_code: string;
+  readonly v2_suggested_canonical_entity_display_name: string;
 }
 
 interface EntityV2Summary {
@@ -170,6 +171,9 @@ interface EntityV2Summary {
   readonly topSourceFieldsUsed: readonly TopCount[];
   readonly topTargetBucketCandidates: readonly TopCount[];
   readonly topMismatchSourceValues: readonly EntityV2MismatchGroup[];
+  readonly reviewSummary: EntityV2ReviewSummary;
+  readonly canonicalCatalogGaps: readonly EntityV2CanonicalCatalogGap[];
+  readonly legacyTargetVariantCollapseNeeded: readonly EntityV2LegacyTargetVariantCollapseGroup[];
   readonly examplesByFamily: Record<EntityV2ExampleFamily, readonly EntityV2Example[]>;
   readonly outputFiles: {
     readonly csv: string;
@@ -197,6 +201,39 @@ interface EntityV2MismatchGroup {
   readonly v2EntityCodes: readonly string[];
 }
 
+interface EntityV2ReviewSummary {
+  readonly okSameEntityRows: number;
+  readonly okBothUnmappedRows: number;
+  readonly canonicalCatalogGapRows: number;
+  readonly legacyTargetVariantCollapseNeededRows: number;
+  readonly possibleResolverMismatchRows: number;
+  readonly possibleDataSourceGapRows: number;
+  readonly unknownReviewNeededRows: number;
+}
+
+interface EntityV2CanonicalCatalogGap {
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly currentEntityCodes: readonly string[];
+  readonly suggestedCanonicalEntityCode: string;
+  readonly suggestedCanonicalEntityDisplayName: string;
+  readonly reason: string;
+  readonly recommendedAction: string;
+}
+
+interface EntityV2LegacyTargetVariantCollapseGroup {
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly currentEntityCodes: readonly string[];
+  readonly suggestedCanonicalEntityCode: string;
+  readonly suggestedCanonicalEntityDisplayName: string;
+  readonly recommendedFuturePhase: "P0.8/P0.9";
+  readonly reason: string;
+  readonly recommendedAction: string;
+}
+
 type EntityV2ExampleFamily = "OMSO" | "VFINE" | "ILLIG" | "REPACKING" | "NEWDO" | "CAI";
 
 interface EntityV2Example {
@@ -208,7 +245,7 @@ interface EntityV2Example {
   readonly sourceValue: string;
   readonly currentEntityCode: string;
   readonly v2EntityCode: string;
-  readonly comparisonStatus: EntityV2ComparisonStatus;
+  readonly comparisonStatus: BusinessCentralEntityV2ComparisonStatus;
   readonly targetBucketCandidate: BusinessCentralTargetBucketCandidate;
 }
 
@@ -238,7 +275,12 @@ const entityV2CsvHeaders = [
   "v2_reason",
   "v2_target_bucket_candidate",
   "v2_target_routing_evidence",
-  "comparison_status"
+  "comparison_status",
+  "v2_review_classification",
+  "v2_review_reason",
+  "v2_recommended_action",
+  "v2_suggested_canonical_entity_code",
+  "v2_suggested_canonical_entity_display_name"
 ] as const satisfies readonly (keyof EntityV2ReportRow)[];
 
 function requireEnv(name: string): string {
@@ -768,6 +810,16 @@ function buildEntityV2ReportRows(
       gProdOrRotLineDescription: row.gProdOrRotLineDescription,
       machineCenterNo: row.machineCenterNo
     }, catalog);
+    const comparisonStatus = entityV2ComparisonStatus(row.currentEntityCode, resolution.resolvedEntityCode);
+    const review = classifyBusinessCentralEntityV2Review({
+      comparisonStatus,
+      sourceFieldUsed: resolution.sourceFieldUsed,
+      sourceValueUsed: resolution.sourceValueUsed,
+      currentEntityCode: row.currentEntityCode,
+      currentEntityDisplayName: row.currentEntityDisplayName,
+      v2EntityCode: resolution.resolvedEntityCode,
+      v2EntityDisplayName: resolution.resolvedEntityDisplayName
+    });
     return {
       posting_date: row.postingDate,
       document_no: row.documentNo ?? "",
@@ -792,7 +844,12 @@ function buildEntityV2ReportRows(
       v2_reason: resolution.reason,
       v2_target_bucket_candidate: resolution.targetBucketCandidate,
       v2_target_routing_evidence: resolution.targetRoutingEvidence,
-      comparison_status: entityV2ComparisonStatus(row.currentEntityCode, resolution.resolvedEntityCode)
+      comparison_status: comparisonStatus,
+      v2_review_classification: review.classification,
+      v2_review_reason: review.reason,
+      v2_recommended_action: review.recommendedAction,
+      v2_suggested_canonical_entity_code: review.suggestedCanonicalEntityCode ?? "",
+      v2_suggested_canonical_entity_display_name: review.suggestedCanonicalEntityDisplayName ?? ""
     };
   });
 }
@@ -813,6 +870,9 @@ function summarizeEntityV2ReportRows(
     topSourceFieldsUsed: topCounts(rows.map((row) => row.v2_source_field_used)),
     topTargetBucketCandidates: topCounts(rows.map((row) => row.v2_target_bucket_candidate)),
     topMismatchSourceValues: topMismatchSourceValues(rows),
+    reviewSummary: entityV2ReviewSummary(rows),
+    canonicalCatalogGaps: canonicalCatalogGaps(rows),
+    legacyTargetVariantCollapseNeeded: legacyTargetVariantCollapseNeeded(rows),
     examplesByFamily: examplesByFamily(rows),
     outputFiles,
     safety: {
@@ -844,7 +904,7 @@ function parseEntityV2Aliases(value: unknown): readonly BusinessCentralCanonical
 function entityV2ComparisonStatus(
   currentEntityCode: string | null,
   v2EntityCode: string | null
-): EntityV2ComparisonStatus {
+): BusinessCentralEntityV2ComparisonStatus {
   if (currentEntityCode && v2EntityCode) {
     return currentEntityCode === v2EntityCode ? "SAME_ENTITY" : "DIFFERENT_ENTITY";
   }
@@ -917,6 +977,101 @@ function topMismatchSourceValues(rows: readonly EntityV2ReportRow[], limit = 10)
     }))
     .sort((left, right) => right.rows - left.rows || left.sourceField.localeCompare(right.sourceField) || left.sourceValue.localeCompare(right.sourceValue))
     .slice(0, limit);
+}
+
+function entityV2ReviewSummary(rows: readonly EntityV2ReportRow[]): EntityV2ReviewSummary {
+  return {
+    okSameEntityRows: countReview(rows, "OK_SAME_ENTITY"),
+    okBothUnmappedRows: countReview(rows, "OK_BOTH_UNMAPPED"),
+    canonicalCatalogGapRows: countReview(rows, "CANONICAL_CATALOG_GAP"),
+    legacyTargetVariantCollapseNeededRows: countReview(rows, "LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED"),
+    possibleResolverMismatchRows: countReview(rows, "POSSIBLE_RESOLVER_MISMATCH"),
+    possibleDataSourceGapRows: countReview(rows, "POSSIBLE_DATA_SOURCE_GAP"),
+    unknownReviewNeededRows: countReview(rows, "UNKNOWN_REVIEW_NEEDED")
+  };
+}
+
+function countReview(
+  rows: readonly EntityV2ReportRow[],
+  classification: BusinessCentralEntityV2ReviewClassification
+): number {
+  return rows.filter((row) => row.v2_review_classification === classification).length;
+}
+
+function canonicalCatalogGaps(rows: readonly EntityV2ReportRow[]): readonly EntityV2CanonicalCatalogGap[] {
+  return groupedReviewRows(rows, "CANONICAL_CATALOG_GAP").map((group) => ({
+    sourceField: group.sourceField,
+    sourceValue: group.sourceValue,
+    rows: group.rows,
+    currentEntityCodes: group.currentEntityCodes,
+    suggestedCanonicalEntityCode: group.suggestedCanonicalEntityCode,
+    suggestedCanonicalEntityDisplayName: group.suggestedCanonicalEntityDisplayName,
+    reason: group.reason,
+    recommendedAction: group.recommendedAction
+  }));
+}
+
+function legacyTargetVariantCollapseNeeded(
+  rows: readonly EntityV2ReportRow[]
+): readonly EntityV2LegacyTargetVariantCollapseGroup[] {
+  return groupedReviewRows(rows, "LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED").map((group) => ({
+    sourceField: group.sourceField,
+    sourceValue: group.sourceValue,
+    rows: group.rows,
+    currentEntityCodes: group.currentEntityCodes,
+    suggestedCanonicalEntityCode: group.suggestedCanonicalEntityCode,
+    suggestedCanonicalEntityDisplayName: group.suggestedCanonicalEntityDisplayName,
+    recommendedFuturePhase: "P0.8/P0.9",
+    reason: group.reason,
+    recommendedAction: group.recommendedAction
+  }));
+}
+
+function groupedReviewRows(
+  rows: readonly EntityV2ReportRow[],
+  classification: BusinessCentralEntityV2ReviewClassification
+) {
+  const grouped = new Map<string, {
+    sourceField: string;
+    sourceValue: string;
+    rows: number;
+    currentEntityCodes: Set<string>;
+    suggestedCanonicalEntityCode: string;
+    suggestedCanonicalEntityDisplayName: string;
+    reason: string;
+    recommendedAction: string;
+  }>();
+  for (const row of rows) {
+    if (row.v2_review_classification !== classification) continue;
+    const sourceField = row.v2_source_field_used;
+    const sourceValue = row.v2_source_value_used || "(blank)";
+    const key = `${sourceField}:${sourceValue}`;
+    const current = grouped.get(key) ?? {
+      sourceField,
+      sourceValue,
+      rows: 0,
+      currentEntityCodes: new Set<string>(),
+      suggestedCanonicalEntityCode: row.v2_suggested_canonical_entity_code,
+      suggestedCanonicalEntityDisplayName: row.v2_suggested_canonical_entity_display_name,
+      reason: row.v2_review_reason,
+      recommendedAction: row.v2_recommended_action
+    };
+    current.rows += 1;
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    grouped.set(key, current);
+  }
+  return [...grouped.values()]
+    .map((group) => ({
+      sourceField: group.sourceField,
+      sourceValue: group.sourceValue,
+      rows: group.rows,
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      suggestedCanonicalEntityCode: group.suggestedCanonicalEntityCode,
+      suggestedCanonicalEntityDisplayName: group.suggestedCanonicalEntityDisplayName,
+      reason: group.reason,
+      recommendedAction: group.recommendedAction
+    }))
+    .sort((left, right) => right.rows - left.rows || left.sourceField.localeCompare(right.sourceField) || left.sourceValue.localeCompare(right.sourceValue));
 }
 
 function examplesByFamily(rows: readonly EntityV2ReportRow[]): Record<EntityV2ExampleFamily, readonly EntityV2Example[]> {
@@ -1817,6 +1972,16 @@ async function runEntityV2DryRun(pool: DatabasePool) {
   console.log(`- catalog_entities=${catalog.entries.length}`);
 
   console.log("");
+  console.log("Review summary");
+  console.log(`- ok_same_entity_rows=${summary.reviewSummary.okSameEntityRows}`);
+  console.log(`- ok_both_unmapped_rows=${summary.reviewSummary.okBothUnmappedRows}`);
+  console.log(`- canonical_catalog_gap_rows=${summary.reviewSummary.canonicalCatalogGapRows}`);
+  console.log(`- legacy_target_variant_collapse_needed_rows=${summary.reviewSummary.legacyTargetVariantCollapseNeededRows}`);
+  console.log(`- possible_resolver_mismatch_rows=${summary.reviewSummary.possibleResolverMismatchRows}`);
+  console.log(`- possible_data_source_gap_rows=${summary.reviewSummary.possibleDataSourceGapRows}`);
+  console.log(`- unknown_review_needed_rows=${summary.reviewSummary.unknownReviewNeededRows}`);
+
+  console.log("");
   console.log("Top source fields used");
   for (const item of summary.topSourceFieldsUsed.slice(0, 5)) {
     console.log(`- ${item.value}: rows=${item.rows}`);
@@ -1836,6 +2001,28 @@ async function runEntityV2DryRun(pool: DatabasePool) {
   for (const item of summary.topMismatchSourceValues.slice(0, 8)) {
     console.log(
       `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; statuses=${item.comparisonStatuses.join("|")}; current=${item.currentEntityCodes.join("|") || "none"}; v2=${item.v2EntityCodes.join("|") || "none"}`
+    );
+  }
+
+  console.log("");
+  console.log("Top canonical catalog gaps");
+  if (summary.canonicalCatalogGaps.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.canonicalCatalogGaps.slice(0, 8)) {
+    console.log(
+      `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; current=${item.currentEntityCodes.join("|") || "none"}; suggested=${item.suggestedCanonicalEntityCode}`
+    );
+  }
+
+  console.log("");
+  console.log("Top legacy target variant collapse groups");
+  if (summary.legacyTargetVariantCollapseNeeded.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.legacyTargetVariantCollapseNeeded.slice(0, 8)) {
+    console.log(
+      `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; current=${item.currentEntityCodes.join("|") || "none"}; suggested=${item.suggestedCanonicalEntityCode}; phase=${item.recommendedFuturePhase}`
     );
   }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildBusinessCentralCanonicalEntityCatalog,
+  classifyBusinessCentralEntityV2Review,
   inferBusinessCentralTargetBucketCandidate,
   resolveBusinessCentralEntityV2,
   type BusinessCentralCanonicalEntityInput
@@ -153,6 +154,62 @@ test("PREFORM 19 GR item produces PREFORM_WEIGHT_19_GR", () => {
   });
 
   assert.equal(result.targetBucketCandidate, "PREFORM_WEIGHT_19_GR");
+});
+
+test("CURRENT_MAPPED_V2_UNMAPPED legacy Thermoforming entity is classified as canonical catalog gap", () => {
+  const review = classifyBusinessCentralEntityV2Review({
+    comparisonStatus: "CURRENT_MAPPED_V2_UNMAPPED",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "THERMO HENGFENG-2-OZ",
+    currentEntityCode: "THERMO HENGFENG-2-OZ - Thermoforming",
+    v2EntityCode: ""
+  });
+
+  assert.equal(review.classification, "CANONICAL_CATALOG_GAP");
+  assert.equal(review.suggestedCanonicalEntityCode, "THERMO HENGFENG-2-OZ");
+  assert.match(review.recommendedAction, /do not auto-migrate in P0\.7/);
+});
+
+test("OMSO printing target variants are classified as legacy target variant collapse needed", () => {
+  for (const currentEntityCode of [
+    "OMSO 1-OZ - Printing 22 OZ",
+    "OMSO 1-OZ - Printing OZ < 20"
+  ]) {
+    const review = classifyBusinessCentralEntityV2Review({
+      comparisonStatus: "CURRENT_MAPPED_V2_UNMAPPED",
+      sourceFieldUsed: "gProdOrRotLineDescription",
+      sourceValueUsed: "OMSO 1-OZ",
+      currentEntityCode,
+      v2EntityCode: ""
+    });
+
+    assert.equal(review.classification, "LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED");
+    assert.equal(review.suggestedCanonicalEntityCode, "OMSO 1-OZ");
+  }
+});
+
+test("BOTH_UNMAPPED with blank source stays OK_BOTH_UNMAPPED", () => {
+  const review = classifyBusinessCentralEntityV2Review({
+    comparisonStatus: "BOTH_UNMAPPED",
+    sourceFieldUsed: "UNMAPPED",
+    sourceValueUsed: "",
+    currentEntityCode: "",
+    v2EntityCode: ""
+  });
+
+  assert.equal(review.classification, "OK_BOTH_UNMAPPED");
+});
+
+test("DIFFERENT_ENTITY unrelated current and v2 entities are classified as possible resolver mismatch", () => {
+  const review = classifyBusinessCentralEntityV2Review({
+    comparisonStatus: "DIFFERENT_ENTITY",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "VFINE 600 ML Bottle",
+    currentEntityCode: "OMSO 1-OZ",
+    v2EntityCode: "VFINE-600"
+  });
+
+  assert.equal(review.classification, "POSSIBLE_RESOLVER_MISMATCH");
 });
 
 function entity(

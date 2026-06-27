@@ -6,6 +6,20 @@ export type BusinessCentralEntityV2SourceField =
   | "gProdOrRotLineNo"
   | "machineCenterNo"
   | "UNMAPPED";
+export type BusinessCentralEntityV2ComparisonStatus =
+  | "SAME_ENTITY"
+  | "DIFFERENT_ENTITY"
+  | "CURRENT_UNMAPPED_V2_RESOLVED"
+  | "CURRENT_MAPPED_V2_UNMAPPED"
+  | "BOTH_UNMAPPED";
+export type BusinessCentralEntityV2ReviewClassification =
+  | "OK_SAME_ENTITY"
+  | "OK_BOTH_UNMAPPED"
+  | "CANONICAL_CATALOG_GAP"
+  | "LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED"
+  | "POSSIBLE_RESOLVER_MISMATCH"
+  | "POSSIBLE_DATA_SOURCE_GAP"
+  | "UNKNOWN_REVIEW_NEEDED";
 
 export type BusinessCentralTargetBucketCandidate =
   | "OZ_22"
@@ -78,6 +92,24 @@ export interface BusinessCentralEntityV2Resolution extends BusinessCentralTarget
   readonly sourceValueUsed: string | null;
   readonly confidence: BusinessCentralEntityV2Confidence;
   readonly reason: string;
+}
+
+export interface BusinessCentralEntityV2ReviewInput {
+  readonly comparisonStatus: BusinessCentralEntityV2ComparisonStatus;
+  readonly sourceFieldUsed: BusinessCentralEntityV2SourceField;
+  readonly sourceValueUsed?: string | null;
+  readonly currentEntityCode?: string | null;
+  readonly currentEntityDisplayName?: string | null;
+  readonly v2EntityCode?: string | null;
+  readonly v2EntityDisplayName?: string | null;
+}
+
+export interface BusinessCentralEntityV2Review {
+  readonly classification: BusinessCentralEntityV2ReviewClassification;
+  readonly reason: string;
+  readonly recommendedAction: string;
+  readonly suggestedCanonicalEntityCode: string | null;
+  readonly suggestedCanonicalEntityDisplayName: string | null;
 }
 
 interface CatalogLookupRecord {
@@ -237,6 +269,99 @@ export function inferBusinessCentralTargetBucketCandidate(
   return bucketResult("UNKNOWN", "no safe target bucket signal");
 }
 
+export function classifyBusinessCentralEntityV2Review(
+  input: BusinessCentralEntityV2ReviewInput
+): BusinessCentralEntityV2Review {
+  const sourceValue = cleanOrNull(input.sourceValueUsed);
+  const currentEntity = cleanOrNull(input.currentEntityCode) ?? cleanOrNull(input.currentEntityDisplayName);
+  const v2Entity = cleanOrNull(input.v2EntityCode) ?? cleanOrNull(input.v2EntityDisplayName);
+  const suggested = suggestedCanonicalEntity(sourceValue);
+
+  if (input.comparisonStatus === "SAME_ENTITY") {
+    return reviewResult({
+      classification: "OK_SAME_ENTITY",
+      reason: "Current entity and resolver v2 entity are the same.",
+      recommendedAction: "No P0.7 action required.",
+      suggested
+    });
+  }
+
+  if (input.comparisonStatus === "BOTH_UNMAPPED") {
+    return reviewResult({
+      classification: "OK_BOTH_UNMAPPED",
+      reason: sourceValue
+        ? "Current mapping and resolver v2 are both unmapped for this source value."
+        : "Current mapping and resolver v2 are both unmapped with no usable entity source value.",
+      recommendedAction: "Keep unmapped for review; do not guess or create broad aliases in P0.7.",
+      suggested
+    });
+  }
+
+  if (
+    input.comparisonStatus === "CURRENT_MAPPED_V2_UNMAPPED"
+    && (input.sourceFieldUsed === "UNMAPPED" || !sourceValue)
+  ) {
+    return reviewResult({
+      classification: "POSSIBLE_DATA_SOURCE_GAP",
+      reason: "Current row is mapped, but resolver v2 has no usable source field/value to resolve.",
+      recommendedAction: "Review Business Central source-field population before any canonical migration planning.",
+      suggested
+    });
+  }
+
+  if (
+    (input.comparisonStatus === "CURRENT_MAPPED_V2_UNMAPPED" || input.comparisonStatus === "DIFFERENT_ENTITY")
+    && sourceValue
+    && currentEntity
+    && hasPrintingTargetVariantSuffix(currentEntity)
+    && sourceLooksLikeCanonicalParent(sourceValue, currentEntity)
+  ) {
+    return reviewResult({
+      classification: "LEGACY_TARGET_VARIANT_COLLAPSE_NEEDED",
+      reason: "Current target variants should become target profiles, not separate entities.",
+      recommendedAction: "Plan canonical entity plus target profiles in P0.8/P0.9; do not auto-migrate in P0.7.",
+      suggested
+    });
+  }
+
+  if (
+    input.comparisonStatus === "CURRENT_MAPPED_V2_UNMAPPED"
+    && (input.sourceFieldUsed === "gProdOrRotLineDescription" || input.sourceFieldUsed === "gProdOrRotLineNo")
+    && sourceValue
+    && currentEntity
+    && !v2Entity
+    && sourceLooksLikeCanonicalParent(sourceValue, currentEntity)
+  ) {
+    return reviewResult({
+      classification: "CANONICAL_CATALOG_GAP",
+      reason: "Current rows map to legacy/detailed entity but V2 cannot find canonical entity in catalog.",
+      recommendedAction: "Create or expose canonical entity in P0.8/P0.9 planning; do not auto-migrate in P0.7.",
+      suggested
+    });
+  }
+
+  if (
+    input.comparisonStatus === "DIFFERENT_ENTITY"
+    && currentEntity
+    && v2Entity
+    && !sourceLooksLikeCanonicalParent(v2Entity, currentEntity)
+  ) {
+    return reviewResult({
+      classification: "POSSIBLE_RESOLVER_MISMATCH",
+      reason: "Current and resolver v2 entities differ and do not look like a simple canonical-vs-legacy naming difference.",
+      recommendedAction: "Review row samples and resolver evidence before any migration planning.",
+      suggested
+    });
+  }
+
+  return reviewResult({
+    classification: "UNKNOWN_REVIEW_NEEDED",
+    reason: "Dry-run comparison needs manual review before it can be categorized safely.",
+    recommendedAction: "Review the row context; keep P0.7 read-only and do not force aliases.",
+    suggested
+  });
+}
+
 function resolveFromSource(
   catalog: BusinessCentralCanonicalEntityCatalog,
   bucket: BusinessCentralTargetBucketInference,
@@ -381,6 +506,48 @@ function parsePreformWeightGr(text: string): string | null {
 
 function normalizeNumericToken(value: string): string {
   return value.replace(",", ".").replace(/\.0+$/, "").replace(".", "_");
+}
+
+function reviewResult(input: {
+  readonly classification: BusinessCentralEntityV2ReviewClassification;
+  readonly reason: string;
+  readonly recommendedAction: string;
+  readonly suggested: { readonly code: string | null; readonly displayName: string | null };
+}): BusinessCentralEntityV2Review {
+  return {
+    classification: input.classification,
+    reason: input.reason,
+    recommendedAction: input.recommendedAction,
+    suggestedCanonicalEntityCode: input.suggested.code,
+    suggestedCanonicalEntityDisplayName: input.suggested.displayName
+  };
+}
+
+function suggestedCanonicalEntity(sourceValue: string | null): {
+  readonly code: string | null;
+  readonly displayName: string | null;
+} {
+  if (!sourceValue) return { code: null, displayName: null };
+  const displayName = normalizeAliasDisplay(sourceValue);
+  return { code: displayName, displayName };
+}
+
+function hasPrintingTargetVariantSuffix(value: string | null | undefined): boolean {
+  const text = normalizeAliasDisplay(value);
+  return /\s-\sPRINTING\s(?:22\sOZ|OZ\s<\s20|NON-?OZ)$/.test(text);
+}
+
+function sourceLooksLikeCanonicalParent(sourceValue: string, currentEntity: string): boolean {
+  const sourceKey = normalizeKey(sourceValue);
+  const currentParentKey = normalizeKey(stripLegacyDetailedSuffix(currentEntity));
+  return Boolean(sourceKey && currentParentKey && sourceKey === currentParentKey);
+}
+
+function stripLegacyDetailedSuffix(value: string): string {
+  return normalizeAliasDisplay(value).replace(
+    /\s-\s(?:PRINTING\s(?:22\sOZ|OZ\s<\s20|NON-?OZ)|THERMOFORMING)$/,
+    ""
+  );
 }
 
 function hasRegSignal(text: string): boolean {
