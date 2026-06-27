@@ -231,6 +231,15 @@ Review classifications:
 
 `CURRENT_MAPPED_V2_UNMAPPED` is not automatically an error. Canonical catalog gaps are expected P0.7 findings when master data still exposes legacy/detailed entities instead of canonical machine entities. Do not fix these by creating broad aliases. Resolve them in P0.8/P0.9 through canonical entity, target profile, and migration dry-run planning.
 
+P0.7b possible resolver mismatch review:
+
+- `POSSIBLE_RESOLVER_MISMATCH` is a review bucket, not automatic proof of a resolver bug.
+- The CSV includes `v2_mismatch_review_type`, `v2_mismatch_review_reason`, and `v2_mismatch_recommended_action`.
+- The JSON includes `possibleResolverMismatchReview.groups` and `topPossibleResolverMismatches`.
+- Use these groups to decide whether P0.8 needs canonical entity normalization, alias cleanup, or Business Central source data investigation.
+- Do not fix mismatch rows with broad/global aliases.
+- Do not switch dashboard logic based on this report.
+
 Safety notes:
 
 - The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.

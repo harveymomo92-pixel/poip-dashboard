@@ -38,6 +38,7 @@ import {
 } from "../packages/domain/src/master-data/mapping-candidates.js";
 import {
   buildBusinessCentralCanonicalEntityCatalog,
+  classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
   resolveBusinessCentralEntityV2,
   type BusinessCentralCanonicalEntityAliasInput,
@@ -45,6 +46,8 @@ import {
   type BusinessCentralCanonicalEntityInput,
   type BusinessCentralEntityV2Confidence,
   type BusinessCentralEntityV2ComparisonStatus,
+  type BusinessCentralEntityV2MismatchReviewType,
+  type BusinessCentralEntityV2MismatchRiskLevel,
   type BusinessCentralEntityV2ReviewClassification,
   type BusinessCentralEntityV2SourceField,
   type BusinessCentralTargetBucketCandidate
@@ -157,6 +160,9 @@ interface EntityV2ReportRow {
   readonly v2_recommended_action: string;
   readonly v2_suggested_canonical_entity_code: string;
   readonly v2_suggested_canonical_entity_display_name: string;
+  readonly v2_mismatch_review_type: BusinessCentralEntityV2MismatchReviewType | "";
+  readonly v2_mismatch_review_reason: string;
+  readonly v2_mismatch_recommended_action: string;
 }
 
 interface EntityV2Summary {
@@ -174,6 +180,8 @@ interface EntityV2Summary {
   readonly reviewSummary: EntityV2ReviewSummary;
   readonly canonicalCatalogGaps: readonly EntityV2CanonicalCatalogGap[];
   readonly legacyTargetVariantCollapseNeeded: readonly EntityV2LegacyTargetVariantCollapseGroup[];
+  readonly topPossibleResolverMismatches: readonly EntityV2TopPossibleResolverMismatch[];
+  readonly possibleResolverMismatchReview: EntityV2PossibleResolverMismatchReview;
   readonly examplesByFamily: Record<EntityV2ExampleFamily, readonly EntityV2Example[]>;
   readonly outputFiles: {
     readonly csv: string;
@@ -234,6 +242,39 @@ interface EntityV2LegacyTargetVariantCollapseGroup {
   readonly recommendedAction: string;
 }
 
+interface EntityV2TopPossibleResolverMismatch {
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly mismatchReviewType: BusinessCentralEntityV2MismatchReviewType;
+  readonly currentEntityCodes: readonly string[];
+  readonly v2EntityCodes: readonly string[];
+  readonly recommendedReviewAction: string;
+}
+
+interface EntityV2PossibleResolverMismatchReview {
+  readonly totalRows: number;
+  readonly truncated: boolean;
+  readonly groups: readonly EntityV2PossibleResolverMismatchGroup[];
+}
+
+interface EntityV2PossibleResolverMismatchGroup {
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly currentEntityCodes: readonly string[];
+  readonly v2EntityCodes: readonly string[];
+  readonly targetBucketCandidates: readonly string[];
+  readonly machineCenterNos: readonly string[];
+  readonly itemCategoryCodes: readonly string[];
+  readonly sampleDocuments: readonly string[];
+  readonly sampleItems: readonly string[];
+  readonly mismatchReviewType: BusinessCentralEntityV2MismatchReviewType;
+  readonly reviewReason: string;
+  readonly recommendedReviewAction: string;
+  readonly riskLevel: BusinessCentralEntityV2MismatchRiskLevel;
+}
+
 type EntityV2ExampleFamily = "OMSO" | "VFINE" | "ILLIG" | "REPACKING" | "NEWDO" | "CAI";
 
 interface EntityV2Example {
@@ -280,7 +321,10 @@ const entityV2CsvHeaders = [
   "v2_review_reason",
   "v2_recommended_action",
   "v2_suggested_canonical_entity_code",
-  "v2_suggested_canonical_entity_display_name"
+  "v2_suggested_canonical_entity_display_name",
+  "v2_mismatch_review_type",
+  "v2_mismatch_review_reason",
+  "v2_mismatch_recommended_action"
 ] as const satisfies readonly (keyof EntityV2ReportRow)[];
 
 function requireEnv(name: string): string {
@@ -795,7 +839,7 @@ function buildEntityV2ReportRows(
   sourceRows: readonly EntityV2SourceRow[],
   catalog: BusinessCentralCanonicalEntityCatalog
 ): readonly EntityV2ReportRow[] {
-  return sourceRows.map((row) => {
+  const rows = sourceRows.map((row) => {
     const resolution = resolveBusinessCentralEntityV2({
       entryType: row.entryType,
       postingDate: row.postingDate,
@@ -849,9 +893,13 @@ function buildEntityV2ReportRows(
       v2_review_reason: review.reason,
       v2_recommended_action: review.recommendedAction,
       v2_suggested_canonical_entity_code: review.suggestedCanonicalEntityCode ?? "",
-      v2_suggested_canonical_entity_display_name: review.suggestedCanonicalEntityDisplayName ?? ""
+      v2_suggested_canonical_entity_display_name: review.suggestedCanonicalEntityDisplayName ?? "",
+      v2_mismatch_review_type: "",
+      v2_mismatch_review_reason: "",
+      v2_mismatch_recommended_action: ""
     };
   });
+  return addEntityV2MismatchReviews(rows);
 }
 
 function summarizeEntityV2ReportRows(
@@ -873,6 +921,8 @@ function summarizeEntityV2ReportRows(
     reviewSummary: entityV2ReviewSummary(rows),
     canonicalCatalogGaps: canonicalCatalogGaps(rows),
     legacyTargetVariantCollapseNeeded: legacyTargetVariantCollapseNeeded(rows),
+    topPossibleResolverMismatches: topPossibleResolverMismatches(rows),
+    possibleResolverMismatchReview: possibleResolverMismatchReview(rows),
     examplesByFamily: examplesByFamily(rows),
     outputFiles,
     safety: {
@@ -882,6 +932,64 @@ function summarizeEntityV2ReportRows(
       conditionalRulesChanged: false
     }
   };
+}
+
+function addEntityV2MismatchReviews(rows: readonly EntityV2ReportRow[]): readonly EntityV2ReportRow[] {
+  const sourceContexts = entityV2SourceValueContexts(rows);
+  const machineCenterContexts = entityV2MachineCenterContexts(rows);
+  return rows.map((row) => {
+    if (row.v2_review_classification !== "POSSIBLE_RESOLVER_MISMATCH") return row;
+    const sourceContext = sourceContexts.get(entityV2SourceContextKey(row.v2_source_field_used, row.v2_source_value_used));
+    const mismatch = classifyBusinessCentralEntityV2MismatchReview({
+      comparisonStatus: row.comparison_status,
+      reviewClassification: row.v2_review_classification,
+      sourceFieldUsed: row.v2_source_field_used,
+      sourceValueUsed: row.v2_source_value_used,
+      currentEntityCode: row.current_entity_code,
+      currentEntityDisplayName: row.current_entity_display_name,
+      v2EntityCode: row.v2_entity_code,
+      v2EntityDisplayName: row.v2_entity_display_name,
+      currentEntityCodesForSourceValue: sourceContext ? sortedStrings(sourceContext.currentEntityCodes) : [],
+      v2EntityCodesForSourceValue: sourceContext ? sortedStrings(sourceContext.v2EntityCodes) : [],
+      machineCenterNo: row.machine_center_no,
+      machineCenterSourceValues: sortedStrings(machineCenterContexts.get(normalizeAliasKey(row.machine_center_no)) ?? new Set<string>())
+    });
+    return {
+      ...row,
+      v2_mismatch_review_type: mismatch.type,
+      v2_mismatch_review_reason: mismatch.reason,
+      v2_mismatch_recommended_action: mismatch.recommendedAction
+    };
+  });
+}
+
+function entityV2SourceValueContexts(rows: readonly EntityV2ReportRow[]) {
+  const contexts = new Map<string, { currentEntityCodes: Set<string>; v2EntityCodes: Set<string> }>();
+  for (const row of rows) {
+    if (!row.v2_source_value_used) continue;
+    const key = entityV2SourceContextKey(row.v2_source_field_used, row.v2_source_value_used);
+    const current = contexts.get(key) ?? { currentEntityCodes: new Set<string>(), v2EntityCodes: new Set<string>() };
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    if (row.v2_entity_code) current.v2EntityCodes.add(row.v2_entity_code);
+    contexts.set(key, current);
+  }
+  return contexts;
+}
+
+function entityV2MachineCenterContexts(rows: readonly EntityV2ReportRow[]) {
+  const contexts = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const machineCenterKey = normalizeAliasKey(row.machine_center_no);
+    if (!machineCenterKey || !row.g_prod_or_rot_line_description) continue;
+    const current = contexts.get(machineCenterKey) ?? new Set<string>();
+    current.add(row.g_prod_or_rot_line_description);
+    contexts.set(machineCenterKey, current);
+  }
+  return contexts;
+}
+
+function entityV2SourceContextKey(sourceField: string, sourceValue: string): string {
+  return `${sourceField}:${normalizeAliasKey(sourceValue)}`;
 }
 
 function parseEntityV2Aliases(value: unknown): readonly BusinessCentralCanonicalEntityAliasInput[] {
@@ -1072,6 +1180,117 @@ function groupedReviewRows(
       recommendedAction: group.recommendedAction
     }))
     .sort((left, right) => right.rows - left.rows || left.sourceField.localeCompare(right.sourceField) || left.sourceValue.localeCompare(right.sourceValue));
+}
+
+function topPossibleResolverMismatches(rows: readonly EntityV2ReportRow[]): readonly EntityV2TopPossibleResolverMismatch[] {
+  return groupPossibleResolverMismatchRows(rows).slice(0, 10).map((group) => ({
+    sourceField: group.sourceField,
+    sourceValue: group.sourceValue,
+    rows: group.rows,
+    mismatchReviewType: group.mismatchReviewType,
+    currentEntityCodes: group.currentEntityCodes,
+    v2EntityCodes: group.v2EntityCodes,
+    recommendedReviewAction: group.recommendedReviewAction
+  }));
+}
+
+function possibleResolverMismatchReview(rows: readonly EntityV2ReportRow[]): EntityV2PossibleResolverMismatchReview {
+  const groups = groupPossibleResolverMismatchRows(rows);
+  return {
+    totalRows: rows.filter((row) => row.v2_review_classification === "POSSIBLE_RESOLVER_MISMATCH").length,
+    truncated: groups.length > 50,
+    groups: groups.slice(0, 50)
+  };
+}
+
+function groupPossibleResolverMismatchRows(rows: readonly EntityV2ReportRow[]): readonly EntityV2PossibleResolverMismatchGroup[] {
+  const grouped = new Map<string, {
+    sourceField: string;
+    sourceValue: string;
+    rows: number;
+    currentEntityCodes: Set<string>;
+    v2EntityCodes: Set<string>;
+    targetBucketCandidates: Set<string>;
+    machineCenterNos: Set<string>;
+    itemCategoryCodes: Set<string>;
+    sampleDocuments: Set<string>;
+    sampleItems: Set<string>;
+    mismatchReviewTypes: Map<BusinessCentralEntityV2MismatchReviewType, number>;
+    reviewReasons: Map<BusinessCentralEntityV2MismatchReviewType, string>;
+    recommendedActions: Map<BusinessCentralEntityV2MismatchReviewType, string>;
+  }>();
+
+  for (const row of rows) {
+    if (row.v2_review_classification !== "POSSIBLE_RESOLVER_MISMATCH") continue;
+    const sourceField = row.v2_source_field_used;
+    const sourceValue = row.v2_source_value_used || "(blank)";
+    const key = `${sourceField}:${normalizeAliasKey(sourceValue)}`;
+    const current = grouped.get(key) ?? {
+      sourceField,
+      sourceValue,
+      rows: 0,
+      currentEntityCodes: new Set<string>(),
+      v2EntityCodes: new Set<string>(),
+      targetBucketCandidates: new Set<string>(),
+      machineCenterNos: new Set<string>(),
+      itemCategoryCodes: new Set<string>(),
+      sampleDocuments: new Set<string>(),
+      sampleItems: new Set<string>(),
+      mismatchReviewTypes: new Map<BusinessCentralEntityV2MismatchReviewType, number>(),
+      reviewReasons: new Map<BusinessCentralEntityV2MismatchReviewType, string>(),
+      recommendedActions: new Map<BusinessCentralEntityV2MismatchReviewType, string>()
+    };
+    current.rows += 1;
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    if (row.v2_entity_code) current.v2EntityCodes.add(row.v2_entity_code);
+    if (row.v2_target_bucket_candidate) current.targetBucketCandidates.add(row.v2_target_bucket_candidate);
+    if (row.machine_center_no) current.machineCenterNos.add(row.machine_center_no);
+    if (row.item_category_code) current.itemCategoryCodes.add(row.item_category_code);
+    if (row.document_no && current.sampleDocuments.size < 5) current.sampleDocuments.add(row.document_no);
+    if (row.item_no && current.sampleItems.size < 5) current.sampleItems.add(row.item_no);
+    const reviewType = row.v2_mismatch_review_type || "UNKNOWN_MISMATCH_REVIEW";
+    current.mismatchReviewTypes.set(reviewType, (current.mismatchReviewTypes.get(reviewType) ?? 0) + 1);
+    if (!current.reviewReasons.has(reviewType)) current.reviewReasons.set(reviewType, row.v2_mismatch_review_reason);
+    if (!current.recommendedActions.has(reviewType)) current.recommendedActions.set(reviewType, row.v2_mismatch_recommended_action);
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()]
+    .map((group) => {
+      const mismatchReviewType = dominantMismatchReviewType(group.mismatchReviewTypes);
+      return {
+        sourceField: group.sourceField,
+        sourceValue: group.sourceValue,
+        rows: group.rows,
+        currentEntityCodes: sortedStrings(group.currentEntityCodes),
+        v2EntityCodes: sortedStrings(group.v2EntityCodes),
+        targetBucketCandidates: sortedStrings(group.targetBucketCandidates),
+        machineCenterNos: sortedStrings(group.machineCenterNos),
+        itemCategoryCodes: sortedStrings(group.itemCategoryCodes),
+        sampleDocuments: [...group.sampleDocuments],
+        sampleItems: [...group.sampleItems],
+        mismatchReviewType,
+        reviewReason: group.reviewReasons.get(mismatchReviewType) ?? "",
+        recommendedReviewAction: group.recommendedActions.get(mismatchReviewType) ?? "",
+        riskLevel: mismatchReviewRiskLevel(mismatchReviewType)
+      };
+    })
+    .sort((left, right) => right.rows - left.rows || left.sourceField.localeCompare(right.sourceField) || left.sourceValue.localeCompare(right.sourceValue));
+}
+
+function dominantMismatchReviewType(
+  values: ReadonlyMap<BusinessCentralEntityV2MismatchReviewType, number>
+): BusinessCentralEntityV2MismatchReviewType {
+  return [...values.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? "UNKNOWN_MISMATCH_REVIEW";
+}
+
+function mismatchReviewRiskLevel(
+  type: BusinessCentralEntityV2MismatchReviewType
+): BusinessCentralEntityV2MismatchRiskLevel {
+  if (type === "POSSIBLE_TRUE_RESOLVER_BUG") return "HIGH";
+  if (type === "LEGACY_NAME_VARIANT" || type === "TARGET_VARIANT_NAME_COLLISION") return "LOW";
+  return "MEDIUM";
 }
 
 function examplesByFamily(rows: readonly EntityV2ReportRow[]): Record<EntityV2ExampleFamily, readonly EntityV2Example[]> {
@@ -2001,6 +2220,17 @@ async function runEntityV2DryRun(pool: DatabasePool) {
   for (const item of summary.topMismatchSourceValues.slice(0, 8)) {
     console.log(
       `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; statuses=${item.comparisonStatuses.join("|")}; current=${item.currentEntityCodes.join("|") || "none"}; v2=${item.v2EntityCodes.join("|") || "none"}`
+    );
+  }
+
+  console.log("");
+  console.log("Top possible resolver mismatch review groups");
+  if (summary.topPossibleResolverMismatches.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.topPossibleResolverMismatches.slice(0, 8)) {
+    console.log(
+      `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; type=${item.mismatchReviewType}; current=${item.currentEntityCodes.join("|") || "none"}; v2=${item.v2EntityCodes.join("|") || "none"}`
     );
   }
 

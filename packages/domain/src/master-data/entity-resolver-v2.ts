@@ -20,6 +20,15 @@ export type BusinessCentralEntityV2ReviewClassification =
   | "POSSIBLE_RESOLVER_MISMATCH"
   | "POSSIBLE_DATA_SOURCE_GAP"
   | "UNKNOWN_REVIEW_NEEDED";
+export type BusinessCentralEntityV2MismatchReviewType =
+  | "LEGACY_NAME_VARIANT"
+  | "SOURCE_VALUE_ALIAS_CONFLICT"
+  | "MACHINE_CENTER_CONFLICT"
+  | "POSSIBLE_TRUE_RESOLVER_BUG"
+  | "POSSIBLE_CATALOG_AMBIGUITY"
+  | "TARGET_VARIANT_NAME_COLLISION"
+  | "UNKNOWN_MISMATCH_REVIEW";
+export type BusinessCentralEntityV2MismatchRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
 export type BusinessCentralTargetBucketCandidate =
   | "OZ_22"
@@ -110,6 +119,29 @@ export interface BusinessCentralEntityV2Review {
   readonly recommendedAction: string;
   readonly suggestedCanonicalEntityCode: string | null;
   readonly suggestedCanonicalEntityDisplayName: string | null;
+}
+
+export interface BusinessCentralEntityV2MismatchReviewInput {
+  readonly comparisonStatus: BusinessCentralEntityV2ComparisonStatus;
+  readonly reviewClassification: BusinessCentralEntityV2ReviewClassification;
+  readonly sourceFieldUsed: BusinessCentralEntityV2SourceField;
+  readonly sourceValueUsed?: string | null;
+  readonly currentEntityCode?: string | null;
+  readonly currentEntityDisplayName?: string | null;
+  readonly v2EntityCode?: string | null;
+  readonly v2EntityDisplayName?: string | null;
+  readonly currentEntityCodesForSourceValue?: readonly string[] | null;
+  readonly v2EntityCodesForSourceValue?: readonly string[] | null;
+  readonly machineCenterNo?: string | null;
+  readonly machineCenterSourceValues?: readonly string[] | null;
+  readonly catalogCandidateCount?: number | null;
+}
+
+export interface BusinessCentralEntityV2MismatchReview {
+  readonly type: BusinessCentralEntityV2MismatchReviewType;
+  readonly reason: string;
+  readonly recommendedAction: string;
+  readonly riskLevel: BusinessCentralEntityV2MismatchRiskLevel;
 }
 
 interface CatalogLookupRecord {
@@ -362,6 +394,103 @@ export function classifyBusinessCentralEntityV2Review(
   });
 }
 
+export function classifyBusinessCentralEntityV2MismatchReview(
+  input: BusinessCentralEntityV2MismatchReviewInput
+): BusinessCentralEntityV2MismatchReview {
+  const sourceValue = cleanOrNull(input.sourceValueUsed);
+  const currentEntity = cleanOrNull(input.currentEntityCode) ?? cleanOrNull(input.currentEntityDisplayName);
+  const v2Entity = cleanOrNull(input.v2EntityCode) ?? cleanOrNull(input.v2EntityDisplayName);
+  if (
+    input.comparisonStatus !== "DIFFERENT_ENTITY"
+    || input.reviewClassification !== "POSSIBLE_RESOLVER_MISMATCH"
+    || !currentEntity
+    || !v2Entity
+  ) {
+    return mismatchReviewResult({
+      type: "UNKNOWN_MISMATCH_REVIEW",
+      reason: "Row is not a fully resolved resolver-mismatch case.",
+      recommendedAction: "Review with the primary P0.7 comparison status before deciding follow-up work.",
+      riskLevel: "MEDIUM"
+    });
+  }
+
+  if (
+    sourceValue
+    && (hasLegacyDetailedSuffix(currentEntity) || hasLegacyDetailedSuffix(v2Entity))
+    && sourceLooksLikeCanonicalParent(sourceValue, currentEntity)
+    && sourceLooksLikeCanonicalParent(sourceValue, v2Entity)
+  ) {
+    return mismatchReviewResult({
+      type: "TARGET_VARIANT_NAME_COLLISION",
+      reason: "Current and v2 entities share the same canonical source value but differ by target/profile suffix.",
+      recommendedAction: "Treat as P0.8/P0.9 target-profile collapse review; do not force-match in P0.7.",
+      riskLevel: "LOW"
+    });
+  }
+
+  if (
+    sourceValue
+    && sameLegacyFamily(sourceValue, currentEntity)
+    && sameLegacyFamily(sourceValue, v2Entity)
+  ) {
+    return mismatchReviewResult({
+      type: "LEGACY_NAME_VARIANT",
+      reason: "Current and v2 entity names look like the same machine with formatting or token-order differences.",
+      recommendedAction: "Review canonical naming normalization before P0.8; avoid broad aliases.",
+      riskLevel: "LOW"
+    });
+  }
+
+  const currentEntityCount = uniqueNormalizedCount(input.currentEntityCodesForSourceValue ?? []);
+  const v2EntityCount = uniqueNormalizedCount(input.v2EntityCodesForSourceValue ?? []);
+  if (sourceValue && (currentEntityCount > 1 || v2EntityCount > 1)) {
+    return mismatchReviewResult({
+      type: "SOURCE_VALUE_ALIAS_CONFLICT",
+      reason: "The same source value appears with multiple current or v2 entity outcomes.",
+      recommendedAction: "Review source-value aliases and catalog entries; do not add a broad/global alias.",
+      riskLevel: "MEDIUM"
+    });
+  }
+
+  const machineCenterSourceCount = uniqueNormalizedCount(input.machineCenterSourceValues ?? []);
+  if (
+    input.sourceFieldUsed === "machineCenterNo"
+    || (cleanOrNull(input.machineCenterNo) && machineCenterSourceCount > 1)
+  ) {
+    return mismatchReviewResult({
+      type: "MACHINE_CENTER_CONFLICT",
+      reason: "Machine center evidence is shared across multiple production-line descriptions.",
+      recommendedAction: "Review production-line description as primary evidence and keep Machine_Center_No as routing evidence.",
+      riskLevel: "MEDIUM"
+    });
+  }
+
+  if ((input.catalogCandidateCount ?? 0) > 1) {
+    return mismatchReviewResult({
+      type: "POSSIBLE_CATALOG_AMBIGUITY",
+      reason: "Catalog context has more than one plausible match for this source value.",
+      recommendedAction: "Review canonical entity catalog and aliases before migration planning.",
+      riskLevel: "MEDIUM"
+    });
+  }
+
+  if (sourceValue && currentEntity && v2Entity && unrelatedEntityNames(currentEntity, v2Entity)) {
+    return mismatchReviewResult({
+      type: "POSSIBLE_TRUE_RESOLVER_BUG",
+      reason: "Both current and v2 entities are present, but they appear unrelated.",
+      recommendedAction: "Inspect row samples and resolver evidence before P0.8; fix only with a test-proven resolver bug.",
+      riskLevel: "HIGH"
+    });
+  }
+
+  return mismatchReviewResult({
+    type: "UNKNOWN_MISMATCH_REVIEW",
+    reason: "Mismatch did not match a known review subtype.",
+    recommendedAction: "Review row samples manually; keep P0.7 read-only.",
+    riskLevel: "MEDIUM"
+  });
+}
+
 function resolveFromSource(
   catalog: BusinessCentralCanonicalEntityCatalog,
   bucket: BusinessCentralTargetBucketInference,
@@ -537,6 +666,11 @@ function hasPrintingTargetVariantSuffix(value: string | null | undefined): boole
   return /\s-\sPRINTING\s(?:22\sOZ|OZ\s<\s20|NON-?OZ)$/.test(text);
 }
 
+function hasLegacyDetailedSuffix(value: string | null | undefined): boolean {
+  const text = normalizeAliasDisplay(value);
+  return /\s-\s(?:PRINTING\s(?:22\sOZ|OZ\s<\s20|NON-?OZ)|THERMOFORMING)$/.test(text);
+}
+
 function sourceLooksLikeCanonicalParent(sourceValue: string, currentEntity: string): boolean {
   const sourceKey = normalizeKey(sourceValue);
   const currentParentKey = normalizeKey(stripLegacyDetailedSuffix(currentEntity));
@@ -548,6 +682,41 @@ function stripLegacyDetailedSuffix(value: string): string {
     /\s-\s(?:PRINTING\s(?:22\sOZ|OZ\s<\s20|NON-?OZ)|THERMOFORMING)$/,
     ""
   );
+}
+
+function sameLegacyFamily(left: string, right: string): boolean {
+  const leftTokens = significantTokens(left);
+  const rightTokens = significantTokens(right);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return false;
+  const overlap = [...leftTokens].filter((token) => rightTokens.has(token));
+  const minSize = Math.min(leftTokens.size, rightTokens.size);
+  return minSize > 0 && overlap.length / minSize >= 0.75;
+}
+
+function significantTokens(value: string): Set<string> {
+  const weak = new Set(["PRINTING", "PRINT", "OZ", "THERMOFORMING", "THERMO", "LINE", "MESIN", "MACHINE"]);
+  return new Set(
+    normalizeAliasDisplay(stripLegacyDetailedSuffix(value))
+      .split(/[^A-Z0-9]+/)
+      .filter((token) => token && !weak.has(token))
+  );
+}
+
+function unrelatedEntityNames(currentEntity: string, v2Entity: string): boolean {
+  return !sameLegacyFamily(currentEntity, v2Entity);
+}
+
+function uniqueNormalizedCount(values: readonly string[]): number {
+  return new Set(values.map((value) => normalizeKey(value)).filter(Boolean)).size;
+}
+
+function mismatchReviewResult(input: {
+  readonly type: BusinessCentralEntityV2MismatchReviewType;
+  readonly reason: string;
+  readonly recommendedAction: string;
+  readonly riskLevel: BusinessCentralEntityV2MismatchRiskLevel;
+}): BusinessCentralEntityV2MismatchReview {
+  return input;
 }
 
 function hasRegSignal(text: string): boolean {

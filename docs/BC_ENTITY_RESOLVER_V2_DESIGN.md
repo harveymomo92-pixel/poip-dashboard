@@ -207,6 +207,32 @@ canonicalCatalogGaps
 legacyTargetVariantCollapseNeeded
 ```
 
+### P0.7b Possible Resolver Mismatch Review
+
+`POSSIBLE_RESOLVER_MISMATCH` is a review bucket, not automatic proof of a resolver bug.
+The dry run adds a second-level mismatch review so P0.8 planning can distinguish naming,
+alias/catalog, source-field, and true resolver-risk cases without changing entity mapping.
+
+Dry-run CSV adds:
+
+```text
+v2_mismatch_review_type
+v2_mismatch_review_reason
+v2_mismatch_recommended_action
+```
+
+Dry-run JSON adds:
+
+```text
+possibleResolverMismatchReview
+topPossibleResolverMismatches
+```
+
+Use `possibleResolverMismatchReview.groups` to decide whether follow-up work belongs in
+canonical entity normalization, alias cleanup, source data investigation, or a test-proven
+resolver bug fix. Do not fix mismatch rows with broad/global aliases, and do not switch
+dashboard logic based on this report.
+
 ---
 
 ## 7. Required Test Cases

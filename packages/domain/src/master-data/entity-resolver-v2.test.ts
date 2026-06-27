@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildBusinessCentralCanonicalEntityCatalog,
+  classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
   inferBusinessCentralTargetBucketCandidate,
   resolveBusinessCentralEntityV2,
@@ -210,6 +211,79 @@ test("DIFFERENT_ENTITY unrelated current and v2 entities are classified as possi
   });
 
   assert.equal(review.classification, "POSSIBLE_RESOLVER_MISMATCH");
+});
+
+test("POLYPRINT legacy name variants are not treated as hard resolver failures", () => {
+  const review = classifyBusinessCentralEntityV2MismatchReview({
+    comparisonStatus: "DIFFERENT_ENTITY",
+    reviewClassification: "POSSIBLE_RESOLVER_MISMATCH",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "POLYPRINT PRINTING-OZ-2",
+    currentEntityCode: "POLYPRINT PRINTING-OZ-2 - Printing 22 OZ",
+    v2EntityCode: "POLYPRINT 2 PRINTING-OZ"
+  });
+
+  assert.equal(review.type, "LEGACY_NAME_VARIANT");
+  assert.equal(review.riskLevel, "LOW");
+});
+
+test("same source value with multiple current entity codes is a source-value alias conflict", () => {
+  const review = classifyBusinessCentralEntityV2MismatchReview({
+    comparisonStatus: "DIFFERENT_ENTITY",
+    reviewClassification: "POSSIBLE_RESOLVER_MISMATCH",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "SHARED SOURCE",
+    currentEntityCode: "ENTITY-A",
+    v2EntityCode: "ENTITY-B",
+    currentEntityCodesForSourceValue: ["ENTITY-A", "ENTITY-C"],
+    v2EntityCodesForSourceValue: ["ENTITY-B"]
+  });
+
+  assert.equal(review.type, "SOURCE_VALUE_ALIAS_CONFLICT");
+  assert.equal(review.riskLevel, "MEDIUM");
+});
+
+test("machine center fallback conflict is classified as machine-center conflict", () => {
+  const review = classifyBusinessCentralEntityV2MismatchReview({
+    comparisonStatus: "DIFFERENT_ENTITY",
+    reviewClassification: "POSSIBLE_RESOLVER_MISMATCH",
+    sourceFieldUsed: "machineCenterNo",
+    sourceValueUsed: "VFINE-BT400",
+    machineCenterNo: "VFINE-BT400",
+    machineCenterSourceValues: ["VFINE 600 ML Bottle", "VFINE 1500 ML Bottle"],
+    currentEntityCode: "VFINE-600",
+    v2EntityCode: "VFINE-1500"
+  });
+
+  assert.equal(review.type, "MACHINE_CENTER_CONFLICT");
+  assert.equal(review.riskLevel, "MEDIUM");
+});
+
+test("clearly unrelated current and v2 entity is possible true resolver bug", () => {
+  const review = classifyBusinessCentralEntityV2MismatchReview({
+    comparisonStatus: "DIFFERENT_ENTITY",
+    reviewClassification: "POSSIBLE_RESOLVER_MISMATCH",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "VFINE 600 ML Bottle",
+    currentEntityCode: "OMSO 1-OZ",
+    v2EntityCode: "VFINE-600"
+  });
+
+  assert.equal(review.type, "POSSIBLE_TRUE_RESOLVER_BUG");
+  assert.equal(review.riskLevel, "HIGH");
+});
+
+test("unknown mismatch review falls back to unknown review type", () => {
+  const review = classifyBusinessCentralEntityV2MismatchReview({
+    comparisonStatus: "CURRENT_MAPPED_V2_UNMAPPED",
+    reviewClassification: "UNKNOWN_REVIEW_NEEDED",
+    sourceFieldUsed: "gProdOrRotLineDescription",
+    sourceValueUsed: "UNKNOWN",
+    currentEntityCode: "UNKNOWN-A",
+    v2EntityCode: ""
+  });
+
+  assert.equal(review.type, "UNKNOWN_MISMATCH_REVIEW");
 });
 
 function entity(
