@@ -588,6 +588,21 @@ pnpm bc:kpi-compare-v1-v2
 
 P0.9a blocks P1.0 while high-risk groups remain, while `target_profiles` has zero active approved profiles, while most resolver-v2 rows still have `NO_ACTIVE_TARGET_PROFILE`, or while KPI comparison is not ready and reviewed. When blocked, P1.0 dashboard switching is not implemented; only reports and docs are produced.
 
+Implemented P0.9b resolution-package artifact:
+
+```text
+Resolution package planner:
+packages/domain/src/master-data/resolution-package.ts
+
+Command:
+pnpm bc:resolution-package
+
+Output folder:
+.tmp/bc-resolution-package/
+```
+
+P0.9b produces review templates only: canonical entity creation plan, alias cleanup review plan, target profile seed draft plan, manual approval queue, blocked-groups checklist, summary, and README. It does not mutate database data and does not unblock P1.0 by itself.
+
 ---
 
 ## 18. P0.9 Risk Classification
@@ -643,6 +658,7 @@ pnpm build
 pnpm bc:entity-v2-backfill-dry-run
 pnpm bc:target-profile-backfill-dry-run
 pnpm bc:high-risk-review-plan
+pnpm bc:resolution-package
 pnpm bc:kpi-compare-v1-v2
 git diff --check
 ```

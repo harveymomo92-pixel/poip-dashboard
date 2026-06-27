@@ -366,6 +366,42 @@ BC_ENTITY_RESOLVER_VERSION=v1
 BC_TARGET_LOOKUP_VERSION=v1
 ```
 
+### Business Central P0.9b resolution package
+
+Use P0.9b to generate human-reviewable planning templates from P0.9/P0.9a findings:
+
+```bash
+pnpm bc:resolution-package
+```
+
+Output folder:
+
+- `.tmp/bc-resolution-package/summary.json`
+- `.tmp/bc-resolution-package/canonical-entity-creation-plan.csv`
+- `.tmp/bc-resolution-package/alias-cleanup-review-plan.csv`
+- `.tmp/bc-resolution-package/target-profile-seed-draft-plan.csv`
+- `.tmp/bc-resolution-package/manual-approval-queue.csv`
+- `.tmp/bc-resolution-package/blocked-groups-checklist.csv`
+- `.tmp/bc-resolution-package/README.md`
+
+Review order:
+
+1. Review canonical entity creation plan.
+2. Review alias cleanup plan.
+3. Review target profile seed drafts.
+4. Approve or manually fill target_qty where needed.
+5. Re-run P0.9/P0.9a dry-run commands.
+6. Only then consider P1.0.
+
+Safety:
+
+- The package is export/template only.
+- Do not insert/update/delete `target_profiles` from the package.
+- Do not update `production_outputs.entity_id` from the package.
+- Do not delete/deactivate aliases or conditional rules from the package.
+- Do not create broad/global aliases to clear blockers.
+- Do not switch dashboard behavior while `summary.json` reports P1.0 readiness as blocked.
+
 Safety notes:
 
 - The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.

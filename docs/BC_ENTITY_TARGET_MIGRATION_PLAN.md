@@ -148,7 +148,39 @@ Do not fix P0.9a blockers by creating broad/global aliases. Resolve them through
 
 ---
 
-## 7. Rollback
+## 7. P0.9b Resolution Package
+
+P0.9b packages the P0.9/P0.9a findings for human review only:
+
+```bash
+pnpm bc:resolution-package
+```
+
+Output folder:
+
+```text
+.tmp/bc-resolution-package/
+```
+
+Files:
+
+```text
+summary.json
+canonical-entity-creation-plan.csv
+alias-cleanup-review-plan.csv
+target-profile-seed-draft-plan.csv
+manual-approval-queue.csv
+blocked-groups-checklist.csv
+README.md
+```
+
+The package is not SQL and must not be applied directly to production. It is a review template for canonical entity planning, alias cleanup review, target profile draft preparation, manual approval, and blocker tracking.
+
+P1.0 remains blocked until the checklist is resolved, target profiles have reviewed active approved coverage, P0.9/P0.9a are rerun, and KPI comparison is reviewed.
+
+---
+
+## 8. Rollback
 
 Preferred rollback:
 

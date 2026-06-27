@@ -51,6 +51,18 @@ import {
   type KpiCompareV1V2Summary
 } from "../packages/domain/src/master-data/high-risk-review-plan.js";
 import {
+  buildAliasCleanupReviewPlanItem,
+  buildBlockedGroupsChecklistItem,
+  buildCanonicalEntityCreationPlanItem,
+  buildManualApprovalQueueItem,
+  buildResolutionPackageSummary,
+  buildTargetProfileSeedDraftPlanItem,
+  type AliasCleanupConflictType,
+  type ManualApprovalPriority,
+  type ResolutionPackageSummary,
+  type ResolutionPackageApprovalStatus
+} from "../packages/domain/src/master-data/resolution-package.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -91,7 +103,8 @@ type Command =
   | "entity-v2-backfill-dry-run"
   | "target-profile-backfill-dry-run"
   | "high-risk-review-plan"
-  | "kpi-compare-v1-v2";
+  | "kpi-compare-v1-v2"
+  | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
 
@@ -561,6 +574,87 @@ interface KpiCompareV1V2CsvRow {
   readonly recommended_action: string;
 }
 
+interface CanonicalEntityCreationPlanCsvRow {
+  readonly canonical_entity_code: string;
+  readonly canonical_entity_display_name: string;
+  readonly area_candidate: string;
+  readonly source_values: string;
+  readonly current_entity_codes: string;
+  readonly rows: number;
+  readonly risk_level: BackfillRiskLevel;
+  readonly reason: string;
+  readonly recommended_action: string;
+  readonly sample_documents: string;
+  readonly sample_items: string;
+  readonly approval_status: ResolutionPackageApprovalStatus;
+}
+
+interface AliasCleanupReviewPlanCsvRow {
+  readonly source_field: string;
+  readonly source_value: string;
+  readonly current_entity_codes: string;
+  readonly proposed_canonical_entity_code: string;
+  readonly rows: number;
+  readonly conflict_type: AliasCleanupConflictType;
+  readonly risk_level: BackfillRiskLevel;
+  readonly reason: string;
+  readonly recommended_action: string;
+  readonly sample_documents: string;
+  readonly sample_items: string;
+  readonly approval_status: ResolutionPackageApprovalStatus;
+}
+
+interface TargetProfileSeedDraftPlanCsvRow {
+  readonly canonical_entity_code: string;
+  readonly canonical_entity_display_name: string;
+  readonly target_bucket: string;
+  readonly machine_center_no: string;
+  readonly machine_center_no_normalized: string;
+  readonly effective_from: string;
+  readonly effective_to: string;
+  readonly target_qty: number | "";
+  readonly unit: "PCS";
+  readonly source_current_entity_code: string;
+  readonly source_target_value_origin: string;
+  readonly rows: number;
+  readonly risk_level: BackfillRiskLevel;
+  readonly reason: string;
+  readonly recommended_action: string;
+  readonly approval_status: ResolutionPackageApprovalStatus;
+  readonly sample_documents: string;
+  readonly sample_items: string;
+}
+
+interface ManualApprovalQueueCsvRow {
+  readonly priority: ManualApprovalPriority;
+  readonly review_group_type: string;
+  readonly source_value: string;
+  readonly canonical_entity_code: string;
+  readonly current_entity_codes: string;
+  readonly target_bucket: string;
+  readonly machine_center_no: string;
+  readonly rows: number;
+  readonly risk_level: BackfillRiskLevel;
+  readonly decision_needed: HighRiskReviewDecision;
+  readonly recommended_action: string;
+  readonly blocks_p10: "true" | "false";
+  readonly sample_documents: string;
+  readonly sample_items: string;
+}
+
+interface BlockedGroupsChecklistCsvRow {
+  readonly blocker_id: string;
+  readonly blocker_type: string;
+  readonly source_value: string;
+  readonly rows: number;
+  readonly current_status: string;
+  readonly required_resolution: string;
+  readonly owner: "";
+  readonly approval_status: "pending";
+  readonly resolved: "false";
+  readonly notes: "";
+}
+
 const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
 const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
 const DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-dry-run.csv";
@@ -573,6 +667,14 @@ const DEFAULT_HIGH_RISK_REVIEW_PLAN_CSV_PATH = ".tmp/bc-high-risk-review-plan.cs
 const DEFAULT_HIGH_RISK_REVIEW_PLAN_JSON_PATH = ".tmp/bc-high-risk-review-plan.json";
 const DEFAULT_KPI_COMPARE_V1_V2_CSV_PATH = ".tmp/bc-kpi-compare-v1-v2.csv";
 const DEFAULT_KPI_COMPARE_V1_V2_JSON_PATH = ".tmp/bc-kpi-compare-v1-v2.json";
+const DEFAULT_RESOLUTION_PACKAGE_DIR = ".tmp/bc-resolution-package";
+const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
+const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
+const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
+const RESOLUTION_PACKAGE_TARGET_PROFILE_FILE = "target-profile-seed-draft-plan.csv";
+const RESOLUTION_PACKAGE_MANUAL_QUEUE_FILE = "manual-approval-queue.csv";
+const RESOLUTION_PACKAGE_BLOCKED_CHECKLIST_FILE = "blocked-groups-checklist.csv";
+const RESOLUTION_PACKAGE_README_FILE = "README.md";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -705,6 +807,87 @@ const kpiCompareV1V2CsvHeaders = [
   "blocker",
   "recommended_action"
 ] as const satisfies readonly (keyof KpiCompareV1V2CsvRow)[];
+
+const canonicalEntityCreationPlanCsvHeaders = [
+  "canonical_entity_code",
+  "canonical_entity_display_name",
+  "area_candidate",
+  "source_values",
+  "current_entity_codes",
+  "rows",
+  "risk_level",
+  "reason",
+  "recommended_action",
+  "sample_documents",
+  "sample_items",
+  "approval_status"
+] as const satisfies readonly (keyof CanonicalEntityCreationPlanCsvRow)[];
+
+const aliasCleanupReviewPlanCsvHeaders = [
+  "source_field",
+  "source_value",
+  "current_entity_codes",
+  "proposed_canonical_entity_code",
+  "rows",
+  "conflict_type",
+  "risk_level",
+  "reason",
+  "recommended_action",
+  "sample_documents",
+  "sample_items",
+  "approval_status"
+] as const satisfies readonly (keyof AliasCleanupReviewPlanCsvRow)[];
+
+const targetProfileSeedDraftPlanCsvHeaders = [
+  "canonical_entity_code",
+  "canonical_entity_display_name",
+  "target_bucket",
+  "machine_center_no",
+  "machine_center_no_normalized",
+  "effective_from",
+  "effective_to",
+  "target_qty",
+  "unit",
+  "source_current_entity_code",
+  "source_target_value_origin",
+  "rows",
+  "risk_level",
+  "reason",
+  "recommended_action",
+  "approval_status",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof TargetProfileSeedDraftPlanCsvRow)[];
+
+const manualApprovalQueueCsvHeaders = [
+  "priority",
+  "review_group_type",
+  "source_value",
+  "canonical_entity_code",
+  "current_entity_codes",
+  "target_bucket",
+  "machine_center_no",
+  "rows",
+  "risk_level",
+  "decision_needed",
+  "recommended_action",
+  "blocks_p10",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof ManualApprovalQueueCsvRow)[];
+
+const blockedGroupsChecklistCsvHeaders = [
+  "blocker_id",
+  "blocker_type",
+  "source_value",
+  "rows",
+  "current_status",
+  "required_resolution",
+  "owner",
+  "approval_status",
+  "resolved",
+  "notes"
+] as const satisfies readonly (keyof BlockedGroupsChecklistCsvRow)[];
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -3406,6 +3589,8 @@ async function buildHighRiskReviewPlan(pool: DatabasePool): Promise<{
   readonly summary: HighRiskReviewPlanSummary;
   readonly groups: readonly HighRiskReviewPlanGroup[];
   readonly targetProfileDryRunSummary: TargetProfileDryRunSummary;
+  readonly entityRows: readonly EntityV2BackfillDryRunReportRow[];
+  readonly targetProfileRows: readonly TargetProfileBackfillDryRunReportRow[];
 }> {
   const [{ entityRows, v2Rows }, productionTargets, targetProfileState, targetProfileDryRunSummary] = await Promise.all([
     buildEntityV2BackfillDryRun(pool),
@@ -3436,7 +3621,7 @@ async function buildHighRiskReviewPlan(pool: DatabasePool): Promise<{
     groups
   });
 
-  return { summary, groups, targetProfileDryRunSummary };
+  return { summary, groups, targetProfileDryRunSummary, entityRows, targetProfileRows };
 }
 
 function buildEntityHighRiskReviewGroups(
@@ -3907,6 +4092,397 @@ function printHighRiskReviewGroups(groups: readonly HighRiskReviewPlanGroup[]) {
       `- type=${item.reviewGroupType}; source=${item.sourceField}:${item.sourceValue}; canonical=${item.canonicalEntityCode}; bucket=${item.targetBucket || "N/A"}; rows=${item.rows}; risk=${item.riskLevel}; decision=${item.reviewDecision}; blocker=${item.p10Blocker ? "yes" : "no"}`
     );
   }
+}
+
+function buildCanonicalEntityCreationPlanRows(
+  rows: readonly EntityV2BackfillDryRunReportRow[]
+): readonly CanonicalEntityCreationPlanCsvRow[] {
+  const groups = new Map<string, {
+    canonicalEntityCode: string;
+    canonicalEntityDisplayName: string;
+    sourceValues: Set<string>;
+    currentEntityCodes: Set<string>;
+    rows: number;
+    riskLevel: BackfillRiskLevel;
+    reason: string;
+    recommendedAction: string;
+    sampleDocuments: Set<string>;
+    sampleItems: Set<string>;
+  }>();
+
+  for (const row of rows) {
+    if (row.backfill_action !== "PROPOSE_CANONICAL_ENTITY_CREATION") continue;
+    const key = row.proposed_canonical_entity_code || "(blank)";
+    const current = groups.get(key) ?? {
+      canonicalEntityCode: key,
+      canonicalEntityDisplayName: row.proposed_canonical_entity_display_name || key,
+      sourceValues: new Set<string>(),
+      currentEntityCodes: new Set<string>(),
+      rows: 0,
+      riskLevel: row.risk_level,
+      reason: row.risk_reason,
+      recommendedAction: row.recommended_action,
+      sampleDocuments: new Set<string>(),
+      sampleItems: new Set<string>()
+    };
+    current.rows += 1;
+    current.riskLevel = higherRiskLevel(current.riskLevel, row.risk_level);
+    if (row.source_value) current.sourceValues.add(row.source_value);
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    if (row.document_no && current.sampleDocuments.size < 5) current.sampleDocuments.add(row.document_no);
+    if (row.item_no && current.sampleItems.size < 5) current.sampleItems.add(row.item_no);
+    groups.set(key, current);
+  }
+
+  return [...groups.values()].map((group) => {
+    const item = buildCanonicalEntityCreationPlanItem({
+      canonicalEntityCode: group.canonicalEntityCode,
+      canonicalEntityDisplayName: group.canonicalEntityDisplayName,
+      sourceValues: sortedStrings(group.sourceValues),
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      rows: group.rows,
+      riskLevel: group.riskLevel,
+      reason: group.reason,
+      recommendedAction: group.recommendedAction,
+      sampleDocuments: [...group.sampleDocuments],
+      sampleItems: [...group.sampleItems]
+    });
+    return {
+      canonical_entity_code: item.canonicalEntityCode,
+      canonical_entity_display_name: item.canonicalEntityDisplayName,
+      area_candidate: item.areaCandidate,
+      source_values: item.sourceValues.join("|"),
+      current_entity_codes: item.currentEntityCodes.join("|"),
+      rows: item.rows,
+      risk_level: item.riskLevel,
+      reason: item.reason,
+      recommended_action: item.recommendedAction,
+      sample_documents: item.sampleDocuments.join("|"),
+      sample_items: item.sampleItems.join("|"),
+      approval_status: item.approvalStatus
+    };
+  }).sort((left, right) => right.rows - left.rows || left.canonical_entity_code.localeCompare(right.canonical_entity_code));
+}
+
+function buildAliasCleanupReviewPlanRows(
+  rows: readonly EntityV2BackfillDryRunReportRow[]
+): readonly AliasCleanupReviewPlanCsvRow[] {
+  const groups = new Map<string, {
+    sourceField: string;
+    sourceValue: string;
+    currentEntityCodes: Set<string>;
+    proposedCanonicalEntityCode: string;
+    rows: number;
+    riskLevel: BackfillRiskLevel;
+    reason: string;
+    recommendedAction: string;
+    sampleDocuments: Set<string>;
+    sampleItems: Set<string>;
+  }>();
+  const actions = new Set<EntityV2BackfillAction>(["REVIEW_ALIAS_CONFLICT", "REVIEW_DATA_SOURCE_GAP", "SKIP_HIGH_RISK"]);
+
+  for (const row of rows) {
+    if (!actions.has(row.backfill_action)) continue;
+    const key = [
+      row.source_field,
+      normalizeAliasKey(row.source_value),
+      row.proposed_canonical_entity_code || "(blank)",
+      row.backfill_action,
+      row.risk_level
+    ].join(":");
+    const current = groups.get(key) ?? {
+      sourceField: row.source_field,
+      sourceValue: row.source_value || "(blank)",
+      currentEntityCodes: new Set<string>(),
+      proposedCanonicalEntityCode: row.proposed_canonical_entity_code || "(blank)",
+      rows: 0,
+      riskLevel: row.risk_level,
+      reason: row.risk_reason,
+      recommendedAction: row.recommended_action,
+      sampleDocuments: new Set<string>(),
+      sampleItems: new Set<string>()
+    };
+    current.rows += 1;
+    current.riskLevel = higherRiskLevel(current.riskLevel, row.risk_level);
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    if (row.document_no && current.sampleDocuments.size < 5) current.sampleDocuments.add(row.document_no);
+    if (row.item_no && current.sampleItems.size < 5) current.sampleItems.add(row.item_no);
+    groups.set(key, current);
+  }
+
+  return [...groups.values()].map((group) => {
+    const item = buildAliasCleanupReviewPlanItem({
+      sourceField: group.sourceField,
+      sourceValue: group.sourceValue,
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      proposedCanonicalEntityCode: group.proposedCanonicalEntityCode,
+      rows: group.rows,
+      riskLevel: group.riskLevel,
+      reason: group.reason,
+      recommendedAction: group.recommendedAction,
+      sampleDocuments: [...group.sampleDocuments],
+      sampleItems: [...group.sampleItems]
+    });
+    return {
+      source_field: item.sourceField,
+      source_value: item.sourceValue,
+      current_entity_codes: item.currentEntityCodes.join("|"),
+      proposed_canonical_entity_code: item.proposedCanonicalEntityCode,
+      rows: item.rows,
+      conflict_type: item.conflictType,
+      risk_level: item.riskLevel,
+      reason: item.reason,
+      recommended_action: item.recommendedAction,
+      sample_documents: item.sampleDocuments.join("|"),
+      sample_items: item.sampleItems.join("|"),
+      approval_status: item.approvalStatus
+    };
+  }).sort((left, right) => riskSort(right.risk_level) - riskSort(left.risk_level) || right.rows - left.rows || left.source_value.localeCompare(right.source_value));
+}
+
+function buildTargetProfileSeedDraftPlanRows(
+  rows: readonly TargetProfileBackfillDryRunReportRow[]
+): readonly TargetProfileSeedDraftPlanCsvRow[] {
+  return rows.map((row) => {
+    const targetQty = typeof row.proposed_target_qty === "number" ? row.proposed_target_qty : null;
+    const item = buildTargetProfileSeedDraftPlanItem({
+      canonicalEntityCode: row.canonical_entity_code,
+      canonicalEntityDisplayName: row.canonical_entity_display_name,
+      targetBucket: row.target_bucket,
+      machineCenterNo: row.machine_center_no,
+      machineCenterNoNormalized: row.machine_center_no_normalized,
+      effectiveFrom: row.effective_from,
+      effectiveTo: row.effective_to,
+      targetQty,
+      unit: row.unit,
+      sourceCurrentEntityCode: row.current_entity_code,
+      sourceTargetValueOrigin: targetProfileValueOrigin(row),
+      rows: row.sample_rows,
+      riskLevel: row.risk_level,
+      reason: row.risk_reason,
+      recommendedAction: targetQty === null ? "Fill target_qty manually before migration." : row.recommended_action,
+      sampleDocuments: row.sample_documents,
+      sampleItems: row.sample_items
+    });
+    return {
+      canonical_entity_code: item.canonicalEntityCode,
+      canonical_entity_display_name: item.canonicalEntityDisplayName,
+      target_bucket: item.targetBucket,
+      machine_center_no: item.machineCenterNo,
+      machine_center_no_normalized: item.machineCenterNoNormalized,
+      effective_from: item.effectiveFrom,
+      effective_to: item.effectiveTo,
+      target_qty: item.targetQty ?? "",
+      unit: item.unit,
+      source_current_entity_code: item.sourceCurrentEntityCode,
+      source_target_value_origin: item.sourceTargetValueOrigin,
+      rows: item.rows,
+      risk_level: item.riskLevel,
+      reason: item.reason,
+      recommended_action: item.recommendedAction,
+      approval_status: item.approvalStatus,
+      sample_documents: item.sampleDocuments.join("|"),
+      sample_items: item.sampleItems.join("|")
+    };
+  }).sort((left, right) => riskSort(right.risk_level) - riskSort(left.risk_level) || right.rows - left.rows || left.canonical_entity_code.localeCompare(right.canonical_entity_code));
+}
+
+function buildManualApprovalQueueRows(
+  groups: readonly HighRiskReviewPlanGroup[]
+): readonly ManualApprovalQueueCsvRow[] {
+  return groups.map((group) => {
+    const item = buildManualApprovalQueueItem(group);
+    return {
+      priority: item.priority,
+      review_group_type: item.reviewGroupType,
+      source_value: item.sourceValue,
+      canonical_entity_code: item.canonicalEntityCode,
+      current_entity_codes: item.currentEntityCodes.join("|"),
+      target_bucket: item.targetBucket,
+      machine_center_no: item.machineCenterNo,
+      rows: item.rows,
+      risk_level: item.riskLevel,
+      decision_needed: item.decisionNeeded,
+      recommended_action: item.recommendedAction,
+      blocks_p10: item.blocksP10 ? "true" : "false",
+      sample_documents: item.sampleDocuments.join("|"),
+      sample_items: item.sampleItems.join("|")
+    };
+  }).sort((left, right) => prioritySort(left.priority) - prioritySort(right.priority) || right.rows - left.rows || left.source_value.localeCompare(right.source_value));
+}
+
+function buildBlockedGroupsChecklistRows(
+  groups: readonly HighRiskReviewPlanGroup[]
+): readonly BlockedGroupsChecklistCsvRow[] {
+  return groups
+    .filter((group) => group.p10Blocker)
+    .sort(reviewGroupSort)
+    .map((group, index) => {
+      const item = buildBlockedGroupsChecklistItem(group, index);
+      return {
+        blocker_id: item.blockerId,
+        blocker_type: item.blockerType,
+        source_value: item.sourceValue,
+        rows: item.rows,
+        current_status: item.currentStatus,
+        required_resolution: item.requiredResolution,
+        owner: item.owner,
+        approval_status: item.approvalStatus,
+        resolved: "false",
+        notes: item.notes
+      };
+    });
+}
+
+function targetProfileValueOrigin(row: TargetProfileBackfillDryRunReportRow): string {
+  if (row.proposed_target_qty === "") {
+    return row.risk_reason.includes("Multiple old target quantities")
+      ? "ambiguous_production_targets"
+      : "missing_target_qty";
+  }
+  return `production_targets:${row.current_entity_code}`;
+}
+
+function resolutionPackageCsv<T extends Record<string, unknown>>(
+  headers: readonly (keyof T)[],
+  rows: readonly T[]
+): string {
+  const lines = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function buildResolutionPackageReadme(summary: ResolutionPackageSummary): string {
+  return `# Business Central P0.9b Resolution Package
+
+Generated at: ${summary.generatedAt}
+
+P1.0 status: ${summary.p10Readiness.status}
+
+Reason:
+
+${summary.p10Readiness.reason}
+
+## Files
+
+- \`${RESOLUTION_PACKAGE_SUMMARY_FILE}\`: package counts, source reports, P1.0 readiness, and safety flags.
+- \`${RESOLUTION_PACKAGE_CANONICAL_FILE}\`: canonical entities that likely need to exist before migration.
+- \`${RESOLUTION_PACKAGE_ALIAS_FILE}\`: source values and current mappings that need alias/catalog cleanup review.
+- \`${RESOLUTION_PACKAGE_TARGET_PROFILE_FILE}\`: target profile seed drafts for later human review.
+- \`${RESOLUTION_PACKAGE_MANUAL_QUEUE_FILE}\`: prioritized business/data owner review queue.
+- \`${RESOLUTION_PACKAGE_BLOCKED_CHECKLIST_FILE}\`: checklist for blockers that must be resolved before P1.0.
+
+## Required Review Order
+
+1. Review canonical entity creation plan.
+2. Review alias cleanup plan.
+3. Review target profile seed drafts.
+4. Approve or manually fill target_qty where needed.
+5. Re-run P0.9 and P0.9a dry-run commands.
+6. Only then consider P1.0.
+
+## What Not To Do
+
+- Do not update \`production_outputs.entity_id\` from this package.
+- Do not insert/update/delete \`target_profiles\` from this package.
+- Do not create canonical entities automatically.
+- Do not delete/deactivate aliases or conditional rules automatically.
+- Do not create broad/global aliases to force ambiguous mappings.
+- Do not switch dashboard behavior while \`p10Readiness.status\` is not \`PASS\`.
+
+## Current Counts
+
+- Canonical entity creation candidates: ${summary.counts.canonicalEntityCreationCandidates}
+- Alias cleanup candidates: ${summary.counts.aliasCleanupCandidates}
+- Target profile seed draft candidates: ${summary.counts.targetProfileSeedDraftCandidates}
+- Manual approval items: ${summary.counts.manualApprovalItems}
+- Blocked groups: ${summary.counts.blockedGroups}
+
+## Required Before P1.0
+
+${summary.p10Readiness.requiredBeforeP10.map((item) => `- ${item}`).join("\n")}
+`;
+}
+
+function higherRiskLevel(current: BackfillRiskLevel, next: BackfillRiskLevel): BackfillRiskLevel {
+  return riskSort(next) > riskSort(current) ? next : current;
+}
+
+function prioritySort(value: ManualApprovalPriority): number {
+  if (value === "P1") return 1;
+  if (value === "P2") return 2;
+  if (value === "P3") return 3;
+  return 4;
+}
+
+async function runResolutionPackage(pool: DatabasePool) {
+  const outputDir = resolveRepoPath(process.env.RESOLUTION_PACKAGE_DIR?.trim() || DEFAULT_RESOLUTION_PACKAGE_DIR);
+  const outputFiles = {
+    summary: path.join(outputDir, RESOLUTION_PACKAGE_SUMMARY_FILE),
+    canonical: path.join(outputDir, RESOLUTION_PACKAGE_CANONICAL_FILE),
+    alias: path.join(outputDir, RESOLUTION_PACKAGE_ALIAS_FILE),
+    targetProfile: path.join(outputDir, RESOLUTION_PACKAGE_TARGET_PROFILE_FILE),
+    manualQueue: path.join(outputDir, RESOLUTION_PACKAGE_MANUAL_QUEUE_FILE),
+    blockedChecklist: path.join(outputDir, RESOLUTION_PACKAGE_BLOCKED_CHECKLIST_FILE),
+    readme: path.join(outputDir, RESOLUTION_PACKAGE_README_FILE)
+  };
+
+  console.log("Business Central P0.9b resolution package");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: export-only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  const { summary: highRiskSummary, groups, entityRows, targetProfileRows } = await buildHighRiskReviewPlan(pool);
+  const canonicalRows = buildCanonicalEntityCreationPlanRows(entityRows);
+  const aliasRows = buildAliasCleanupReviewPlanRows(entityRows);
+  const targetProfileSeedRows = buildTargetProfileSeedDraftPlanRows(targetProfileRows);
+  const manualQueueRows = buildManualApprovalQueueRows(groups);
+  const blockedChecklistRows = buildBlockedGroupsChecklistRows(groups);
+  const summary = buildResolutionPackageSummary({
+    sourceReports: {
+      entityBackfillDryRun: DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_JSON_PATH,
+      targetProfileBackfillDryRun: DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_JSON_PATH,
+      highRiskReviewPlan: DEFAULT_HIGH_RISK_REVIEW_PLAN_JSON_PATH
+    },
+    canonicalEntityCreationCandidates: canonicalRows.length,
+    aliasCleanupCandidates: aliasRows.length,
+    targetProfileSeedDraftCandidates: targetProfileSeedRows.length,
+    manualApprovalItems: manualQueueRows.length,
+    blockedGroups: blockedChecklistRows.length,
+    p10Gate: highRiskSummary.p10Gate
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.canonical, resolutionPackageCsv(canonicalEntityCreationPlanCsvHeaders, canonicalRows), "utf8");
+  await writeFile(outputFiles.alias, resolutionPackageCsv(aliasCleanupReviewPlanCsvHeaders, aliasRows), "utf8");
+  await writeFile(outputFiles.targetProfile, resolutionPackageCsv(targetProfileSeedDraftPlanCsvHeaders, targetProfileSeedRows), "utf8");
+  await writeFile(outputFiles.manualQueue, resolutionPackageCsv(manualApprovalQueueCsvHeaders, manualQueueRows), "utf8");
+  await writeFile(outputFiles.blockedChecklist, resolutionPackageCsv(blockedGroupsChecklistCsvHeaders, blockedChecklistRows), "utf8");
+  await writeFile(outputFiles.readme, buildResolutionPackageReadme(summary), "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- canonical_entity_creation_candidates=${summary.counts.canonicalEntityCreationCandidates}`);
+  console.log(`- alias_cleanup_candidates=${summary.counts.aliasCleanupCandidates}`);
+  console.log(`- target_profile_seed_draft_candidates=${summary.counts.targetProfileSeedDraftCandidates}`);
+  console.log(`- manual_approval_items=${summary.counts.manualApprovalItems}`);
+  console.log(`- blocked_groups=${summary.counts.blockedGroups}`);
+  console.log(`- p10_status=${summary.p10Readiness.status}`);
+  console.log(`- p10_reason=${summary.p10Readiness.reason}`);
+
+  console.log("");
+  console.log("Top manual approval queue items");
+  for (const item of manualQueueRows.slice(0, 10)) {
+    console.log(`- ${item.priority}; ${item.review_group_type}; source=${item.source_value}; rows=${item.rows}; risk=${item.risk_level}; blocks_p10=${item.blocks_p10}`);
+  }
+
+  console.log("");
+  console.log("Package files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
 }
 
 async function runMappingPlan(pool: DatabasePool) {
@@ -4469,8 +5045,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|kpi-compare-v1-v2>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -4486,6 +5062,7 @@ async function main() {
     else if (command === "entity-v2-backfill-dry-run") await runEntityV2BackfillDryRun(database.pool);
     else if (command === "target-profile-backfill-dry-run") await runTargetProfileBackfillDryRun(database.pool);
     else if (command === "high-risk-review-plan") await runHighRiskReviewPlan(database.pool);
+    else if (command === "resolution-package") await runResolutionPackage(database.pool);
     else if (command === "kpi-compare-v1-v2") await runKpiCompareV1V2(database.pool);
     else await runMappingApply(database.pool);
   } finally {
