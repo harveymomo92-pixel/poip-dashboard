@@ -240,6 +240,35 @@ P0.7b possible resolver mismatch review:
 - Do not fix mismatch rows with broad/global aliases.
 - Do not switch dashboard logic based on this report.
 
+### Business Central target profile dry run
+
+Use the P0.8 dry run to simulate the new target profile lookup without changing dashboard target behavior:
+
+```bash
+pnpm bc:target-profile-dry-run
+```
+
+Outputs:
+
+- `.tmp/bc-target-profile-dry-run.csv`: row-level resolver v2 entity, target bucket candidate, target profile lookup status, matched profile fields, reason, and recommended action.
+- `.tmp/bc-target-profile-dry-run.json`: summary counts, top no-active groups, top multiple-match groups, matched profile groups, output paths, and safety flags.
+
+Interpret lookup statuses:
+
+- `TARGET_PROFILE_MATCHED_EXACT`: entity, bucket, exact machine center, and posting date matched an active approved profile.
+- `TARGET_PROFILE_MATCHED_ENTITY_BUCKET`: generic entity/bucket profile matched, or DEFAULT/UNKNOWN fallback matched.
+- `NO_ACTIVE_TARGET_PROFILE`: no active approved profile matched; expected while `target_profiles` is empty or before P0.9 seed/backfill planning.
+- `MULTIPLE_TARGET_PROFILE_MATCH`: more than one active approved profile matched at the same priority; review data, do not guess.
+- `INVALID_TARGET_BUCKET`: the P0.7 bucket candidate is blank or outside the P0.8 bucket model.
+- `INVALID_ENTITY`: resolver v2 did not produce a canonical entity candidate.
+
+P0.8 safety notes:
+
+- `target_profiles` is additive and does not power the dashboard yet.
+- Existing `production_targets` and dashboard target lookup remain the production path until P1.0.
+- Do not create broad/global aliases to solve target profile gaps.
+- P0.9 will handle seed/backfill dry-run planning; P1.0 will handle any controlled switch.
+
 Safety notes:
 
 - The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.
@@ -594,7 +623,7 @@ Expected outputs:
 .tmp/bc-entity-v2-dry-run.json
 ```
 
-### P0.8 planned target profile work
+### P0.8 target profile model
 
 Target lookup should eventually use:
 
@@ -604,6 +633,14 @@ entity_id
 + optional machine_center_no
 + posting_date effective range
 ```
+
+P0.8 adds the model and dry-run only:
+
+```bash
+pnpm bc:target-profile-dry-run
+```
+
+It does not migrate old targets into `target_profiles`, does not switch dashboard target lookup, and does not run backfill.
 
 ### P0.9 planned dry-run commands
 

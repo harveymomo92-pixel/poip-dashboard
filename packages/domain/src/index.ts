@@ -15,6 +15,7 @@ export * from "./master-data/conditional-mapping.js";
 export * from "./master-data/entity-resolver-v2.js";
 export * from "./master-data/mapping-candidates.js";
 export * from "./master-data/machine-display.js";
+export * from "./master-data/target-profile.js";
 export * from "./master-data/v1-import.js";
 export * from "./parser-contract/index.js";
 export * from "./permissions/index.js";

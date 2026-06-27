@@ -52,6 +52,11 @@ import {
   type BusinessCentralEntityV2SourceField,
   type BusinessCentralTargetBucketCandidate
 } from "../packages/domain/src/master-data/entity-resolver-v2.js";
+import {
+  resolveBusinessCentralTargetProfile,
+  type TargetProfile,
+  type TargetProfileLookupStatus
+} from "../packages/domain/src/master-data/target-profile.js";
 
 const SOURCE_SYSTEM = "business-central";
 const DEFAULT_MAPPING_PLAN_PATH = ".tmp/mapping-plan/business-central-mapping-plan.csv";
@@ -66,7 +71,8 @@ type Command =
   | "mapping-apply"
   | "mapping-plan"
   | "mapping-plan-apply"
-  | "entity-v2-dry-run";
+  | "entity-v2-dry-run"
+  | "target-profile-dry-run";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
 
@@ -290,8 +296,91 @@ interface EntityV2Example {
   readonly targetBucketCandidate: BusinessCentralTargetBucketCandidate;
 }
 
+interface TargetProfileDryRunReportRow {
+  readonly posting_date: string;
+  readonly document_no: string;
+  readonly entry_no: string;
+  readonly item_no: string;
+  readonly item_description: string;
+  readonly item_category_code: string;
+  readonly quantity: number;
+  readonly gross_weight: number | "";
+  readonly entry_type: string;
+  readonly location_code: string;
+  readonly g_prod_or_rot_line_no: string;
+  readonly g_prod_or_rot_line_description: string;
+  readonly machine_center_no: string;
+  readonly resolver_v2_entity_code: string;
+  readonly resolver_v2_entity_display_name: string;
+  readonly resolver_v2_source_field_used: BusinessCentralEntityV2SourceField;
+  readonly resolver_v2_source_value_used: string;
+  readonly resolver_v2_target_bucket_candidate: BusinessCentralTargetBucketCandidate;
+  readonly target_profile_lookup_status: TargetProfileLookupStatus;
+  readonly target_profile_id: string;
+  readonly target_profile_target_qty: number | "";
+  readonly target_profile_unit: string;
+  readonly target_profile_effective_from: string;
+  readonly target_profile_effective_to: string;
+  readonly target_profile_machine_center_no: string;
+  readonly target_profile_reason: string;
+  readonly recommended_action: string;
+}
+
+interface TargetProfileDryRunSummary {
+  readonly generatedAt: string;
+  readonly totalRows: number;
+  readonly resolverV2ResolvedRows: number;
+  readonly resolverV2UnresolvedRows: number;
+  readonly targetProfileMatchedRows: number;
+  readonly targetProfileNoActiveRows: number;
+  readonly targetProfileMultipleMatchRows: number;
+  readonly targetProfileInvalidBucketRows: number;
+  readonly targetProfileInvalidEntityRows: number;
+  readonly topNoActiveTargetProfileGroups: readonly TargetProfileDryRunIssueGroup[];
+  readonly topMultipleTargetProfileGroups: readonly TargetProfileDryRunIssueGroup[];
+  readonly topMatchedTargetProfiles: readonly TargetProfileDryRunMatchedGroup[];
+  readonly outputFiles: {
+    readonly csv: string;
+    readonly json: string;
+  };
+  readonly targetProfilesTableAvailable: boolean;
+  readonly targetProfilesLoaded: number;
+  readonly safety: {
+    readonly dashboardChanged: false;
+    readonly databaseUpdated: false;
+    readonly productionOutputsUpdated: false;
+    readonly oldTargetLogicChanged: false;
+  };
+}
+
+interface TargetProfileDryRunIssueGroup {
+  readonly entityCode: string;
+  readonly entityDisplayName: string;
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly targetBucketCandidate: string;
+  readonly machineCenterNo: string;
+  readonly rows: number;
+  readonly sampleDocuments: readonly string[];
+  readonly sampleItems: readonly string[];
+  readonly recommendedAction: string;
+}
+
+interface TargetProfileDryRunMatchedGroup {
+  readonly targetProfileId: string;
+  readonly entityCode: string;
+  readonly entityDisplayName: string;
+  readonly targetBucket: string;
+  readonly machineCenterNo: string;
+  readonly targetQty: number;
+  readonly unit: string;
+  readonly rows: number;
+}
+
 const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
 const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
+const DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-dry-run.csv";
+const DEFAULT_TARGET_PROFILE_DRY_RUN_JSON_PATH = ".tmp/bc-target-profile-dry-run.json";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -326,6 +415,36 @@ const entityV2CsvHeaders = [
   "v2_mismatch_review_reason",
   "v2_mismatch_recommended_action"
 ] as const satisfies readonly (keyof EntityV2ReportRow)[];
+
+const targetProfileDryRunCsvHeaders = [
+  "posting_date",
+  "document_no",
+  "entry_no",
+  "item_no",
+  "item_description",
+  "item_category_code",
+  "quantity",
+  "gross_weight",
+  "entry_type",
+  "location_code",
+  "g_prod_or_rot_line_no",
+  "g_prod_or_rot_line_description",
+  "machine_center_no",
+  "resolver_v2_entity_code",
+  "resolver_v2_entity_display_name",
+  "resolver_v2_source_field_used",
+  "resolver_v2_source_value_used",
+  "resolver_v2_target_bucket_candidate",
+  "target_profile_lookup_status",
+  "target_profile_id",
+  "target_profile_target_qty",
+  "target_profile_unit",
+  "target_profile_effective_from",
+  "target_profile_effective_to",
+  "target_profile_machine_center_no",
+  "target_profile_reason",
+  "recommended_action"
+] as const satisfies readonly (keyof TargetProfileDryRunReportRow)[];
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -2262,6 +2381,392 @@ async function runEntityV2DryRun(pool: DatabasePool) {
   console.log(`- ${outputFiles.json}`);
 }
 
+async function queryBusinessCentralTargetProfiles(pool: DatabasePool): Promise<{
+  readonly tableAvailable: boolean;
+  readonly profiles: readonly TargetProfile[];
+}> {
+  const tableCheck = await pool.query<{ table_name: string | null }>(
+    "select to_regclass('public.target_profiles')::text as table_name"
+  );
+  if (!tableCheck.rows[0]?.table_name) {
+    return { tableAvailable: false, profiles: [] };
+  }
+
+  const result = await pool.query<{
+    id: string;
+    entity_id: string;
+    machine_center_no: string | null;
+    machine_center_no_normalized: string | null;
+    target_bucket: string;
+    target_bucket_normalized: string;
+    effective_from: string;
+    effective_to: string | null;
+    target_qty: string | number;
+    unit: string;
+    is_active: boolean;
+    approval_status: string;
+    source: string | null;
+    notes: string | null;
+  }>(
+    `
+      select id,
+             entity_id,
+             machine_center_no,
+             machine_center_no_normalized,
+             target_bucket,
+             target_bucket_normalized,
+             effective_from::text,
+             effective_to::text,
+             target_qty,
+             unit,
+             is_active,
+             approval_status,
+             source,
+             notes
+      from target_profiles
+      order by entity_id, target_bucket_normalized, machine_center_no_normalized nulls first, effective_from desc
+    `
+  );
+
+  return {
+    tableAvailable: true,
+    profiles: result.rows.map((row): TargetProfile => ({
+      id: row.id,
+      entityId: row.entity_id,
+      machineCenterNo: row.machine_center_no,
+      machineCenterNoNormalized: row.machine_center_no_normalized,
+      targetBucket: row.target_bucket,
+      targetBucketNormalized: row.target_bucket_normalized,
+      effectiveFrom: dateText(row.effective_from),
+      effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
+      targetQty: numberValue(row.target_qty),
+      unit: row.unit,
+      isActive: row.is_active,
+      approvalStatus: row.approval_status,
+      source: row.source,
+      notes: row.notes
+    }))
+  };
+}
+
+function buildTargetProfileDryRunReportRows(input: {
+  readonly sourceRows: readonly EntityV2SourceRow[];
+  readonly catalog: BusinessCentralCanonicalEntityCatalog;
+  readonly targetProfiles: readonly TargetProfile[];
+  readonly targetProfilesTableAvailable: boolean;
+}): readonly TargetProfileDryRunReportRow[] {
+  const entityByCode = new Map(input.catalog.entries.map((entry) => [entry.entityCode, entry]));
+
+  return input.sourceRows.map((row) => {
+    const resolution = resolveBusinessCentralEntityV2({
+      entryType: row.entryType,
+      postingDate: row.postingDate,
+      documentNo: row.documentNo,
+      itemNo: row.itemNo,
+      itemDescription: row.itemDescription,
+      itemCategoryCode: row.itemCategoryCode,
+      locationCode: row.locationCode,
+      quantity: row.quantity,
+      grossWeight: row.grossWeight,
+      gProdOrRotLineNo: row.gProdOrRotLineNo,
+      gProdOrRotLineDescription: row.gProdOrRotLineDescription,
+      machineCenterNo: row.machineCenterNo
+    }, input.catalog);
+    const resolvedEntity = resolution.resolvedEntityCode
+      ? entityByCode.get(resolution.resolvedEntityCode)
+      : undefined;
+    const lookup = resolveBusinessCentralTargetProfile({
+      entityId: resolvedEntity?.entityId ?? null,
+      targetBucket: resolution.targetBucketCandidate,
+      machineCenterNo: row.machineCenterNo,
+      postingDate: row.postingDate,
+      profiles: input.targetProfiles
+    });
+    const targetProfile = lookup.targetProfile;
+
+    return {
+      posting_date: row.postingDate,
+      document_no: row.documentNo ?? "",
+      entry_no: row.entryNo ?? "",
+      item_no: row.itemNo,
+      item_description: row.itemDescription ?? "",
+      item_category_code: row.itemCategoryCode ?? "",
+      quantity: row.quantity,
+      gross_weight: row.grossWeight ?? "",
+      entry_type: row.entryType ?? "",
+      location_code: row.locationCode ?? "",
+      g_prod_or_rot_line_no: row.gProdOrRotLineNo ?? "",
+      g_prod_or_rot_line_description: row.gProdOrRotLineDescription ?? "",
+      machine_center_no: row.machineCenterNo ?? "",
+      resolver_v2_entity_code: resolution.resolvedEntityCode ?? "",
+      resolver_v2_entity_display_name: resolution.resolvedEntityDisplayName ?? "",
+      resolver_v2_source_field_used: resolution.sourceFieldUsed,
+      resolver_v2_source_value_used: resolution.sourceValueUsed ?? "",
+      resolver_v2_target_bucket_candidate: resolution.targetBucketCandidate,
+      target_profile_lookup_status: lookup.status,
+      target_profile_id: targetProfile?.id ?? "",
+      target_profile_target_qty: targetProfile?.targetQty ?? "",
+      target_profile_unit: targetProfile?.unit ?? "",
+      target_profile_effective_from: targetProfile ? dateText(targetProfile.effectiveFrom) : "",
+      target_profile_effective_to: targetProfile?.effectiveTo ? dateText(targetProfile.effectiveTo) : "",
+      target_profile_machine_center_no: targetProfile?.machineCenterNo ?? "",
+      target_profile_reason: lookup.reason,
+      recommended_action: targetProfileRecommendedAction(lookup.status, input.targetProfilesTableAvailable)
+    };
+  });
+}
+
+function targetProfileRecommendedAction(
+  status: TargetProfileLookupStatus,
+  targetProfilesTableAvailable: boolean
+): string {
+  if (status === "TARGET_PROFILE_MATCHED_EXACT" || status === "TARGET_PROFILE_MATCHED_ENTITY_BUCKET") {
+    return "Review dry-run match only; dashboard target lookup is not switched in P0.8.";
+  }
+  if (status === "MULTIPLE_TARGET_PROFILE_MATCH") {
+    return "Review overlapping active approved target profiles; do not let P0.8 guess.";
+  }
+  if (status === "INVALID_TARGET_BUCKET") {
+    return "Review P0.7 bucket inference/source data; do not guess target bucket.";
+  }
+  if (status === "INVALID_ENTITY") {
+    return "Resolve canonical entity catalog gaps before target profile backfill planning.";
+  }
+  if (!targetProfilesTableAvailable) {
+    return "Run the P0.8 migration, then plan P0.9 seed/backfill dry-run; no dashboard switch in P0.8.";
+  }
+  return "Create or approve a target profile in P0.9 planning; do not migrate old targets in P0.8.";
+}
+
+function targetProfileDryRunRowsToCsv(rows: readonly TargetProfileDryRunReportRow[]): string {
+  const lines = [
+    targetProfileDryRunCsvHeaders.join(","),
+    ...rows.map((row) => targetProfileDryRunCsvHeaders.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function summarizeTargetProfileDryRunRows(input: {
+  readonly rows: readonly TargetProfileDryRunReportRow[];
+  readonly outputFiles: TargetProfileDryRunSummary["outputFiles"];
+  readonly targetProfilesTableAvailable: boolean;
+  readonly targetProfilesLoaded: number;
+}): TargetProfileDryRunSummary {
+  const rows = input.rows;
+  return {
+    generatedAt: new Date().toISOString(),
+    totalRows: rows.length,
+    resolverV2ResolvedRows: rows.filter((row) => row.resolver_v2_entity_code).length,
+    resolverV2UnresolvedRows: rows.filter((row) => !row.resolver_v2_entity_code).length,
+    targetProfileMatchedRows: rows.filter((row) => (
+      row.target_profile_lookup_status === "TARGET_PROFILE_MATCHED_EXACT"
+      || row.target_profile_lookup_status === "TARGET_PROFILE_MATCHED_ENTITY_BUCKET"
+    )).length,
+    targetProfileNoActiveRows: rows.filter((row) => row.target_profile_lookup_status === "NO_ACTIVE_TARGET_PROFILE").length,
+    targetProfileMultipleMatchRows: rows.filter((row) => row.target_profile_lookup_status === "MULTIPLE_TARGET_PROFILE_MATCH").length,
+    targetProfileInvalidBucketRows: rows.filter((row) => row.target_profile_lookup_status === "INVALID_TARGET_BUCKET").length,
+    targetProfileInvalidEntityRows: rows.filter((row) => row.target_profile_lookup_status === "INVALID_ENTITY").length,
+    topNoActiveTargetProfileGroups: targetProfileIssueGroups(rows, "NO_ACTIVE_TARGET_PROFILE"),
+    topMultipleTargetProfileGroups: targetProfileIssueGroups(rows, "MULTIPLE_TARGET_PROFILE_MATCH"),
+    topMatchedTargetProfiles: targetProfileMatchedGroups(rows),
+    outputFiles: input.outputFiles,
+    targetProfilesTableAvailable: input.targetProfilesTableAvailable,
+    targetProfilesLoaded: input.targetProfilesLoaded,
+    safety: {
+      dashboardChanged: false,
+      databaseUpdated: false,
+      productionOutputsUpdated: false,
+      oldTargetLogicChanged: false
+    }
+  };
+}
+
+function targetProfileIssueGroups(
+  rows: readonly TargetProfileDryRunReportRow[],
+  status: TargetProfileLookupStatus,
+  limit = 20
+): readonly TargetProfileDryRunIssueGroup[] {
+  const groups = new Map<string, {
+    entityCode: string;
+    entityDisplayName: string;
+    sourceField: string;
+    sourceValue: string;
+    targetBucketCandidate: string;
+    machineCenterNo: string;
+    rows: number;
+    sampleDocuments: Set<string>;
+    sampleItems: Set<string>;
+    recommendedAction: string;
+  }>();
+
+  for (const row of rows) {
+    if (row.target_profile_lookup_status !== status) continue;
+    const key = [
+      row.resolver_v2_entity_code,
+      row.resolver_v2_target_bucket_candidate,
+      normalizeAliasKey(row.machine_center_no),
+      row.resolver_v2_source_field_used,
+      normalizeAliasKey(row.resolver_v2_source_value_used)
+    ].join(":");
+    const current = groups.get(key) ?? {
+      entityCode: row.resolver_v2_entity_code || "(unresolved)",
+      entityDisplayName: row.resolver_v2_entity_display_name || "(unresolved)",
+      sourceField: row.resolver_v2_source_field_used,
+      sourceValue: row.resolver_v2_source_value_used || "(blank)",
+      targetBucketCandidate: row.resolver_v2_target_bucket_candidate,
+      machineCenterNo: row.machine_center_no || "(blank)",
+      rows: 0,
+      sampleDocuments: new Set<string>(),
+      sampleItems: new Set<string>(),
+      recommendedAction: row.recommended_action
+    };
+    current.rows += 1;
+    if (row.document_no && current.sampleDocuments.size < 5) current.sampleDocuments.add(row.document_no);
+    if (row.item_no && current.sampleItems.size < 5) current.sampleItems.add(row.item_no);
+    groups.set(key, current);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      entityCode: group.entityCode,
+      entityDisplayName: group.entityDisplayName,
+      sourceField: group.sourceField,
+      sourceValue: group.sourceValue,
+      targetBucketCandidate: group.targetBucketCandidate,
+      machineCenterNo: group.machineCenterNo,
+      rows: group.rows,
+      sampleDocuments: [...group.sampleDocuments],
+      sampleItems: [...group.sampleItems],
+      recommendedAction: group.recommendedAction
+    }))
+    .sort((left, right) => right.rows - left.rows || left.entityCode.localeCompare(right.entityCode))
+    .slice(0, limit);
+}
+
+function targetProfileMatchedGroups(
+  rows: readonly TargetProfileDryRunReportRow[],
+  limit = 20
+): readonly TargetProfileDryRunMatchedGroup[] {
+  const groups = new Map<string, TargetProfileDryRunMatchedGroup>();
+  for (const row of rows) {
+    if (!row.target_profile_id) continue;
+    const current = groups.get(row.target_profile_id) ?? {
+      targetProfileId: row.target_profile_id,
+      entityCode: row.resolver_v2_entity_code,
+      entityDisplayName: row.resolver_v2_entity_display_name,
+      targetBucket: row.resolver_v2_target_bucket_candidate,
+      machineCenterNo: row.target_profile_machine_center_no || "(generic)",
+      targetQty: typeof row.target_profile_target_qty === "number" ? row.target_profile_target_qty : 0,
+      unit: row.target_profile_unit,
+      rows: 0
+    };
+    groups.set(row.target_profile_id, {
+      ...current,
+      rows: current.rows + 1
+    });
+  }
+  return [...groups.values()]
+    .sort((left, right) => right.rows - left.rows || left.targetProfileId.localeCompare(right.targetProfileId))
+    .slice(0, limit);
+}
+
+async function runTargetProfileDryRun(pool: DatabasePool) {
+  const csvPath = resolveRepoPath(process.env.TARGET_PROFILE_DRY_RUN_CSV?.trim() || DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH);
+  const jsonPath = resolveRepoPath(process.env.TARGET_PROFILE_DRY_RUN_JSON?.trim() || DEFAULT_TARGET_PROFILE_DRY_RUN_JSON_PATH);
+
+  console.log("Business Central target profile dry run");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`CSV output: ${displayRepoPath(csvPath)}`);
+  console.log(`JSON output: ${displayRepoPath(jsonPath)}`);
+  console.log("Safety: read-only; dashboard target lookup, production_outputs.entity_id, old targets, aliases, and conditional rules are not changed.");
+
+  const [catalog, sourceRows, targetProfileState] = await Promise.all([
+    queryBusinessCentralCanonicalEntityCatalog(pool),
+    queryEntityV2SourceRows(pool),
+    queryBusinessCentralTargetProfiles(pool)
+  ]);
+  const reportRows = buildTargetProfileDryRunReportRows({
+    sourceRows,
+    catalog,
+    targetProfiles: targetProfileState.profiles,
+    targetProfilesTableAvailable: targetProfileState.tableAvailable
+  });
+  const outputFiles = {
+    csv: displayRepoPath(csvPath),
+    json: displayRepoPath(jsonPath)
+  };
+  const summary = summarizeTargetProfileDryRunRows({
+    rows: reportRows,
+    outputFiles,
+    targetProfilesTableAvailable: targetProfileState.tableAvailable,
+    targetProfilesLoaded: targetProfileState.profiles.length
+  });
+
+  await mkdir(path.dirname(csvPath), { recursive: true });
+  await mkdir(path.dirname(jsonPath), { recursive: true });
+  await writeFile(csvPath, targetProfileDryRunRowsToCsv(reportRows), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_rows=${summary.totalRows}`);
+  console.log(`- resolver_v2_resolved_rows=${summary.resolverV2ResolvedRows}; resolver_v2_unresolved_rows=${summary.resolverV2UnresolvedRows}`);
+  console.log(`- target_profile_matched_rows=${summary.targetProfileMatchedRows}`);
+  console.log(`- target_profile_no_active_rows=${summary.targetProfileNoActiveRows}`);
+  console.log(`- target_profile_multiple_match_rows=${summary.targetProfileMultipleMatchRows}`);
+  console.log(`- target_profile_invalid_bucket_rows=${summary.targetProfileInvalidBucketRows}`);
+  console.log(`- target_profile_invalid_entity_rows=${summary.targetProfileInvalidEntityRows}`);
+  console.log(`- target_profiles_table_available=${summary.targetProfilesTableAvailable}`);
+  console.log(`- target_profiles_loaded=${summary.targetProfilesLoaded}`);
+
+  if (!summary.targetProfilesTableAvailable) {
+    console.log("");
+    console.log("Target profiles table is not available in this database yet. This dry run treated profiles as empty; run migrations before P0.9 seed/backfill planning.");
+  } else if (summary.targetProfilesLoaded === 0) {
+    console.log("");
+    console.log("Target profiles table is empty. NO_ACTIVE_TARGET_PROFILE is expected until P0.9/backfill/seed planning.");
+  }
+
+  console.log("");
+  console.log("Top no-active target profile groups");
+  if (summary.topNoActiveTargetProfileGroups.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.topNoActiveTargetProfileGroups.slice(0, 10)) {
+    console.log(
+      `- entity=${item.entityCode}; bucket=${item.targetBucketCandidate}; machine_center=${item.machineCenterNo}; rows=${item.rows}; source=${item.sourceField}:${item.sourceValue}`
+    );
+  }
+
+  console.log("");
+  console.log("Top multiple target profile groups");
+  if (summary.topMultipleTargetProfileGroups.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.topMultipleTargetProfileGroups.slice(0, 10)) {
+    console.log(
+      `- entity=${item.entityCode}; bucket=${item.targetBucketCandidate}; machine_center=${item.machineCenterNo}; rows=${item.rows}; source=${item.sourceField}:${item.sourceValue}`
+    );
+  }
+
+  console.log("");
+  console.log("Top matched target profiles");
+  if (summary.topMatchedTargetProfiles.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.topMatchedTargetProfiles.slice(0, 10)) {
+    console.log(
+      `- profile=${item.targetProfileId}; entity=${item.entityCode}; bucket=${item.targetBucket}; machine_center=${item.machineCenterNo}; target=${item.targetQty} ${item.unit}; rows=${item.rows}`
+    );
+  }
+
+  console.log("");
+  console.log("Reports written");
+  console.log(`- ${outputFiles.csv}`);
+  console.log(`- ${outputFiles.json}`);
+}
+
 async function runMappingPlan(pool: DatabasePool) {
   const limit = Math.min(Number(process.env.MAPPING_PLAN_LIMIT ?? 250) || 250, 1000);
   const outputPathInput = process.env.MAPPING_PLAN_OUTPUT?.trim() || DEFAULT_MAPPING_PLAN_PATH;
@@ -2822,8 +3327,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -2835,6 +3340,7 @@ async function main() {
     else if (command === "mapping-plan") await runMappingPlan(database.pool);
     else if (command === "mapping-plan-apply") await runMappingPlanApply(database.pool);
     else if (command === "entity-v2-dry-run") await runEntityV2DryRun(database.pool);
+    else if (command === "target-profile-dry-run") await runTargetProfileDryRun(database.pool);
     else await runMappingApply(database.pool);
   } finally {
     await database.pool.end();

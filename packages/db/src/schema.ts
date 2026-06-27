@@ -197,6 +197,46 @@ export const productionTargets = pgTable(
   ]
 );
 
+export const targetProfiles = pgTable(
+  "target_profiles",
+  {
+    id,
+    entityId: uuid("entity_id")
+      .notNull()
+      .references(() => masterEntities.id),
+    machineCenterNo: text("machine_center_no"),
+    machineCenterNoNormalized: text("machine_center_no_normalized"),
+    targetBucket: text("target_bucket").notNull(),
+    targetBucketNormalized: text("target_bucket_normalized").notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    targetQty: numeric("target_qty", { precision: 18, scale: 4 }).notNull(),
+    unit: text("unit").notNull().default("PCS"),
+    isActive: boolean("is_active").notNull().default(true),
+    approvalStatus: text("approval_status").notNull().default("draft"),
+    source: text("source").notNull().default("manual"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id),
+    updatedBy: uuid("updated_by").references(() => users.id),
+    createdAt,
+    updatedAt
+  },
+  (table) => [
+    index("idx_target_profiles_lookup_exact").on(
+      table.entityId,
+      table.targetBucketNormalized,
+      table.machineCenterNoNormalized,
+      table.effectiveFrom
+    ),
+    index("idx_target_profiles_lookup_bucket").on(
+      table.entityId,
+      table.targetBucketNormalized,
+      table.effectiveFrom
+    ),
+    index("idx_target_profiles_active_approval").on(table.isActive, table.approvalStatus)
+  ]
+);
+
 export const syncRuns = pgTable("sync_runs", {
   id,
   sourceSystem: text("source_system").notNull(),
@@ -412,11 +452,13 @@ export const dataQualityIssues = pgTable(
     resolvedBy: uuid("resolved_by").references(() => users.id),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolutionNote: text("resolution_note"),
-    createdAt
+    createdAt,
+    updatedAt
   },
   (table) => [
     index("idx_dq_status_severity").on(table.status, table.severity),
-    index("idx_dq_issue_code").on(table.issueCode)
+    index("idx_dq_issue_code").on(table.issueCode),
+    index("idx_dq_source_ref").on(table.sourceSystem, table.issueCode, table.sourceRef)
   ]
 );
 

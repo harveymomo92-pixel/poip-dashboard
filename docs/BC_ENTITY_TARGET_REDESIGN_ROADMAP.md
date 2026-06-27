@@ -452,6 +452,28 @@ Old target logic still works.
 Tests cover exact match, fallback match, no match, and multiple match.
 ```
 
+Implemented P0.8 artifacts:
+
+```text
+Domain model:
+packages/domain/src/master-data/target-profile.ts
+
+Migration:
+packages/db/migrations/0007_target_profiles.sql
+
+Dry-run command:
+pnpm bc:target-profile-dry-run
+```
+
+Dry-run outputs:
+
+```text
+.tmp/bc-target-profile-dry-run.csv
+.tmp/bc-target-profile-dry-run.json
+```
+
+P0.8 remains additive only. `target_profiles` does not power the dashboard yet, `production_targets` remains the production target source, and P0.9 is responsible for seed/backfill dry-run planning. Do not resolve target gaps by creating broad/global aliases.
+
 Required validation:
 
 ```bash
