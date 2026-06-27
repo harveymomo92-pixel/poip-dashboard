@@ -573,6 +573,21 @@ pnpm bc:target-profile-backfill-dry-run
 
 P0.9 is reporting/export only. It does not update `production_outputs.entity_id`, does not insert or update `target_profiles`, does not create entities, and does not switch dashboard target lookup. P1.0 is the earliest phase that may perform a controlled switch after dry-run approval.
 
+Implemented P0.9a review-gate artifacts:
+
+```text
+Domain gate logic:
+packages/domain/src/master-data/high-risk-review-plan.ts
+
+High-risk review planner:
+pnpm bc:high-risk-review-plan
+
+KPI compare scaffold:
+pnpm bc:kpi-compare-v1-v2
+```
+
+P0.9a blocks P1.0 while high-risk groups remain, while `target_profiles` has zero active approved profiles, while most resolver-v2 rows still have `NO_ACTIVE_TARGET_PROFILE`, or while KPI comparison is not ready and reviewed. When blocked, P1.0 dashboard switching is not implemented; only reports and docs are produced.
+
 ---
 
 ## 18. P0.9 Risk Classification
@@ -627,7 +642,16 @@ pnpm test
 pnpm build
 pnpm bc:entity-v2-backfill-dry-run
 pnpm bc:target-profile-backfill-dry-run
+pnpm bc:high-risk-review-plan
+pnpm bc:kpi-compare-v1-v2
 git diff --check
+```
+
+P0.9a gate requirement:
+
+```text
+p10Gate.status must be PASS before P1.0 can switch dashboard behavior.
+If p10Gate.status is BLOCKED, keep BC_ENTITY_RESOLVER_VERSION=v1 and BC_TARGET_LOOKUP_VERSION=v1.
 ```
 
 ---

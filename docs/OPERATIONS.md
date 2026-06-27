@@ -315,6 +315,57 @@ Safety:
 - These commands do not change aliases, conditional rules, dashboard KPI behavior, or old target lookup.
 - P1.0 controlled switch comes later after dry-run approval.
 
+### Business Central P0.9a high-risk review gate
+
+Use the P0.9a planner to turn dry-run findings into an explicit P1.0 gate:
+
+```bash
+pnpm bc:high-risk-review-plan
+```
+
+Outputs:
+
+- `.tmp/bc-high-risk-review-plan.csv`
+- `.tmp/bc-high-risk-review-plan.json`
+
+Review decisions:
+
+- `BLOCK_P1_SWITCH`: do not start P1.0 switch.
+- `MANUAL_APPROVAL_REQUIRED`: review and approve manually before migration.
+- `CAN_CREATE_CANONICAL_ENTITY_LATER`: canonical entity appears needed, but P0.9a does not create it.
+- `CAN_CREATE_TARGET_PROFILE_DRAFT_LATER`: target profile draft may be created later after review.
+- `CAN_AUTO_COLLAPSE_IN_FUTURE`: safe-looking collapse candidate for a future approved migration.
+- `NEEDS_SOURCE_DATA_FIX`: source value is blank/unusable.
+- `NEEDS_ALIAS_CLEANUP`: alias/catalog conflict must be cleaned up manually.
+- `IGNORE_FOR_NOW`: informational/non-blocking item.
+
+P1.0 gate rules:
+
+- Any unresolved high-risk entity or target profile group keeps `p10Gate.status = BLOCKED`.
+- Zero active approved `target_profiles` keeps the gate blocked.
+- `NO_ACTIVE_TARGET_PROFILE` for most resolver-v2 resolved rows keeps the gate blocked.
+- KPI comparison must exist and be reviewed before the gate can pass.
+
+Read-only KPI compare scaffold:
+
+```bash
+pnpm bc:kpi-compare-v1-v2
+```
+
+Outputs:
+
+- `.tmp/bc-kpi-compare-v1-v2.csv`
+- `.tmp/bc-kpi-compare-v1-v2.json`
+
+If P0.9a is blocked, the KPI compare scaffold returns `P1.0_BLOCKED_BY_HIGH_RISK_REVIEW`. It does not switch dashboard logic and does not write database rows.
+
+P1.0 feature flags remain planned and default to v1 behavior:
+
+```text
+BC_ENTITY_RESOLVER_VERSION=v1
+BC_TARGET_LOOKUP_VERSION=v1
+```
+
 Safety notes:
 
 - The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.

@@ -32,6 +32,8 @@
     "bc:target-profile-dry-run": "bash scripts/bc-metrics.sh target-profile-dry-run",
     "bc:entity-v2-backfill-dry-run": "bash scripts/bc-metrics.sh entity-v2-backfill-dry-run",
     "bc:target-profile-backfill-dry-run": "bash scripts/bc-metrics.sh target-profile-backfill-dry-run",
+    "bc:high-risk-review-plan": "bash scripts/bc-metrics.sh high-risk-review-plan",
+    "bc:kpi-compare-v1-v2": "bash scripts/bc-metrics.sh kpi-compare-v1-v2",
     "v1:master-profile": "bash scripts/v1-master.sh profile",
     "v1:master-import": "bash scripts/v1-master.sh import",
     "v1:master-reconcile": "bash scripts/v1-master.sh reconcile",

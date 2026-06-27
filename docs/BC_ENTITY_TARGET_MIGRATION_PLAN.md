@@ -1,6 +1,6 @@
 # Business Central Entity & Target Migration Plan
 
-Status: P0.9 dry-run implemented
+Status: P0.9 dry-run and P0.9a review gate implemented
 Related roadmap: `docs/BC_ENTITY_TARGET_REDESIGN_ROADMAP.md`
 
 ---
@@ -122,7 +122,33 @@ Both reports include family summaries for OMSO, POLYPRINT, VFINE, LONGSUN, BORCH
 
 ---
 
-## 6. Rollback
+## 6. P0.9a High-Risk Review Gate
+
+P0.9a turns the dry-run findings into a P1.0 gate:
+
+```bash
+pnpm bc:high-risk-review-plan
+pnpm bc:kpi-compare-v1-v2
+```
+
+Outputs:
+
+```text
+.tmp/bc-high-risk-review-plan.csv
+.tmp/bc-high-risk-review-plan.json
+.tmp/bc-kpi-compare-v1-v2.csv
+.tmp/bc-kpi-compare-v1-v2.json
+```
+
+The gate must remain `BLOCKED` while any high-risk entity or target profile groups remain unresolved, while `target_profiles` has zero active approved profiles, while most resolver-v2 rows have no active target profile, or while KPI comparison is not ready and reviewed.
+
+P0.9a is still export-only. It does not update rows, insert target profiles, create canonical entities, alter aliases, alter conditional rules, or switch dashboard lookup.
+
+Do not fix P0.9a blockers by creating broad/global aliases. Resolve them through reviewed canonical entity planning, alias cleanup, source-data fixes, target profile draft creation, and later manual approval.
+
+---
+
+## 7. Rollback
 
 Preferred rollback:
 
