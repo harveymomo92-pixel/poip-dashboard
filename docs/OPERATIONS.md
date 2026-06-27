@@ -368,6 +368,36 @@ Use `/data-quality` to review issues. Status actions:
 - Acknowledge: issue is known and under review.
 - Resolve: issue has been corrected or accepted with a required note.
 - Ignore: issue is intentionally excluded with a required note.
+
+### Business Central Data Quality automation
+
+P0.6 adds a manual generator for actionable Business Central diagnostics:
+
+```bash
+curl -b /tmp/poip.cookies \
+  -X POST http://localhost:4000/api/v1/data-quality/business-central/generate
+```
+
+The same action is available in `/data-quality` for users with `settings.manage`. The generator creates or updates grouped issues for:
+
+- `BC_UNMAPPED_SOURCE`
+- `BC_CONDITIONAL_MAPPING_REVIEW`
+- `BC_TARGET_MISSING`
+- `BC_NO_ACTIVE_TARGET`
+- `BC_REJECT_PCS_INCOMPLETE`
+- `BC_AMBIGUOUS_REJECT_ATTACHMENT`
+
+Each generated issue uses a stable `sourceRef` dedupe key and includes source field/value, normalized value, row count, OK quantity impact, posting-date range, document/item samples, suggested target entities where available, recommended action, and a UI hint. Re-running the generator updates the existing issue instead of inserting duplicates. Active generated issues are auto-resolved only when the corresponding source gap is no longer present; ignored issues remain visible as ignored history.
+
+Recommended actions are intentionally conservative:
+
+- Ambiguous OMSO/printing groups: use a Conditional Mapping Rule, not a broad alias.
+- Unmapped groups without a candidate: review or create master entity/alias.
+- Target gaps: create or approve the target for the entity-day/month.
+- Reject PCS incomplete: review reject attachment or gross-weight conversion source.
+- Ambiguous reject attachment: review candidate OK rows and attach deterministically.
+
+The generator writes only `data_quality_issues` and audit logs. It does not change dashboard KPI formulas, target formulas, reject formulas, production output quantities, aliases, conditional rules, targets, or conversion mappings. It is not hooked into every successful sync yet because the aggregation can scan Business Central history; run it manually after sync/backfill or after mapping/target review when operators need a fresh issue queue.
 - Reopen: brings resolved/ignored issues back into the active queue.
 
 All status changes write audit events.
@@ -443,3 +473,117 @@ Rules:
 6. Keep reject rate as `N/A` while Reject PCS Eq is incomplete.
 7. Re-run diagnostics after every mapping commit.
 8. Record any UAT mapping decision in an ops note.
+
+<!-- BC_ENTITY_TARGET_REDESIGN_ROADMAP_START -->
+
+## Business Central Entity & Target Redesign Roadmap
+
+This section tracks the safe redesign from complex Business Central entity aliases to canonical entity resolution and target profiles.
+
+Primary docs:
+
+```text
+docs/BC_ENTITY_TARGET_REDESIGN_ROADMAP.md
+docs/BC_ENTITY_RESOLVER_V2_DESIGN.md
+docs/BC_TARGET_PROFILES.md
+docs/BC_ENTITY_TARGET_MIGRATION_PLAN.md
+docs/BC_ENTITY_TARGET_RELEASE_NOTES.md
+```
+
+### Phase order
+
+```text
+P0.7 Entity Resolver V2 Dry Run
+P0.8 Target Profile Model Design
+P0.9 Backfill Plan & Migration Dry Run
+P1.0 Controlled Switch to Resolver V2 + Target Profiles
+```
+
+### Safety rule
+
+```text
+Do not switch dashboard KPI behavior before P0.7, P0.8, and P0.9 dry-run reports are reviewed.
+```
+
+### P0.7 planned command
+
+```bash
+pnpm bc:entity-v2-dry-run
+```
+
+Expected outputs:
+
+```text
+.tmp/bc-entity-v2-dry-run.csv
+.tmp/bc-entity-v2-dry-run.json
+```
+
+### P0.8 planned target profile work
+
+Target lookup should eventually use:
+
+```text
+entity_id
++ target_bucket
++ optional machine_center_no
++ posting_date effective range
+```
+
+### P0.9 planned dry-run commands
+
+```bash
+pnpm bc:entity-v2-backfill-dry-run
+pnpm bc:target-profile-backfill-dry-run
+```
+
+Expected outputs:
+
+```text
+.tmp/bc-entity-v2-backfill-dry-run.csv
+.tmp/bc-entity-v2-backfill-dry-run.json
+.tmp/bc-target-profile-backfill-dry-run.csv
+.tmp/bc-target-profile-backfill-dry-run.json
+```
+
+### P1.0 planned comparison command
+
+```bash
+pnpm bc:kpi-compare-v1-v2
+```
+
+Expected outputs:
+
+```text
+.tmp/bc-kpi-compare-v1-v2.csv
+.tmp/bc-kpi-compare-v1-v2.json
+```
+
+### Feature flags planned for P1.0
+
+```text
+BC_ENTITY_RESOLVER_VERSION=v1|v2
+BC_TARGET_LOOKUP_VERSION=v1|target_profiles
+```
+
+### Do not do during transition
+
+```text
+Do not delete old aliases.
+Do not delete conditional rules.
+Do not delete old detailed entities.
+Do not update production_outputs.entity_id without approved dry-run report.
+Do not create broad/global aliases to force ambiguous mappings.
+```
+
+### Validation baseline
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+git diff --check
+```
+
+<!-- BC_ENTITY_TARGET_REDESIGN_ROADMAP_END -->
+

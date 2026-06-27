@@ -178,10 +178,39 @@ Commit body can be `{}` to commit all valid rows, or:
 | `GET` | `/data-quality/summary` | `data_quality.view` | Data quality issue counts and summary. |
 | `GET` | `/data-quality/issues` | `data_quality.view` | Paginated issues filtered by status, severity, source, issue code, and date. |
 | `GET` | `/data-quality/issues/:id` | `data_quality.view` | Redacted issue detail and source context. |
+| `POST` | `/data-quality/business-central/generate` | `settings.manage` | Generate/update Business Central diagnostic issues for unmapped sources, conditional mapping reviews, target gaps, and reject PCS gaps. |
 | `POST` | `/data-quality/issues/:id/acknowledge` | `settings.manage` | Mark an open issue as acknowledged. |
 | `POST` | `/data-quality/issues/:id/resolve` | `settings.manage` | Resolve an active issue with a required note. |
 | `POST` | `/data-quality/issues/:id/ignore` | `settings.manage` | Ignore an active issue with a required note. |
 | `POST` | `/data-quality/issues/:id/reopen` | `settings.manage` | Reopen a resolved or ignored issue. |
+
+Business Central generation is a manual P0.6 operation. It does not change production output quantities, KPI formulas, targets, aliases, conditional rules, or conversion mappings. It creates or updates grouped issues using stable `sourceRef` dedupe keys and resolves active generated issues only when the source gap is no longer present.
+
+Generated issue codes:
+
+- `BC_UNMAPPED_SOURCE`
+- `BC_CONDITIONAL_MAPPING_REVIEW`
+- `BC_TARGET_MISSING`
+- `BC_NO_ACTIVE_TARGET`
+- `BC_REJECT_PCS_INCOMPLETE`
+- `BC_AMBIGUOUS_REJECT_ATTACHMENT`
+
+Example response:
+
+```json
+{
+  "created": 6,
+  "updated": 2,
+  "unchanged": 18,
+  "resolved": 1,
+  "byType": {
+    "BC_UNMAPPED_SOURCE": { "created": 3, "updated": 1, "unchanged": 10, "resolved": 0 }
+  },
+  "bySeverity": {
+    "CRITICAL": { "created": 1, "updated": 0, "unchanged": 2, "resolved": 0 }
+  }
+}
+```
 
 ## Master Data and Mapping
 
