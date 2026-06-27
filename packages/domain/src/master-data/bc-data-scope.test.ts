@@ -88,3 +88,81 @@ test("unknown blank source with insufficient evidence stays unknown review", () 
   assert.equal(result.bcEntitySourceStatus, "ENTITY_SOURCE_BLANK_UNKNOWN");
   assert.equal(result.blocksP10AfterScope, true);
 });
+
+test("Transfer entry type is retained for future inventory movement and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Transfer",
+    locationCode: "INTRANSIT",
+    itemNo: "PALLETK-001",
+    documentNo: "TR2601/0001",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "TRANSFER_OR_INVENTORY_MOVEMENT");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("Consumption entry type is retained for future material usage and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Consumption",
+    locationCode: "PRODUKSI",
+    itemNo: "TINTA-DA10",
+    itemCategoryCode: "PBT-TINTA",
+    documentNo: "SPK2601/P0001",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "CONSUMPTION_OR_MATERIAL_USAGE");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("Sale entry type is retained for future sales reporting and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Sale",
+    locationCode: "JADI",
+    itemNo: "CR16OZ8THP",
+    documentNo: "SJ2601/A0005",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "SALES_REPORT");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("Purchase entry type is retained for future purchase receiving and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Purchase",
+    locationCode: "BAHAN",
+    itemNo: "RM-001",
+    documentNo: "GR2601/0001",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "PURCHASE_OR_RECEIVING");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("positive and negative adjustment entry types remain unknown review for now", () => {
+  for (const entryType of ["Positive Adjmt.", "Negative Adjmt."]) {
+    const result = classifyBusinessCentralDataScope({
+      entryType,
+      locationCode: "SPAREPART",
+      itemNo: "SP9000000124",
+      documentNo: "M2301/1015",
+      unitOfMeasureCode: "PCS",
+      blocksP10BeforeScope: true
+    });
+
+    assert.equal(result.bcCurrentKpiScope, "UNKNOWN_SCOPE_REVIEW");
+    assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
+    assert.equal(result.blocksP10AfterScope, true);
+  }
+});

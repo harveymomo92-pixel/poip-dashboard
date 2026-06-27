@@ -74,6 +74,15 @@ blocks_p10_after_scope
 
 P1.0 gating uses `blocks_p10_after_scope` while preserving the original pre-scope blocker signal for traceability. `OUT_OF_CURRENT_KPI_SCOPE` rows remain visible in reports and are counted in `excludedFromP10ButRetainedRows`.
 
+P0.9e classifies only deterministic high-confidence Business Central entry types as out of current KPI scope:
+
+- `TRANSFER` -> `TRANSFER_OR_INVENTORY_MOVEMENT`
+- `CONSUMPTION` -> `CONSUMPTION_OR_MATERIAL_USAGE`
+- `SALE` -> `SALES_REPORT`
+- `PURCHASE` -> `PURCHASE_OR_RECEIVING`
+
+These classifications do not change stored rows or dashboard behavior. `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, and weak sparepart/material text-pattern candidates remain `UNKNOWN_SCOPE_REVIEW` for later review.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

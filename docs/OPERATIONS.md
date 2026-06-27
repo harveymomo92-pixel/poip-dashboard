@@ -748,6 +748,7 @@ P0.8 Target Profile Model Design
 P0.9 Backfill Plan & Migration Dry Run
 P0.9c Business Central Data Scope + Future Use Classifier
 P0.9d Unknown Scope Evidence Profiler
+P0.9e High-Confidence Business Central Scope Rules
 P1.0 Controlled Switch to Resolver V2 + Target Profiles
 ```
 
@@ -830,6 +831,17 @@ Expected outputs:
 ```
 
 The profiler is advisory only. It proposes classifier rule candidates and confidence levels, but does not update source data, aliases, conditional rules, target profiles, dashboard flags, or P1.0 gates.
+
+P0.9e implements only these high-confidence deterministic entry-type scope rules:
+
+```text
+TRANSFER -> TRANSFER_OR_INVENTORY_MOVEMENT
+CONSUMPTION -> CONSUMPTION_OR_MATERIAL_USAGE
+SALE -> SALES_REPORT
+PURCHASE -> PURCHASE_OR_RECEIVING
+```
+
+They are all `OUT_OF_CURRENT_KPI_SCOPE`, remain visible in reports, and no longer block P1.0 after scope. Do not treat `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern candidates as implemented rules yet.
 
 ### P1.0 planned comparison command
 

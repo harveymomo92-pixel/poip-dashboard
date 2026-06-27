@@ -205,7 +205,22 @@ P0.9d is reporting-only. Unknown rows that block P1.0 remain blocking until a la
 
 ---
 
-## 9. Rollback
+## 9. P0.9e High-Confidence Scope Rules
+
+P0.9e implements only deterministic high-confidence rules discovered by P0.9d:
+
+```text
+TRANSFER    -> OUT_OF_CURRENT_KPI_SCOPE / TRANSFER_OR_INVENTORY_MOVEMENT
+CONSUMPTION -> OUT_OF_CURRENT_KPI_SCOPE / CONSUMPTION_OR_MATERIAL_USAGE
+SALE        -> OUT_OF_CURRENT_KPI_SCOPE / SALES_REPORT
+PURCHASE    -> OUT_OF_CURRENT_KPI_SCOPE / PURCHASE_OR_RECEIVING
+```
+
+These rows remain exported in every report and are excluded only from P1.0 blocker calculation via `blocks_p10_after_scope=false`. P0.9e does not implement medium/low candidates, including `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern rules.
+
+---
+
+## 10. Rollback
 
 Preferred rollback:
 

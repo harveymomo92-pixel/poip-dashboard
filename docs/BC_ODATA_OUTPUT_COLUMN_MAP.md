@@ -175,6 +175,17 @@ Outputs:
 
 The profile groups unknown rows by document prefix, item prefix, location, item category, unit, entity-source status, source value, current entity, and target bucket. Suggested rules are advisory only. They do not change `bc_current_kpi_scope`, `bc_future_use_domain`, aliases, conditional rules, target profiles, or dashboard behavior.
 
+P0.9e implements only the deterministic high-confidence entry-type rules from the profiler:
+
+| Entry_Type | bc_current_kpi_scope | bc_future_use_domain |
+|---|---|---|
+| `TRANSFER` | `OUT_OF_CURRENT_KPI_SCOPE` | `TRANSFER_OR_INVENTORY_MOVEMENT` |
+| `CONSUMPTION` | `OUT_OF_CURRENT_KPI_SCOPE` | `CONSUMPTION_OR_MATERIAL_USAGE` |
+| `SALE` | `OUT_OF_CURRENT_KPI_SCOPE` | `SALES_REPORT` |
+| `PURCHASE` | `OUT_OF_CURRENT_KPI_SCOPE` | `PURCHASE_OR_RECEIVING` |
+
+These rows are still exported and retained, but `blocks_p10_after_scope=false`. Medium/low candidates such as `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, and sparepart/material text patterns remain `UNKNOWN_SCOPE_REVIEW` until a later reviewed rule.
+
 ## Practical Warnings
 
 `Entry_Type = Output` rows still need classification. Finished output and reject/scrap rows can both appear in this scope.

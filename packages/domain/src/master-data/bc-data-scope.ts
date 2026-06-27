@@ -72,6 +72,98 @@ export function classifyBusinessCentralDataScope(
   const hasPrimaryEntitySource = Boolean(prodLineDescription);
   const hasFallbackEntitySource = !hasPrimaryEntitySource && Boolean(prodLineNo || machineCenterNo);
 
+  if (entryType === "TRANSFER") {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "TRANSFER_OR_INVENTORY_MOVEMENT",
+      reason: "Transfer entry type is deterministically outside the current output KPI dashboard and belongs to future inventory movement reporting.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        locationCode ? "locationCode" : "",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType === "CONSUMPTION") {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "CONSUMPTION_OR_MATERIAL_USAGE",
+      reason: "Consumption entry type is deterministically outside the current output KPI dashboard and belongs to future material usage reporting.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        locationCode ? "locationCode" : "",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        itemCategoryCode ? "itemCategoryCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType === "SALE") {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "SALES_REPORT",
+      reason: "Sale entry type is deterministically outside the current output KPI dashboard and belongs to future sales reporting.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        locationCode ? "locationCode" : "",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType === "PURCHASE") {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "PURCHASE_OR_RECEIVING",
+      reason: "Purchase entry type is deterministically outside the current output KPI dashboard and belongs to future purchase/receiving reporting.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        locationCode ? "locationCode" : "",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType && entryType !== "OUTPUT") {
+    return finalizeScope({
+      scope: "UNKNOWN_SCOPE_REVIEW",
+      futureUseDomain: "UNKNOWN_REVIEW",
+      reason: "Non-output entry type is not covered by the current high-confidence deterministic scope rules.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        locationCode ? "locationCode" : "",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        itemCategoryCode ? "itemCategoryCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
   if (isRejectLike(locationCode, itemNo, itemDescription, itemCategoryCode, outputClass)) {
     const scrapLike = isScrapLike(itemDescription, itemCategoryCode, itemNo);
     const evidenceFields = uniqueFields([
