@@ -747,6 +747,7 @@ P0.7 Entity Resolver V2 Dry Run
 P0.8 Target Profile Model Design
 P0.9 Backfill Plan & Migration Dry Run
 P0.9c Business Central Data Scope + Future Use Classifier
+P0.9d Unknown Scope Evidence Profiler
 P1.0 Controlled Switch to Resolver V2 + Target Profiles
 ```
 
@@ -814,6 +815,21 @@ bc_scope_evidence_fields
 bc_entity_source_status
 blocks_p10_after_scope
 ```
+
+P0.9d profiles the remaining unknown scope rows:
+
+```bash
+pnpm bc:unknown-scope-profile
+```
+
+Expected outputs:
+
+```text
+.tmp/bc-unknown-scope-profile.csv
+.tmp/bc-unknown-scope-profile.json
+```
+
+The profiler is advisory only. It proposes classifier rule candidates and confidence levels, but does not update source data, aliases, conditional rules, target profiles, dashboard flags, or P1.0 gates.
 
 ### P1.0 planned comparison command
 

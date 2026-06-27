@@ -160,6 +160,21 @@ ENTITY_SOURCE_BLANK_UNKNOWN: entity source is blank and remaining evidence is in
 
 Rows with blank entity source must not collapse into a generic `(blank)` decision only. Classify with `Entry_Type`, `Location_Code`, `Item_No`, `gItem_Description`, `Description`, `Item_Category_Code`, `Document_No`, `Quantity`, `Unit_of_Measure_Code`, and `Gross_Weight` before deciding whether they are future-use rows or true unknown review rows.
 
+P0.9d profiles remaining `UNKNOWN_SCOPE_REVIEW` rows without reclassifying them:
+
+```bash
+pnpm bc:unknown-scope-profile
+```
+
+Outputs:
+
+```text
+.tmp/bc-unknown-scope-profile.csv
+.tmp/bc-unknown-scope-profile.json
+```
+
+The profile groups unknown rows by document prefix, item prefix, location, item category, unit, entity-source status, source value, current entity, and target bucket. Suggested rules are advisory only. They do not change `bc_current_kpi_scope`, `bc_future_use_domain`, aliases, conditional rules, target profiles, or dashboard behavior.
+
 ## Practical Warnings
 
 `Entry_Type = Output` rows still need classification. Finished output and reject/scrap rows can both appear in this scope.

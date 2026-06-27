@@ -184,7 +184,28 @@ P1.0 remains blocked until the checklist is resolved, target profiles have revie
 
 ---
 
-## 8. Rollback
+## 8. P0.9d Unknown Scope Evidence Profiler
+
+P0.9d explains remaining `UNKNOWN_SCOPE_REVIEW` rows before any classifier, alias, or target-profile changes:
+
+```bash
+pnpm bc:unknown-scope-profile
+```
+
+Outputs:
+
+```text
+.tmp/bc-unknown-scope-profile.csv
+.tmp/bc-unknown-scope-profile.json
+```
+
+The profiler groups unknown rows by entry type, location, item category, unit, document prefix, item prefix, source value, current entity, target bucket, machine center, and entity-source status. It may suggest future classifier rule candidates with confidence levels, but it does not reclassify source rows.
+
+P0.9d is reporting-only. Unknown rows that block P1.0 remain blocking until a later reviewed classifier change is implemented and the dry-run gates are rerun.
+
+---
+
+## 9. Rollback
 
 Preferred rollback:
 

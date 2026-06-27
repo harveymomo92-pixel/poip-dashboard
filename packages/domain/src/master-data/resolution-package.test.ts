@@ -153,6 +153,8 @@ test("resolution package summary safety flags remain false", () => {
   });
 
   assert.equal(summary.p10Readiness.status, "BLOCKED");
+  assert.equal(summary.unknownScopeProfile.unknownScopeRows, 0);
+  assert.equal(summary.unknownScopeProfile.profileCsvPath, null);
   assert.deepEqual(summary.safety, {
     databaseUpdated: false,
     productionOutputsUpdated: false,

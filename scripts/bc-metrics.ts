@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDashboardKpiSummary } from "../packages/domain/src/kpi/dashboard.js";
@@ -63,6 +63,13 @@ import {
   type ResolutionPackageApprovalStatus
 } from "../packages/domain/src/master-data/resolution-package.js";
 import {
+  buildBusinessCentralUnknownScopeProfile,
+  type BusinessCentralUnknownScopeProfileGroup,
+  type BusinessCentralUnknownScopeProfileInputRow,
+  type BusinessCentralUnknownScopeProfileSummary,
+  type UnknownScopeRuleConfidence
+} from "../packages/domain/src/master-data/unknown-scope-profile.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -111,6 +118,7 @@ type Command =
   | "target-profile-backfill-dry-run"
   | "high-risk-review-plan"
   | "kpi-compare-v1-v2"
+  | "unknown-scope-profile"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -194,6 +202,7 @@ interface EntityV2ReportRow extends BusinessCentralScopeReportFields {
   readonly item_description: string;
   readonly item_category_code: string;
   readonly quantity: number;
+  readonly unit_of_measure_code: string;
   readonly gross_weight: number | "";
   readonly entry_type: string;
   readonly location_code: string;
@@ -724,6 +733,32 @@ interface BlockedGroupsChecklistCsvRow {
   readonly notes: "";
 }
 
+interface UnknownScopeProfileCsvRow {
+  readonly group_id: string;
+  readonly rows: number;
+  readonly blocks_p10_after_scope: "true" | "false";
+  readonly entry_type: string;
+  readonly location_code: string;
+  readonly item_category_code: string;
+  readonly unit_of_measure_code: string;
+  readonly document_prefix: string;
+  readonly item_prefix: string;
+  readonly source_value: string;
+  readonly current_entity_codes: string;
+  readonly canonical_entity_code: string;
+  readonly target_bucket: string;
+  readonly machine_center_no: string;
+  readonly bc_entity_source_status: BusinessCentralEntitySourceStatus;
+  readonly reason_unknown: string;
+  readonly sample_documents: string;
+  readonly sample_items: string;
+  readonly suggested_future_use_domain: BusinessCentralFutureUseDomain;
+  readonly suggested_current_kpi_scope: BusinessCentralCurrentKpiScope;
+  readonly suggested_rule: string;
+  readonly confidence: UnknownScopeRuleConfidence;
+  readonly needs_manual_review: "true" | "false";
+}
+
 const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
 const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
 const DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-dry-run.csv";
@@ -736,6 +771,8 @@ const DEFAULT_HIGH_RISK_REVIEW_PLAN_CSV_PATH = ".tmp/bc-high-risk-review-plan.cs
 const DEFAULT_HIGH_RISK_REVIEW_PLAN_JSON_PATH = ".tmp/bc-high-risk-review-plan.json";
 const DEFAULT_KPI_COMPARE_V1_V2_CSV_PATH = ".tmp/bc-kpi-compare-v1-v2.csv";
 const DEFAULT_KPI_COMPARE_V1_V2_JSON_PATH = ".tmp/bc-kpi-compare-v1-v2.json";
+const DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH = ".tmp/bc-unknown-scope-profile.csv";
+const DEFAULT_UNKNOWN_SCOPE_PROFILE_JSON_PATH = ".tmp/bc-unknown-scope-profile.json";
 const DEFAULT_RESOLUTION_PACKAGE_DIR = ".tmp/bc-resolution-package";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
@@ -752,6 +789,7 @@ const entityV2CsvHeaders = [
   "item_description",
   "item_category_code",
   "quantity",
+  "unit_of_measure_code",
   "gross_weight",
   "entry_type",
   "location_code",
@@ -907,6 +945,32 @@ const kpiCompareV1V2CsvHeaders = [
   "recommended_action"
 ] as const satisfies readonly (keyof KpiCompareV1V2CsvRow)[];
 
+const unknownScopeProfileCsvHeaders = [
+  "group_id",
+  "rows",
+  "blocks_p10_after_scope",
+  "entry_type",
+  "location_code",
+  "item_category_code",
+  "unit_of_measure_code",
+  "document_prefix",
+  "item_prefix",
+  "source_value",
+  "current_entity_codes",
+  "canonical_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "bc_entity_source_status",
+  "reason_unknown",
+  "sample_documents",
+  "sample_items",
+  "suggested_future_use_domain",
+  "suggested_current_kpi_scope",
+  "suggested_rule",
+  "confidence",
+  "needs_manual_review"
+] as const satisfies readonly (keyof UnknownScopeProfileCsvRow)[];
+
 const canonicalEntityCreationPlanCsvHeaders = [
   "canonical_entity_code",
   "canonical_entity_display_name",
@@ -1007,6 +1071,15 @@ function displayRepoPath(value: string): string {
   const absolute = resolveRepoPath(value);
   const relative = path.relative(REPO_ROOT, absolute);
   return relative.startsWith("..") ? absolute : relative;
+}
+
+async function fileExists(value: string): Promise<boolean> {
+  try {
+    await access(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateDate(value: string, name: string): string {
@@ -1559,6 +1632,7 @@ function buildEntityV2ReportRows(
       item_description: row.itemDescription ?? "",
       item_category_code: row.itemCategoryCode ?? "",
       quantity: row.quantity,
+      unit_of_measure_code: row.uom ?? "",
       gross_weight: row.grossWeight ?? "",
       entry_type: row.entryType ?? "",
       location_code: row.locationCode ?? "",
@@ -4242,6 +4316,120 @@ function kpiCompareV1V2RowsToCsv(summary: KpiCompareV1V2Summary): string {
   return `${lines.join("\n")}\n`;
 }
 
+function buildUnknownScopeProfileInputRows(input: {
+  readonly entityRows: readonly EntityV2BackfillDryRunReportRow[];
+  readonly v2Rows: readonly EntityV2ReportRow[];
+}): readonly BusinessCentralUnknownScopeProfileInputRow[] {
+  return input.v2Rows.map((row, index) => {
+    const entityRow = input.entityRows[index];
+    const bcCurrentKpiScope = row.bc_current_kpi_scope === "UNKNOWN_SCOPE_REVIEW" || entityRow?.bc_current_kpi_scope === "UNKNOWN_SCOPE_REVIEW"
+      ? "UNKNOWN_SCOPE_REVIEW"
+      : row.bc_current_kpi_scope;
+    return {
+      entryType: row.entry_type,
+      locationCode: row.location_code,
+      itemCategoryCode: row.item_category_code,
+      unitOfMeasureCode: row.unit_of_measure_code,
+      documentNo: row.document_no,
+      itemNo: row.item_no,
+      sourceValue: entityRow?.source_value || row.v2_source_value_used,
+      currentEntityCode: row.current_entity_code,
+      canonicalEntityCode: entityRow?.proposed_canonical_entity_code || row.v2_entity_code,
+      targetBucket: row.v2_target_bucket_candidate,
+      machineCenterNo: row.machine_center_no,
+      bcCurrentKpiScope,
+      bcEntitySourceStatus: row.bc_entity_source_status,
+      blocksP10AfterScope: entityRow?.blocks_p10_after_scope === "true"
+    };
+  });
+}
+
+function unknownScopeProfileRowsToCsv(groups: readonly BusinessCentralUnknownScopeProfileGroup[]): string {
+  const rows: UnknownScopeProfileCsvRow[] = groups.map((group) => ({
+    group_id: group.groupId,
+    rows: group.rows,
+    blocks_p10_after_scope: group.blocksP10AfterScope ? "true" : "false",
+    entry_type: group.entryType,
+    location_code: group.locationCode,
+    item_category_code: group.itemCategoryCode,
+    unit_of_measure_code: group.unitOfMeasureCode,
+    document_prefix: group.documentPrefix,
+    item_prefix: group.itemPrefix,
+    source_value: group.sourceValue,
+    current_entity_codes: group.currentEntityCodes.join("|"),
+    canonical_entity_code: group.canonicalEntityCode,
+    target_bucket: group.targetBucket,
+    machine_center_no: group.machineCenterNo,
+    bc_entity_source_status: group.bcEntitySourceStatus,
+    reason_unknown: group.reasonUnknown,
+    sample_documents: group.sampleDocuments.join("|"),
+    sample_items: group.sampleItems.join("|"),
+    suggested_future_use_domain: group.suggestedFutureUseDomain,
+    suggested_current_kpi_scope: group.suggestedCurrentKpiScope,
+    suggested_rule: group.suggestedRule,
+    confidence: group.confidence,
+    needs_manual_review: group.needsManualReview ? "true" : "false"
+  }));
+  const lines = [
+    unknownScopeProfileCsvHeaders.join(","),
+    ...rows.map((row) => unknownScopeProfileCsvHeaders.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+async function runUnknownScopeProfile(pool: DatabasePool) {
+  const csvPath = resolveRepoPath(process.env.UNKNOWN_SCOPE_PROFILE_CSV?.trim() || DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH);
+  const jsonPath = resolveRepoPath(process.env.UNKNOWN_SCOPE_PROFILE_JSON?.trim() || DEFAULT_UNKNOWN_SCOPE_PROFILE_JSON_PATH);
+
+  console.log("Business Central P0.9d unknown scope evidence profile");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`CSV output: ${displayRepoPath(csvPath)}`);
+  console.log(`JSON output: ${displayRepoPath(jsonPath)}`);
+  console.log("Safety: read-only profiler; database rows, target_profiles, aliases, conditional rules, classifier rules, and dashboard behavior are not changed.");
+
+  const { entityRows, v2Rows } = await buildEntityV2BackfillDryRun(pool);
+  const outputFiles = {
+    csv: displayRepoPath(csvPath),
+    json: displayRepoPath(jsonPath)
+  };
+  const { groups, summary } = buildBusinessCentralUnknownScopeProfile({
+    rows: buildUnknownScopeProfileInputRows({ entityRows, v2Rows }),
+    outputFiles
+  });
+
+  await mkdir(path.dirname(csvPath), { recursive: true });
+  await mkdir(path.dirname(jsonPath), { recursive: true });
+  await writeFile(csvPath, unknownScopeProfileRowsToCsv(groups), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_rows=${summary.totalRows}`);
+  console.log(`- unknown_scope_rows=${summary.unknownScopeRows}`);
+  console.log(`- unknown_scope_blocking_rows=${summary.unknownScopeBlockingRows}`);
+  console.log(`- unknown_scope_non_blocking_rows=${summary.unknownScopeNonBlockingRows}`);
+  console.log(`- p10_blocking_before_profiler=${summary.p10ImpactEstimate.blockingRowsBeforeProfiler}`);
+  console.log(`- p10_blocking_after_profiler=${summary.p10ImpactEstimate.blockingRowsAfterProfiler}`);
+
+  console.log("");
+  console.log("Top unknown groups");
+  for (const group of groups.slice(0, 10)) {
+    console.log(`- ${group.groupId}; rows=${group.rows}; block=${group.blocksP10AfterScope ? "yes" : "no"}; entry=${group.entryType}; loc=${group.locationCode}; doc=${group.documentPrefix}; item=${group.itemPrefix}; source=${group.sourceValue}; suggested=${group.suggestedFutureUseDomain}; confidence=${group.confidence}`);
+  }
+
+  console.log("");
+  console.log("Suggested classifier rule candidates");
+  for (const candidate of summary.suggestedClassifierRuleCandidates.slice(0, 10)) {
+    console.log(`- rows=${candidate.rows}; confidence=${candidate.confidence}; scope=${candidate.suggestedCurrentKpiScope}; domain=${candidate.suggestedFutureUseDomain}; rule=${candidate.suggestedRule}`);
+  }
+
+  console.log("");
+  console.log("Reports written");
+  console.log(`- ${outputFiles.csv}`);
+  console.log(`- ${outputFiles.json}`);
+}
+
 async function runHighRiskReviewPlan(pool: DatabasePool) {
   const csvPath = resolveRepoPath(process.env.HIGH_RISK_REVIEW_PLAN_CSV?.trim() || DEFAULT_HIGH_RISK_REVIEW_PLAN_CSV_PATH);
   const jsonPath = resolveRepoPath(process.env.HIGH_RISK_REVIEW_PLAN_JSON?.trim() || DEFAULT_HIGH_RISK_REVIEW_PLAN_JSON_PATH);
@@ -4664,6 +4852,8 @@ ${summary.p10Readiness.reason}
 - Target profile seed draft candidates: ${summary.counts.targetProfileSeedDraftCandidates}
 - Manual approval items: ${summary.counts.manualApprovalItems}
 - Blocked groups: ${summary.counts.blockedGroups}
+- Unknown scope rows: ${summary.unknownScopeProfile.unknownScopeRows}
+- Unknown scope profile CSV: ${summary.unknownScopeProfile.profileCsvPath ?? "not generated yet"}
 
 ## Required Before P1.0
 
@@ -4706,6 +4896,9 @@ async function runResolutionPackage(pool: DatabasePool) {
   const targetProfileSeedRows = buildTargetProfileSeedDraftPlanRows(targetProfileRows);
   const manualQueueRows = buildManualApprovalQueueRows(groups);
   const blockedChecklistRows = buildBlockedGroupsChecklistRows(groups);
+  const unknownProfileCsvPath = await fileExists(resolveRepoPath(DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH))
+    ? DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH
+    : null;
   const summary = buildResolutionPackageSummary({
     sourceReports: {
       entityBackfillDryRun: DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_JSON_PATH,
@@ -4729,6 +4922,17 @@ async function runResolutionPackage(pool: DatabasePool) {
       p10BlockingRowsAfterScope: highRiskSummary.p10BlockingRowsAfterScope,
       excludedFromP10ButRetainedRows: highRiskSummary.excludedFromP10ButRetainedRows
     },
+    topUnknownScopeGroups: highRiskSummary.topBlockedGroups
+      .filter((group) => group.bcCurrentKpiScope === "UNKNOWN_SCOPE_REVIEW")
+      .slice(0, 10)
+      .map((group) => ({
+        sourceValue: group.sourceValue,
+        rows: group.rows,
+        blocksP10AfterScope: group.blocksP10AfterScope,
+        currentKpiScope: group.bcCurrentKpiScope,
+        futureUseDomain: group.bcFutureUseDomain
+      })),
+    unknownScopeProfileCsvPath: unknownProfileCsvPath,
     p10Gate: highRiskSummary.p10Gate
   });
 
@@ -5322,8 +5526,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|kpi-compare-v1-v2>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -5340,6 +5544,7 @@ async function main() {
     else if (command === "target-profile-backfill-dry-run") await runTargetProfileBackfillDryRun(database.pool);
     else if (command === "high-risk-review-plan") await runHighRiskReviewPlan(database.pool);
     else if (command === "resolution-package") await runResolutionPackage(database.pool);
+    else if (command === "unknown-scope-profile") await runUnknownScopeProfile(database.pool);
     else if (command === "kpi-compare-v1-v2") await runKpiCompareV1V2(database.pool);
     else await runMappingApply(database.pool);
   } finally {

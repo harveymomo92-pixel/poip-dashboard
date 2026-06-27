@@ -142,6 +142,11 @@ export interface ResolutionPackageSummary {
     readonly reason: string;
     readonly requiredBeforeP10: readonly string[];
   };
+  readonly unknownScopeProfile: {
+    readonly unknownScopeRows: number;
+    readonly topUnknownScopeGroups: readonly ResolutionPackageUnknownScopeGroup[];
+    readonly profileCsvPath: string | null;
+  };
   readonly safety: {
     readonly databaseUpdated: false;
     readonly productionOutputsUpdated: false;
@@ -150,6 +155,14 @@ export interface ResolutionPackageSummary {
     readonly aliasesChanged: false;
     readonly conditionalRulesChanged: false;
   };
+}
+
+export interface ResolutionPackageUnknownScopeGroup {
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly blocksP10AfterScope: boolean;
+  readonly currentKpiScope: BusinessCentralCurrentKpiScope;
+  readonly futureUseDomain: BusinessCentralFutureUseDomain;
 }
 
 export function buildCanonicalEntityCreationPlanItem(
@@ -233,6 +246,8 @@ export function buildResolutionPackageSummary(input: {
   readonly blockedGroups: number;
   readonly scopeSummary: ResolutionPackageSummary["scopeSummary"];
   readonly p10Gate: P10Gate;
+  readonly topUnknownScopeGroups?: readonly ResolutionPackageUnknownScopeGroup[];
+  readonly unknownScopeProfileCsvPath?: string | null;
 }): ResolutionPackageSummary {
   return {
     generatedAt: input.generatedAt ?? new Date().toISOString(),
@@ -249,6 +264,11 @@ export function buildResolutionPackageSummary(input: {
       status: input.p10Gate.status,
       reason: input.p10Gate.reason,
       requiredBeforeP10: requiredBeforeP10(input.p10Gate)
+    },
+    unknownScopeProfile: {
+      unknownScopeRows: input.scopeSummary.unknownScopeReviewRows,
+      topUnknownScopeGroups: input.topUnknownScopeGroups ?? [],
+      profileCsvPath: input.unknownScopeProfileCsvPath ?? null
     },
     safety: {
       databaseUpdated: false,
