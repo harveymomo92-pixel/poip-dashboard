@@ -558,6 +558,21 @@ top changed machine centers
 high-risk mappings
 ```
 
+Implemented P0.9 dry-run artifacts:
+
+```text
+Domain planning logic:
+packages/domain/src/master-data/entity-target-backfill-plan.ts
+
+Entity backfill dry-run:
+pnpm bc:entity-v2-backfill-dry-run
+
+Target profile backfill dry-run:
+pnpm bc:target-profile-backfill-dry-run
+```
+
+P0.9 is reporting/export only. It does not update `production_outputs.entity_id`, does not insert or update `target_profiles`, does not create entities, and does not switch dashboard target lookup. P1.0 is the earliest phase that may perform a controlled switch after dry-run approval.
+
 ---
 
 ## 18. P0.9 Risk Classification

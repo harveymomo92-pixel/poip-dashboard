@@ -269,6 +269,52 @@ P0.8 safety notes:
 - Do not create broad/global aliases to solve target profile gaps.
 - P0.9 will handle seed/backfill dry-run planning; P1.0 will handle any controlled switch.
 
+### Business Central P0.9 backfill dry runs
+
+Use these commands to export migration plans only:
+
+```bash
+pnpm bc:entity-v2-backfill-dry-run
+pnpm bc:target-profile-backfill-dry-run
+```
+
+Outputs:
+
+- `.tmp/bc-entity-v2-backfill-dry-run.csv`
+- `.tmp/bc-entity-v2-backfill-dry-run.json`
+- `.tmp/bc-target-profile-backfill-dry-run.csv`
+- `.tmp/bc-target-profile-backfill-dry-run.json`
+
+Entity backfill actions:
+
+- `NO_CHANGE`: current entity already matches resolver v2.
+- `PROPOSE_CANONICAL_ENTITY_COLLAPSE`: existing canonical entity can be reviewed as a collapse target.
+- `PROPOSE_CANONICAL_ENTITY_CREATION`: canonical entity appears needed before any row update.
+- `REVIEW_ALIAS_CONFLICT`: aliases/catalog/source values conflict and require manual review.
+- `REVIEW_DATA_SOURCE_GAP`: source value is blank/unusable.
+- `SKIP_HIGH_RISK`: do not migrate automatically.
+
+Risk levels:
+
+- `LOW`: simple legacy target-variant suffix collapse, such as old printing/thermoforming detailed entity names.
+- `MEDIUM`: plausible canonical/target profile candidate but not safe enough for automatic migration.
+- `HIGH`: conflicting current entities, missing source value, unrelated current/v2 entity, or ambiguous resolver review.
+
+Target profile dry-run notes:
+
+- `approval_status` is always `draft`.
+- `source` is `p0.9-dry-run`.
+- If `proposed_target_qty` is blank, fill target quantity manually before migration.
+- High-risk candidates must not be inserted into `target_profiles` automatically.
+
+Safety:
+
+- These commands do not update `production_outputs.entity_id`.
+- These commands do not insert/update/delete `target_profiles`.
+- These commands do not create canonical entities.
+- These commands do not change aliases, conditional rules, dashboard KPI behavior, or old target lookup.
+- P1.0 controlled switch comes later after dry-run approval.
+
 Safety notes:
 
 - The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.

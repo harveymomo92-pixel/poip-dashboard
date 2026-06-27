@@ -37,6 +37,12 @@ import {
   type MappingSuggestion
 } from "../packages/domain/src/master-data/mapping-candidates.js";
 import {
+  planEntityV2Backfill,
+  planTargetProfileBackfill,
+  type BackfillRiskLevel,
+  type EntityV2BackfillAction
+} from "../packages/domain/src/master-data/entity-target-backfill-plan.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -53,6 +59,7 @@ import {
   type BusinessCentralTargetBucketCandidate
 } from "../packages/domain/src/master-data/entity-resolver-v2.js";
 import {
+  normalizeMachineCenterNo,
   resolveBusinessCentralTargetProfile,
   type TargetProfile,
   type TargetProfileLookupStatus
@@ -72,7 +79,9 @@ type Command =
   | "mapping-plan"
   | "mapping-plan-apply"
   | "entity-v2-dry-run"
-  | "target-profile-dry-run";
+  | "target-profile-dry-run"
+  | "entity-v2-backfill-dry-run"
+  | "target-profile-backfill-dry-run";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
 
@@ -132,6 +141,7 @@ interface EntityV2SourceRow {
   readonly gProdOrRotLineNo: string | null;
   readonly gProdOrRotLineDescription: string | null;
   readonly machineCenterNo: string | null;
+  readonly currentEntityId: string | null;
   readonly currentEntityCode: string | null;
   readonly currentEntityDisplayName: string | null;
 }
@@ -150,6 +160,7 @@ interface EntityV2ReportRow {
   readonly g_prod_or_rot_line_no: string;
   readonly g_prod_or_rot_line_description: string;
   readonly machine_center_no: string;
+  readonly current_entity_id: string;
   readonly current_entity_code: string;
   readonly current_entity_display_name: string;
   readonly v2_entity_code: string;
@@ -377,10 +388,150 @@ interface TargetProfileDryRunMatchedGroup {
   readonly rows: number;
 }
 
+interface EntityV2BackfillDryRunReportRow {
+  readonly posting_date: string;
+  readonly document_no: string;
+  readonly entry_no: string;
+  readonly item_no: string;
+  readonly item_description: string;
+  readonly quantity: number;
+  readonly entry_type: string;
+  readonly location_code: string;
+  readonly source_field: BusinessCentralEntityV2SourceField;
+  readonly source_value: string;
+  readonly machine_center_no: string;
+  readonly current_entity_id: string;
+  readonly current_entity_code: string;
+  readonly current_entity_display_name: string;
+  readonly proposed_canonical_entity_code: string;
+  readonly proposed_canonical_entity_display_name: string;
+  readonly backfill_action: EntityV2BackfillAction;
+  readonly risk_level: BackfillRiskLevel;
+  readonly risk_reason: string;
+  readonly recommended_action: string;
+}
+
+interface EntityV2BackfillDryRunSummary {
+  readonly generatedAt: string;
+  readonly totalRows: number;
+  readonly proposedEntityBackfillRows: number;
+  readonly noChangeRows: number;
+  readonly highRiskRows: number;
+  readonly mediumRiskRows: number;
+  readonly lowRiskRows: number;
+  readonly topProposedCanonicalEntities: readonly EntityV2BackfillGroup[];
+  readonly topHighRiskGroups: readonly EntityV2BackfillGroup[];
+  readonly safeCollapseCandidates: readonly EntityV2BackfillGroup[];
+  readonly canonicalEntityCreationCandidates: readonly EntityV2BackfillGroup[];
+  readonly aliasConflictCandidates: readonly EntityV2BackfillGroup[];
+  readonly families: readonly BackfillFamilySummary[];
+  readonly outputFiles: {
+    readonly csv: string;
+    readonly json: string;
+  };
+  readonly safety: {
+    readonly databaseUpdated: false;
+    readonly productionOutputsUpdated: false;
+    readonly dashboardChanged: false;
+    readonly aliasesChanged: false;
+    readonly conditionalRulesChanged: false;
+  };
+}
+
+interface EntityV2BackfillGroup {
+  readonly proposedCanonicalEntityCode: string;
+  readonly proposedCanonicalEntityDisplayName: string;
+  readonly currentEntityCodes: readonly string[];
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly action: EntityV2BackfillAction;
+  readonly riskLevel: BackfillRiskLevel;
+  readonly riskReason: string;
+  readonly recommendedAction: string;
+}
+
+interface BackfillFamilySummary {
+  readonly family: string;
+  readonly rows: number;
+  readonly highRiskRows: number;
+  readonly mediumRiskRows: number;
+  readonly lowRiskRows: number;
+}
+
+interface ProductionTargetSource {
+  readonly entityId: string;
+  readonly entityCode: string;
+  readonly entityDisplayName: string;
+  readonly effectiveFrom: string;
+  readonly effectiveTo: string | null;
+  readonly dailyTargetQty: number;
+  readonly status: string;
+}
+
+interface TargetProfileBackfillDryRunReportRow {
+  readonly canonical_entity_code: string;
+  readonly canonical_entity_display_name: string;
+  readonly current_entity_code: string;
+  readonly current_entity_display_name: string;
+  readonly target_bucket: string;
+  readonly machine_center_no: string;
+  readonly machine_center_no_normalized: string;
+  readonly effective_from: string;
+  readonly effective_to: string;
+  readonly proposed_target_qty: number | "";
+  readonly unit: "PCS";
+  readonly source: "p0.9-dry-run";
+  readonly approval_status: "draft";
+  readonly risk_level: BackfillRiskLevel;
+  readonly risk_reason: string;
+  readonly recommended_action: string;
+  readonly sample_rows: number;
+}
+
+interface TargetProfileBackfillDryRunSummary {
+  readonly generatedAt: string;
+  readonly proposedTargetProfileRows: number;
+  readonly lowRiskRows: number;
+  readonly mediumRiskRows: number;
+  readonly highRiskRows: number;
+  readonly topProposedTargetProfiles: readonly TargetProfileBackfillGroup[];
+  readonly topMissingTargetQtyGroups: readonly TargetProfileBackfillGroup[];
+  readonly topHighRiskGroups: readonly TargetProfileBackfillGroup[];
+  readonly families: readonly BackfillFamilySummary[];
+  readonly outputFiles: {
+    readonly csv: string;
+    readonly json: string;
+  };
+  readonly safety: {
+    readonly databaseUpdated: false;
+    readonly targetProfilesUpdated: false;
+    readonly dashboardChanged: false;
+    readonly oldTargetLogicChanged: false;
+  };
+}
+
+interface TargetProfileBackfillGroup {
+  readonly canonicalEntityCode: string;
+  readonly canonicalEntityDisplayName: string;
+  readonly currentEntityCodes: readonly string[];
+  readonly targetBucket: string;
+  readonly machineCenterNo: string;
+  readonly proposedTargetQty: number | null;
+  readonly rows: number;
+  readonly riskLevel: BackfillRiskLevel;
+  readonly riskReason: string;
+  readonly recommendedAction: string;
+}
+
 const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
 const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
 const DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-dry-run.csv";
 const DEFAULT_TARGET_PROFILE_DRY_RUN_JSON_PATH = ".tmp/bc-target-profile-dry-run.json";
+const DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_CSV_PATH = ".tmp/bc-entity-v2-backfill-dry-run.csv";
+const DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_JSON_PATH = ".tmp/bc-entity-v2-backfill-dry-run.json";
+const DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-backfill-dry-run.csv";
+const DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_JSON_PATH = ".tmp/bc-target-profile-backfill-dry-run.json";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -445,6 +596,49 @@ const targetProfileDryRunCsvHeaders = [
   "target_profile_reason",
   "recommended_action"
 ] as const satisfies readonly (keyof TargetProfileDryRunReportRow)[];
+
+const entityV2BackfillDryRunCsvHeaders = [
+  "posting_date",
+  "document_no",
+  "entry_no",
+  "item_no",
+  "item_description",
+  "quantity",
+  "entry_type",
+  "location_code",
+  "source_field",
+  "source_value",
+  "machine_center_no",
+  "current_entity_id",
+  "current_entity_code",
+  "current_entity_display_name",
+  "proposed_canonical_entity_code",
+  "proposed_canonical_entity_display_name",
+  "backfill_action",
+  "risk_level",
+  "risk_reason",
+  "recommended_action"
+] as const satisfies readonly (keyof EntityV2BackfillDryRunReportRow)[];
+
+const targetProfileBackfillDryRunCsvHeaders = [
+  "canonical_entity_code",
+  "canonical_entity_display_name",
+  "current_entity_code",
+  "current_entity_display_name",
+  "target_bucket",
+  "machine_center_no",
+  "machine_center_no_normalized",
+  "effective_from",
+  "effective_to",
+  "proposed_target_qty",
+  "unit",
+  "source",
+  "approval_status",
+  "risk_level",
+  "risk_reason",
+  "recommended_action",
+  "sample_rows"
+] as const satisfies readonly (keyof TargetProfileBackfillDryRunReportRow)[];
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -903,6 +1097,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
     g_prod_or_rot_line_no: string | null;
     g_prod_or_rot_line_description: string | null;
     machine_center_no: string | null;
+    current_entity_id: string | null;
     current_entity_code: string | null;
     current_entity_display_name: string | null;
   }>(
@@ -924,6 +1119,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
              po.prod_line_no as g_prod_or_rot_line_no,
              po.prod_line_description as g_prod_or_rot_line_description,
              po.machine_center_no,
+             po.entity_id::text as current_entity_id,
              me.entity_code as current_entity_code,
              me.display_name as current_entity_display_name
       from production_outputs po
@@ -949,6 +1145,7 @@ async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly Ent
     gProdOrRotLineNo: row.g_prod_or_rot_line_no,
     gProdOrRotLineDescription: row.g_prod_or_rot_line_description,
     machineCenterNo: row.machine_center_no,
+    currentEntityId: row.current_entity_id,
     currentEntityCode: row.current_entity_code,
     currentEntityDisplayName: row.current_entity_display_name
   }));
@@ -997,6 +1194,7 @@ function buildEntityV2ReportRows(
       g_prod_or_rot_line_no: row.gProdOrRotLineNo ?? "",
       g_prod_or_rot_line_description: row.gProdOrRotLineDescription ?? "",
       machine_center_no: row.machineCenterNo ?? "",
+      current_entity_id: row.currentEntityId ?? "",
       current_entity_code: row.currentEntityCode ?? "",
       current_entity_display_name: row.currentEntityDisplayName ?? "",
       v2_entity_code: resolution.resolvedEntityCode ?? "",
@@ -2767,6 +2965,538 @@ async function runTargetProfileDryRun(pool: DatabasePool) {
   console.log(`- ${outputFiles.json}`);
 }
 
+function buildEntityV2BackfillDryRunReportRows(
+  rows: readonly EntityV2ReportRow[]
+): readonly EntityV2BackfillDryRunReportRow[] {
+  const sourceContexts = entityV2SourceValueContexts(rows);
+
+  return rows.map((row) => {
+    const sourceContext = sourceContexts.get(entityV2SourceContextKey(row.v2_source_field_used, row.v2_source_value_used));
+    const plan = planEntityV2Backfill({
+      sourceField: row.v2_source_field_used,
+      sourceValue: row.v2_source_value_used,
+      currentEntityCode: row.current_entity_code,
+      currentEntityDisplayName: row.current_entity_display_name,
+      currentEntityCodesForSourceValue: sourceContext ? sortedStrings(sourceContext.currentEntityCodes) : [],
+      proposedEntityCode: row.v2_entity_code,
+      proposedEntityDisplayName: row.v2_entity_display_name,
+      suggestedCanonicalEntityCode: row.v2_suggested_canonical_entity_code,
+      suggestedCanonicalEntityDisplayName: row.v2_suggested_canonical_entity_display_name,
+      comparisonStatus: row.comparison_status,
+      reviewClassification: row.v2_review_classification,
+      mismatchReviewType: row.v2_mismatch_review_type
+    });
+
+    return {
+      posting_date: row.posting_date,
+      document_no: row.document_no,
+      entry_no: row.entry_no,
+      item_no: row.item_no,
+      item_description: row.item_description,
+      quantity: row.quantity,
+      entry_type: row.entry_type,
+      location_code: row.location_code,
+      source_field: row.v2_source_field_used,
+      source_value: row.v2_source_value_used,
+      machine_center_no: row.machine_center_no,
+      current_entity_id: row.current_entity_id,
+      current_entity_code: row.current_entity_code,
+      current_entity_display_name: row.current_entity_display_name,
+      proposed_canonical_entity_code: plan.proposedCanonicalEntityCode ?? "",
+      proposed_canonical_entity_display_name: plan.proposedCanonicalEntityDisplayName ?? "",
+      backfill_action: plan.backfillAction,
+      risk_level: plan.riskLevel,
+      risk_reason: plan.riskReason,
+      recommended_action: plan.recommendedAction
+    };
+  });
+}
+
+function entityV2BackfillRowsToCsv(rows: readonly EntityV2BackfillDryRunReportRow[]): string {
+  const lines = [
+    entityV2BackfillDryRunCsvHeaders.join(","),
+    ...rows.map((row) => entityV2BackfillDryRunCsvHeaders.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function summarizeEntityV2BackfillDryRunRows(input: {
+  readonly rows: readonly EntityV2BackfillDryRunReportRow[];
+  readonly outputFiles: EntityV2BackfillDryRunSummary["outputFiles"];
+}): EntityV2BackfillDryRunSummary {
+  const rows = input.rows;
+  return {
+    generatedAt: new Date().toISOString(),
+    totalRows: rows.length,
+    proposedEntityBackfillRows: rows.filter((row) => row.backfill_action === "PROPOSE_CANONICAL_ENTITY_COLLAPSE" || row.backfill_action === "PROPOSE_CANONICAL_ENTITY_CREATION").length,
+    noChangeRows: rows.filter((row) => row.backfill_action === "NO_CHANGE").length,
+    highRiskRows: rows.filter((row) => row.risk_level === "HIGH").length,
+    mediumRiskRows: rows.filter((row) => row.risk_level === "MEDIUM").length,
+    lowRiskRows: rows.filter((row) => row.risk_level === "LOW").length,
+    topProposedCanonicalEntities: entityBackfillGroups(rows.filter((row) => row.backfill_action === "PROPOSE_CANONICAL_ENTITY_COLLAPSE" || row.backfill_action === "PROPOSE_CANONICAL_ENTITY_CREATION")),
+    topHighRiskGroups: entityBackfillGroups(rows.filter((row) => row.risk_level === "HIGH")),
+    safeCollapseCandidates: entityBackfillGroups(rows.filter((row) => row.backfill_action === "PROPOSE_CANONICAL_ENTITY_COLLAPSE" && row.risk_level === "LOW")),
+    canonicalEntityCreationCandidates: entityBackfillGroups(rows.filter((row) => row.backfill_action === "PROPOSE_CANONICAL_ENTITY_CREATION")),
+    aliasConflictCandidates: entityBackfillGroups(rows.filter((row) => row.backfill_action === "REVIEW_ALIAS_CONFLICT")),
+    families: backfillFamilySummary(rows),
+    outputFiles: input.outputFiles,
+    safety: {
+      databaseUpdated: false,
+      productionOutputsUpdated: false,
+      dashboardChanged: false,
+      aliasesChanged: false,
+      conditionalRulesChanged: false
+    }
+  };
+}
+
+function entityBackfillGroups(
+  rows: readonly EntityV2BackfillDryRunReportRow[],
+  limit = 20
+): readonly EntityV2BackfillGroup[] {
+  const groups = new Map<string, {
+    proposedCanonicalEntityCode: string;
+    proposedCanonicalEntityDisplayName: string;
+    currentEntityCodes: Set<string>;
+    sourceField: string;
+    sourceValue: string;
+    rows: number;
+    action: EntityV2BackfillAction;
+    riskLevel: BackfillRiskLevel;
+    riskReason: string;
+    recommendedAction: string;
+  }>();
+
+  for (const row of rows) {
+    const key = [
+      row.proposed_canonical_entity_code || "(blank)",
+      row.source_field,
+      normalizeAliasKey(row.source_value),
+      row.backfill_action,
+      row.risk_level
+    ].join(":");
+    const current = groups.get(key) ?? {
+      proposedCanonicalEntityCode: row.proposed_canonical_entity_code || "(blank)",
+      proposedCanonicalEntityDisplayName: row.proposed_canonical_entity_display_name || "(blank)",
+      currentEntityCodes: new Set<string>(),
+      sourceField: row.source_field,
+      sourceValue: row.source_value || "(blank)",
+      rows: 0,
+      action: row.backfill_action,
+      riskLevel: row.risk_level,
+      riskReason: row.risk_reason,
+      recommendedAction: row.recommended_action
+    };
+    current.rows += 1;
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    groups.set(key, current);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      proposedCanonicalEntityCode: group.proposedCanonicalEntityCode,
+      proposedCanonicalEntityDisplayName: group.proposedCanonicalEntityDisplayName,
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      sourceField: group.sourceField,
+      sourceValue: group.sourceValue,
+      rows: group.rows,
+      action: group.action,
+      riskLevel: group.riskLevel,
+      riskReason: group.riskReason,
+      recommendedAction: group.recommendedAction
+    }))
+    .sort((left, right) => right.rows - left.rows || left.riskLevel.localeCompare(right.riskLevel) || left.proposedCanonicalEntityCode.localeCompare(right.proposedCanonicalEntityCode))
+    .slice(0, limit);
+}
+
+function backfillFamilySummary(
+  rows: readonly (EntityV2BackfillDryRunReportRow | TargetProfileBackfillDryRunReportRow)[]
+): readonly BackfillFamilySummary[] {
+  const families = ["OMSO", "POLYPRINT", "VFINE", "LONGSUN", "BORCH", "THERMO", "NEWDO", "CAI", "REPACKING"] as const;
+  return families.map((family) => {
+    const familyRows = rows.filter((row) => normalizeAliasDisplay(Object.values(row).join(" ")).includes(family));
+    return {
+      family,
+      rows: familyRows.length,
+      highRiskRows: familyRows.filter((row) => row.risk_level === "HIGH").length,
+      mediumRiskRows: familyRows.filter((row) => row.risk_level === "MEDIUM").length,
+      lowRiskRows: familyRows.filter((row) => row.risk_level === "LOW").length
+    };
+  }).filter((row) => row.rows > 0);
+}
+
+async function queryProductionTargetSources(pool: DatabasePool): Promise<readonly ProductionTargetSource[]> {
+  const result = await pool.query<{
+    entity_id: string;
+    entity_code: string;
+    entity_display_name: string;
+    effective_from: string;
+    effective_to: string | null;
+    daily_target_qty: string | number;
+    status: string;
+  }>(
+    `
+      select pt.entity_id::text,
+             me.entity_code,
+             me.display_name as entity_display_name,
+             pt.effective_from::text,
+             pt.effective_to::text,
+             pt.daily_target_qty,
+             pt.status
+      from production_targets pt
+      inner join master_entities me on me.id = pt.entity_id
+      where pt.status in ('APPROVED', 'ACTIVE')
+      order by me.entity_code, pt.effective_from
+    `
+  );
+  return result.rows.map((row) => ({
+    entityId: row.entity_id,
+    entityCode: row.entity_code,
+    entityDisplayName: row.entity_display_name,
+    effectiveFrom: dateText(row.effective_from),
+    effectiveTo: row.effective_to ? dateText(row.effective_to) : null,
+    dailyTargetQty: numberValue(row.daily_target_qty),
+    status: row.status
+  }));
+}
+
+function buildTargetProfileBackfillDryRunReportRows(input: {
+  readonly entityRows: readonly EntityV2BackfillDryRunReportRow[];
+  readonly v2Rows: readonly EntityV2ReportRow[];
+  readonly productionTargets: readonly ProductionTargetSource[];
+}): readonly TargetProfileBackfillDryRunReportRow[] {
+  const targetsByEntityId = new Map<string, ProductionTargetSource[]>();
+  for (const target of input.productionTargets) {
+    const current = targetsByEntityId.get(target.entityId) ?? [];
+    current.push(target);
+    targetsByEntityId.set(target.entityId, current);
+  }
+
+  const grouped = new Map<string, {
+    entityRow: EntityV2BackfillDryRunReportRow;
+    v2Row: EntityV2ReportRow;
+    sampleRows: number;
+  }>();
+
+  input.entityRows.forEach((entityRow, index) => {
+    const v2Row = input.v2Rows[index];
+    if (!v2Row) return;
+    if (entityRow.backfill_action === "NO_CHANGE" || entityRow.backfill_action === "REVIEW_DATA_SOURCE_GAP") return;
+    if (!entityRow.proposed_canonical_entity_code || !entityRow.current_entity_code) return;
+    const key = [
+      entityRow.proposed_canonical_entity_code,
+      entityRow.current_entity_code,
+      v2Row.v2_target_bucket_candidate,
+      normalizeMachineCenterNo(v2Row.machine_center_no) ?? "(blank)"
+    ].join(":");
+    const current = grouped.get(key) ?? { entityRow, v2Row, sampleRows: 0 };
+    grouped.set(key, { ...current, sampleRows: current.sampleRows + 1 });
+  });
+
+  const candidates: TargetProfileBackfillDryRunReportRow[] = [];
+  for (const group of grouped.values()) {
+    const targets = targetsByEntityId.get(group.entityRow.current_entity_id) ?? [];
+    if (targets.length === 0) {
+      candidates.push(targetProfileBackfillRow(group, null, false));
+      continue;
+    }
+
+    const targetsByPeriod = new Map<string, ProductionTargetSource[]>();
+    for (const target of targets) {
+      const key = `${target.effectiveFrom}:${target.effectiveTo ?? ""}`;
+      const current = targetsByPeriod.get(key) ?? [];
+      current.push(target);
+      targetsByPeriod.set(key, current);
+    }
+
+    for (const periodTargets of targetsByPeriod.values()) {
+      const distinctQty = new Set(periodTargets.map((target) => target.dailyTargetQty));
+      const target = periodTargets[0] ?? null;
+      candidates.push(targetProfileBackfillRow(group, distinctQty.size > 1 ? null : target, distinctQty.size > 1));
+    }
+  }
+
+  return candidates.sort((left, right) => (
+    riskSort(right.risk_level) - riskSort(left.risk_level)
+    || right.sample_rows - left.sample_rows
+    || left.canonical_entity_code.localeCompare(right.canonical_entity_code)
+  ));
+}
+
+function targetProfileBackfillRow(
+  group: {
+    readonly entityRow: EntityV2BackfillDryRunReportRow;
+    readonly v2Row: EntityV2ReportRow;
+    readonly sampleRows: number;
+  },
+  target: ProductionTargetSource | null,
+  hasMultipleTargetQtySources: boolean
+): TargetProfileBackfillDryRunReportRow {
+  const plan = planTargetProfileBackfill({
+    canonicalEntityCode: group.entityRow.proposed_canonical_entity_code,
+    canonicalEntityDisplayName: group.entityRow.proposed_canonical_entity_display_name,
+    currentEntityCode: group.entityRow.current_entity_code,
+    currentEntityDisplayName: group.entityRow.current_entity_display_name,
+    targetBucket: group.v2Row.v2_target_bucket_candidate,
+    machineCenterNo: group.v2Row.machine_center_no,
+    proposedTargetQty: target?.dailyTargetQty ?? null,
+    entityBackfillRiskLevel: group.entityRow.risk_level,
+    entityBackfillAction: group.entityRow.backfill_action,
+    hasMultipleTargetQtySources
+  });
+
+  return {
+    canonical_entity_code: group.entityRow.proposed_canonical_entity_code,
+    canonical_entity_display_name: group.entityRow.proposed_canonical_entity_display_name,
+    current_entity_code: group.entityRow.current_entity_code,
+    current_entity_display_name: group.entityRow.current_entity_display_name,
+    target_bucket: plan.targetBucket,
+    machine_center_no: plan.machineCenterNo ?? "",
+    machine_center_no_normalized: plan.machineCenterNoNormalized ?? "",
+    effective_from: target?.effectiveFrom ?? "",
+    effective_to: target?.effectiveTo ?? "",
+    proposed_target_qty: plan.proposedTargetQty ?? "",
+    unit: plan.unit,
+    source: plan.source,
+    approval_status: plan.approvalStatus,
+    risk_level: plan.riskLevel,
+    risk_reason: plan.riskReason,
+    recommended_action: plan.recommendedAction,
+    sample_rows: group.sampleRows
+  };
+}
+
+function targetProfileBackfillRowsToCsv(rows: readonly TargetProfileBackfillDryRunReportRow[]): string {
+  const lines = [
+    targetProfileBackfillDryRunCsvHeaders.join(","),
+    ...rows.map((row) => targetProfileBackfillDryRunCsvHeaders.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function summarizeTargetProfileBackfillDryRunRows(input: {
+  readonly rows: readonly TargetProfileBackfillDryRunReportRow[];
+  readonly outputFiles: TargetProfileBackfillDryRunSummary["outputFiles"];
+}): TargetProfileBackfillDryRunSummary {
+  const rows = input.rows;
+  return {
+    generatedAt: new Date().toISOString(),
+    proposedTargetProfileRows: rows.length,
+    lowRiskRows: rows.filter((row) => row.risk_level === "LOW").length,
+    mediumRiskRows: rows.filter((row) => row.risk_level === "MEDIUM").length,
+    highRiskRows: rows.filter((row) => row.risk_level === "HIGH").length,
+    topProposedTargetProfiles: targetProfileBackfillGroups(rows),
+    topMissingTargetQtyGroups: targetProfileBackfillGroups(rows.filter((row) => row.proposed_target_qty === "")),
+    topHighRiskGroups: targetProfileBackfillGroups(rows.filter((row) => row.risk_level === "HIGH")),
+    families: backfillFamilySummary(rows),
+    outputFiles: input.outputFiles,
+    safety: {
+      databaseUpdated: false,
+      targetProfilesUpdated: false,
+      dashboardChanged: false,
+      oldTargetLogicChanged: false
+    }
+  };
+}
+
+function targetProfileBackfillGroups(
+  rows: readonly TargetProfileBackfillDryRunReportRow[],
+  limit = 20
+): readonly TargetProfileBackfillGroup[] {
+  const groups = new Map<string, {
+    canonicalEntityCode: string;
+    canonicalEntityDisplayName: string;
+    currentEntityCodes: Set<string>;
+    targetBucket: string;
+    machineCenterNo: string;
+    proposedTargetQty: number | null;
+    rows: number;
+    riskLevel: BackfillRiskLevel;
+    riskReason: string;
+    recommendedAction: string;
+  }>();
+
+  for (const row of rows) {
+    const key = [
+      row.canonical_entity_code,
+      row.target_bucket,
+      row.machine_center_no_normalized || "(blank)",
+      row.proposed_target_qty || "(blank)",
+      row.risk_level
+    ].join(":");
+    const current = groups.get(key) ?? {
+      canonicalEntityCode: row.canonical_entity_code,
+      canonicalEntityDisplayName: row.canonical_entity_display_name,
+      currentEntityCodes: new Set<string>(),
+      targetBucket: row.target_bucket,
+      machineCenterNo: row.machine_center_no || "(generic)",
+      proposedTargetQty: typeof row.proposed_target_qty === "number" ? row.proposed_target_qty : null,
+      rows: 0,
+      riskLevel: row.risk_level,
+      riskReason: row.risk_reason,
+      recommendedAction: row.recommended_action
+    };
+    current.rows += row.sample_rows;
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    groups.set(key, current);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      canonicalEntityCode: group.canonicalEntityCode,
+      canonicalEntityDisplayName: group.canonicalEntityDisplayName,
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      targetBucket: group.targetBucket,
+      machineCenterNo: group.machineCenterNo,
+      proposedTargetQty: group.proposedTargetQty,
+      rows: group.rows,
+      riskLevel: group.riskLevel,
+      riskReason: group.riskReason,
+      recommendedAction: group.recommendedAction
+    }))
+    .sort((left, right) => riskSort(right.riskLevel) - riskSort(left.riskLevel) || right.rows - left.rows || left.canonicalEntityCode.localeCompare(right.canonicalEntityCode))
+    .slice(0, limit);
+}
+
+function riskSort(value: BackfillRiskLevel): number {
+  if (value === "HIGH") return 3;
+  if (value === "MEDIUM") return 2;
+  return 1;
+}
+
+async function buildEntityV2BackfillDryRun(pool: DatabasePool): Promise<{
+  readonly entityRows: readonly EntityV2BackfillDryRunReportRow[];
+  readonly v2Rows: readonly EntityV2ReportRow[];
+}> {
+  const [catalog, sourceRows] = await Promise.all([
+    queryBusinessCentralCanonicalEntityCatalog(pool),
+    queryEntityV2SourceRows(pool)
+  ]);
+  const v2Rows = buildEntityV2ReportRows(sourceRows, catalog);
+  return {
+    entityRows: buildEntityV2BackfillDryRunReportRows(v2Rows),
+    v2Rows
+  };
+}
+
+async function runEntityV2BackfillDryRun(pool: DatabasePool) {
+  const csvPath = resolveRepoPath(process.env.ENTITY_V2_BACKFILL_DRY_RUN_CSV?.trim() || DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_CSV_PATH);
+  const jsonPath = resolveRepoPath(process.env.ENTITY_V2_BACKFILL_DRY_RUN_JSON?.trim() || DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_JSON_PATH);
+
+  console.log("Business Central entity v2 backfill dry run");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`CSV output: ${displayRepoPath(csvPath)}`);
+  console.log(`JSON output: ${displayRepoPath(jsonPath)}`);
+  console.log("Safety: read-only; production_outputs.entity_id, aliases, conditional rules, dashboard, and target profiles are not changed.");
+
+  const { entityRows } = await buildEntityV2BackfillDryRun(pool);
+  const outputFiles = {
+    csv: displayRepoPath(csvPath),
+    json: displayRepoPath(jsonPath)
+  };
+  const summary = summarizeEntityV2BackfillDryRunRows({ rows: entityRows, outputFiles });
+
+  await mkdir(path.dirname(csvPath), { recursive: true });
+  await mkdir(path.dirname(jsonPath), { recursive: true });
+  await writeFile(csvPath, entityV2BackfillRowsToCsv(entityRows), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_rows=${summary.totalRows}`);
+  console.log(`- proposed_entity_backfill_rows=${summary.proposedEntityBackfillRows}`);
+  console.log(`- no_change_rows=${summary.noChangeRows}`);
+  console.log(`- high_risk_rows=${summary.highRiskRows}; medium_risk_rows=${summary.mediumRiskRows}; low_risk_rows=${summary.lowRiskRows}`);
+
+  console.log("");
+  console.log("Top proposed canonical entities");
+  printEntityBackfillGroups(summary.topProposedCanonicalEntities.slice(0, 10));
+
+  console.log("");
+  console.log("Top high-risk groups");
+  printEntityBackfillGroups(summary.topHighRiskGroups.slice(0, 10));
+
+  console.log("");
+  console.log("Reports written");
+  console.log(`- ${outputFiles.csv}`);
+  console.log(`- ${outputFiles.json}`);
+}
+
+async function runTargetProfileBackfillDryRun(pool: DatabasePool) {
+  const csvPath = resolveRepoPath(process.env.TARGET_PROFILE_BACKFILL_DRY_RUN_CSV?.trim() || DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_CSV_PATH);
+  const jsonPath = resolveRepoPath(process.env.TARGET_PROFILE_BACKFILL_DRY_RUN_JSON?.trim() || DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_JSON_PATH);
+
+  console.log("Business Central target profile backfill dry run");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`CSV output: ${displayRepoPath(csvPath)}`);
+  console.log(`JSON output: ${displayRepoPath(jsonPath)}`);
+  console.log("Safety: read-only; target_profiles, production_outputs.entity_id, old targets, and dashboard lookup are not changed.");
+
+  const [{ entityRows, v2Rows }, productionTargets] = await Promise.all([
+    buildEntityV2BackfillDryRun(pool),
+    queryProductionTargetSources(pool)
+  ]);
+  const reportRows = buildTargetProfileBackfillDryRunReportRows({ entityRows, v2Rows, productionTargets });
+  const outputFiles = {
+    csv: displayRepoPath(csvPath),
+    json: displayRepoPath(jsonPath)
+  };
+  const summary = summarizeTargetProfileBackfillDryRunRows({ rows: reportRows, outputFiles });
+
+  await mkdir(path.dirname(csvPath), { recursive: true });
+  await mkdir(path.dirname(jsonPath), { recursive: true });
+  await writeFile(csvPath, targetProfileBackfillRowsToCsv(reportRows), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- proposed_target_profile_rows=${summary.proposedTargetProfileRows}`);
+  console.log(`- high_risk_rows=${summary.highRiskRows}; medium_risk_rows=${summary.mediumRiskRows}; low_risk_rows=${summary.lowRiskRows}`);
+
+  console.log("");
+  console.log("Top proposed target profiles");
+  printTargetProfileBackfillGroups(summary.topProposedTargetProfiles.slice(0, 10));
+
+  console.log("");
+  console.log("Top missing target quantity groups");
+  printTargetProfileBackfillGroups(summary.topMissingTargetQtyGroups.slice(0, 10));
+
+  console.log("");
+  console.log("Top high-risk groups");
+  printTargetProfileBackfillGroups(summary.topHighRiskGroups.slice(0, 10));
+
+  console.log("");
+  console.log("Reports written");
+  console.log(`- ${outputFiles.csv}`);
+  console.log(`- ${outputFiles.json}`);
+}
+
+function printEntityBackfillGroups(groups: readonly EntityV2BackfillGroup[]) {
+  if (groups.length === 0) {
+    console.log("- none");
+    return;
+  }
+  for (const item of groups) {
+    console.log(
+      `- proposed=${item.proposedCanonicalEntityCode}; rows=${item.rows}; risk=${item.riskLevel}; action=${item.action}; current=${item.currentEntityCodes.join("|") || "none"}; source=${item.sourceField}:${item.sourceValue}`
+    );
+  }
+}
+
+function printTargetProfileBackfillGroups(groups: readonly TargetProfileBackfillGroup[]) {
+  if (groups.length === 0) {
+    console.log("- none");
+    return;
+  }
+  for (const item of groups) {
+    console.log(
+      `- canonical=${item.canonicalEntityCode}; bucket=${item.targetBucket}; machine_center=${item.machineCenterNo}; target=${item.proposedTargetQty ?? "blank"}; rows=${item.rows}; risk=${item.riskLevel}; current=${item.currentEntityCodes.join("|") || "none"}`
+    );
+  }
+}
+
 async function runMappingPlan(pool: DatabasePool) {
   const limit = Math.min(Number(process.env.MAPPING_PLAN_LIMIT ?? 250) || 250, 1000);
   const outputPathInput = process.env.MAPPING_PLAN_OUTPUT?.trim() || DEFAULT_MAPPING_PLAN_PATH;
@@ -3327,8 +4057,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -3341,6 +4071,8 @@ async function main() {
     else if (command === "mapping-plan-apply") await runMappingPlanApply(database.pool);
     else if (command === "entity-v2-dry-run") await runEntityV2DryRun(database.pool);
     else if (command === "target-profile-dry-run") await runTargetProfileDryRun(database.pool);
+    else if (command === "entity-v2-backfill-dry-run") await runEntityV2BackfillDryRun(database.pool);
+    else if (command === "target-profile-backfill-dry-run") await runTargetProfileBackfillDryRun(database.pool);
     else await runMappingApply(database.pool);
   } finally {
     await database.pool.end();
