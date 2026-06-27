@@ -28,6 +28,7 @@
     "bc:mapping-plan": "bash scripts/bc-metrics.sh mapping-plan",
     "bc:mapping-plan-apply": "bash scripts/bc-metrics.sh mapping-plan-apply",
     "bc:mapping-apply": "bash scripts/bc-metrics.sh mapping-apply",
+    "bc:entity-v2-dry-run": "bash scripts/bc-metrics.sh entity-v2-dry-run",
     "v1:master-profile": "bash scripts/v1-master.sh profile",
     "v1:master-import": "bash scripts/v1-master.sh import",
     "v1:master-reconcile": "bash scripts/v1-master.sh reconcile",

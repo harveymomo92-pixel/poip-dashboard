@@ -166,6 +166,14 @@ resolver v2 entity candidate
 
 It must not update database rows.
 
+Implementation note:
+
+```text
+P0.7 derives the canonical catalog from active master_entities plus active, Business Central
+source aliases. Duplicate aliases remain ambiguous and do not force a match. The dry run
+does not create canonical entities or aliases when a source value has no exact safe match.
+```
+
 ---
 
 ## 7. Required Test Cases

@@ -36,6 +36,16 @@ import {
   type MappingPlanRow,
   type MappingSuggestion
 } from "../packages/domain/src/master-data/mapping-candidates.js";
+import {
+  buildBusinessCentralCanonicalEntityCatalog,
+  resolveBusinessCentralEntityV2,
+  type BusinessCentralCanonicalEntityAliasInput,
+  type BusinessCentralCanonicalEntityCatalog,
+  type BusinessCentralCanonicalEntityInput,
+  type BusinessCentralEntityV2Confidence,
+  type BusinessCentralEntityV2SourceField,
+  type BusinessCentralTargetBucketCandidate
+} from "../packages/domain/src/master-data/entity-resolver-v2.js";
 
 const SOURCE_SYSTEM = "business-central";
 const DEFAULT_MAPPING_PLAN_PATH = ".tmp/mapping-plan/business-central-mapping-plan.csv";
@@ -49,9 +59,17 @@ type Command =
   | "mapping-candidates"
   | "mapping-apply"
   | "mapping-plan"
-  | "mapping-plan-apply";
+  | "mapping-plan-apply"
+  | "entity-v2-dry-run";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
+
+type EntityV2ComparisonStatus =
+  | "SAME_ENTITY"
+  | "DIFFERENT_ENTITY"
+  | "CURRENT_UNMAPPED_V2_RESOLVED"
+  | "CURRENT_MAPPED_V2_UNMAPPED"
+  | "BOTH_UNMAPPED";
 
 interface Filters {
   readonly from: string;
@@ -94,6 +112,134 @@ interface UnmappedSourceGroup {
   readonly lastPostingDate: string | null;
   readonly suggestions: readonly MappingSuggestion[];
 }
+
+interface EntityV2SourceRow {
+  readonly entryNo: string | null;
+  readonly postingDate: string;
+  readonly documentNo: string | null;
+  readonly itemNo: string;
+  readonly itemDescription: string | null;
+  readonly itemCategoryCode: string | null;
+  readonly quantity: number;
+  readonly grossWeight: number | null;
+  readonly entryType: string | null;
+  readonly locationCode: string | null;
+  readonly gProdOrRotLineNo: string | null;
+  readonly gProdOrRotLineDescription: string | null;
+  readonly machineCenterNo: string | null;
+  readonly currentEntityCode: string | null;
+  readonly currentEntityDisplayName: string | null;
+}
+
+interface EntityV2ReportRow {
+  readonly posting_date: string;
+  readonly document_no: string;
+  readonly entry_no: string;
+  readonly item_no: string;
+  readonly item_description: string;
+  readonly item_category_code: string;
+  readonly quantity: number;
+  readonly gross_weight: number | "";
+  readonly entry_type: string;
+  readonly location_code: string;
+  readonly g_prod_or_rot_line_no: string;
+  readonly g_prod_or_rot_line_description: string;
+  readonly machine_center_no: string;
+  readonly current_entity_code: string;
+  readonly current_entity_display_name: string;
+  readonly v2_entity_code: string;
+  readonly v2_entity_display_name: string;
+  readonly v2_source_field_used: BusinessCentralEntityV2SourceField;
+  readonly v2_source_value_used: string;
+  readonly v2_confidence: BusinessCentralEntityV2Confidence;
+  readonly v2_reason: string;
+  readonly v2_target_bucket_candidate: BusinessCentralTargetBucketCandidate;
+  readonly v2_target_routing_evidence: string;
+  readonly comparison_status: EntityV2ComparisonStatus;
+}
+
+interface EntityV2Summary {
+  readonly generatedAt: string;
+  readonly totalRows: number;
+  readonly resolvedRows: number;
+  readonly unresolvedRows: number;
+  readonly sameEntityRows: number;
+  readonly differentEntityRows: number;
+  readonly currentlyUnmappedButV2Resolved: number;
+  readonly currentlyMappedButV2Unmapped: number;
+  readonly topSourceFieldsUsed: readonly TopCount[];
+  readonly topTargetBucketCandidates: readonly TopCount[];
+  readonly topMismatchSourceValues: readonly EntityV2MismatchGroup[];
+  readonly examplesByFamily: Record<EntityV2ExampleFamily, readonly EntityV2Example[]>;
+  readonly outputFiles: {
+    readonly csv: string;
+    readonly json: string;
+  };
+  readonly safety: {
+    readonly dashboardChanged: false;
+    readonly databaseUpdated: false;
+    readonly aliasesChanged: false;
+    readonly conditionalRulesChanged: false;
+  };
+}
+
+interface TopCount {
+  readonly value: string;
+  readonly rows: number;
+}
+
+interface EntityV2MismatchGroup {
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly rows: number;
+  readonly comparisonStatuses: readonly string[];
+  readonly currentEntityCodes: readonly string[];
+  readonly v2EntityCodes: readonly string[];
+}
+
+type EntityV2ExampleFamily = "OMSO" | "VFINE" | "ILLIG" | "REPACKING" | "NEWDO" | "CAI";
+
+interface EntityV2Example {
+  readonly postingDate: string;
+  readonly documentNo: string;
+  readonly itemNo: string;
+  readonly itemDescription: string;
+  readonly sourceField: string;
+  readonly sourceValue: string;
+  readonly currentEntityCode: string;
+  readonly v2EntityCode: string;
+  readonly comparisonStatus: EntityV2ComparisonStatus;
+  readonly targetBucketCandidate: BusinessCentralTargetBucketCandidate;
+}
+
+const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
+const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
+const entityV2CsvHeaders = [
+  "posting_date",
+  "document_no",
+  "entry_no",
+  "item_no",
+  "item_description",
+  "item_category_code",
+  "quantity",
+  "gross_weight",
+  "entry_type",
+  "location_code",
+  "g_prod_or_rot_line_no",
+  "g_prod_or_rot_line_description",
+  "machine_center_no",
+  "current_entity_code",
+  "current_entity_display_name",
+  "v2_entity_code",
+  "v2_entity_display_name",
+  "v2_source_field_used",
+  "v2_source_value_used",
+  "v2_confidence",
+  "v2_reason",
+  "v2_target_bucket_candidate",
+  "v2_target_routing_evidence",
+  "comparison_status"
+] as const satisfies readonly (keyof EntityV2ReportRow)[];
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -476,6 +622,338 @@ async function activeEntityCandidates(pool: DatabasePool): Promise<readonly Cand
     productFamily: row.product_family,
     reportGroup: row.report_group
   }));
+}
+
+async function queryBusinessCentralCanonicalEntityCatalog(
+  pool: DatabasePool
+): Promise<BusinessCentralCanonicalEntityCatalog> {
+  const result = await pool.query<{
+    entity_id: string;
+    entity_code: string;
+    display_name: string;
+    line_code: string | null;
+    product_family: string | null;
+    report_group: string | null;
+    aliases: unknown;
+  }>(
+    `
+      select me.id as entity_id,
+             me.entity_code,
+             me.display_name,
+             me.line_code,
+             me.product_family,
+             me.report_group,
+             coalesce(
+               jsonb_agg(
+                 distinct jsonb_build_object(
+                   'alias', mea.alias,
+                   'aliasNormalized', mea.alias_normalized,
+                   'sourceSystem', mea.source_system,
+                   'sourceField', mea.source_field,
+                   'isActive', mea.is_active
+                 )
+               ) filter (where mea.id is not null),
+               '[]'::jsonb
+             ) as aliases
+      from master_entities me
+      left join master_entity_aliases mea
+        on mea.entity_id = me.id
+       and mea.is_active
+       and mea.source_system = $1
+      where me.is_active
+      group by me.id
+      order by me.entity_code
+    `,
+    [SOURCE_SYSTEM]
+  );
+
+  return buildBusinessCentralCanonicalEntityCatalog(result.rows.map((row): BusinessCentralCanonicalEntityInput => ({
+    entityId: row.entity_id,
+    entityCode: row.entity_code,
+    displayName: row.display_name,
+    lineCode: row.line_code,
+    productFamily: row.product_family,
+    reportGroup: row.report_group,
+    aliases: parseEntityV2Aliases(row.aliases)
+  })));
+}
+
+async function queryEntityV2SourceRows(pool: DatabasePool): Promise<readonly EntityV2SourceRow[]> {
+  const limit = Number(process.env.ENTITY_V2_DRY_RUN_LIMIT ?? 0);
+  const params: unknown[] = [SOURCE_SYSTEM];
+  const limitClause = Number.isFinite(limit) && limit > 0 ? "limit $2" : "";
+  if (limitClause) params.push(limit);
+
+  const result = await pool.query<{
+    entry_no: string | null;
+    posting_date: string;
+    document_no: string | null;
+    item_no: string;
+    item_description: string | null;
+    item_category_code: string | null;
+    quantity: string | number;
+    gross_weight: string | number | null;
+    entry_type: string | null;
+    location_code: string | null;
+    g_prod_or_rot_line_no: string | null;
+    g_prod_or_rot_line_description: string | null;
+    machine_center_no: string | null;
+    current_entity_code: string | null;
+    current_entity_display_name: string | null;
+  }>(
+    `
+      select po.entry_no::text,
+             po.posting_date::text,
+             po.document_no,
+             po.item_no,
+             po.item_description,
+             po.item_category_code,
+             po.quantity,
+             po.gross_weight_per_pcs as gross_weight,
+             po.entry_type,
+             coalesce(
+               po.raw_payload ->> 'Location_Code',
+               po.raw_payload ->> 'LocationCode',
+               po.raw_payload ->> 'location_code'
+             ) as location_code,
+             po.prod_line_no as g_prod_or_rot_line_no,
+             po.prod_line_description as g_prod_or_rot_line_description,
+             po.machine_center_no,
+             me.entity_code as current_entity_code,
+             me.display_name as current_entity_display_name
+      from production_outputs po
+      left join master_entities me on me.id = po.entity_id
+      where po.source_system = $1
+      order by po.posting_date asc, po.entry_no asc nulls last, po.id asc
+      ${limitClause}
+    `,
+    params
+  );
+
+  return result.rows.map((row) => ({
+    entryNo: row.entry_no,
+    postingDate: dateText(row.posting_date),
+    documentNo: row.document_no,
+    itemNo: row.item_no,
+    itemDescription: row.item_description,
+    itemCategoryCode: row.item_category_code,
+    quantity: numberValue(row.quantity),
+    grossWeight: row.gross_weight === null ? null : numberValue(row.gross_weight),
+    entryType: row.entry_type,
+    locationCode: row.location_code,
+    gProdOrRotLineNo: row.g_prod_or_rot_line_no,
+    gProdOrRotLineDescription: row.g_prod_or_rot_line_description,
+    machineCenterNo: row.machine_center_no,
+    currentEntityCode: row.current_entity_code,
+    currentEntityDisplayName: row.current_entity_display_name
+  }));
+}
+
+function buildEntityV2ReportRows(
+  sourceRows: readonly EntityV2SourceRow[],
+  catalog: BusinessCentralCanonicalEntityCatalog
+): readonly EntityV2ReportRow[] {
+  return sourceRows.map((row) => {
+    const resolution = resolveBusinessCentralEntityV2({
+      entryType: row.entryType,
+      postingDate: row.postingDate,
+      documentNo: row.documentNo,
+      itemNo: row.itemNo,
+      itemDescription: row.itemDescription,
+      itemCategoryCode: row.itemCategoryCode,
+      locationCode: row.locationCode,
+      quantity: row.quantity,
+      grossWeight: row.grossWeight,
+      gProdOrRotLineNo: row.gProdOrRotLineNo,
+      gProdOrRotLineDescription: row.gProdOrRotLineDescription,
+      machineCenterNo: row.machineCenterNo
+    }, catalog);
+    return {
+      posting_date: row.postingDate,
+      document_no: row.documentNo ?? "",
+      entry_no: row.entryNo ?? "",
+      item_no: row.itemNo,
+      item_description: row.itemDescription ?? "",
+      item_category_code: row.itemCategoryCode ?? "",
+      quantity: row.quantity,
+      gross_weight: row.grossWeight ?? "",
+      entry_type: row.entryType ?? "",
+      location_code: row.locationCode ?? "",
+      g_prod_or_rot_line_no: row.gProdOrRotLineNo ?? "",
+      g_prod_or_rot_line_description: row.gProdOrRotLineDescription ?? "",
+      machine_center_no: row.machineCenterNo ?? "",
+      current_entity_code: row.currentEntityCode ?? "",
+      current_entity_display_name: row.currentEntityDisplayName ?? "",
+      v2_entity_code: resolution.resolvedEntityCode ?? "",
+      v2_entity_display_name: resolution.resolvedEntityDisplayName ?? "",
+      v2_source_field_used: resolution.sourceFieldUsed,
+      v2_source_value_used: resolution.sourceValueUsed ?? "",
+      v2_confidence: resolution.confidence,
+      v2_reason: resolution.reason,
+      v2_target_bucket_candidate: resolution.targetBucketCandidate,
+      v2_target_routing_evidence: resolution.targetRoutingEvidence,
+      comparison_status: entityV2ComparisonStatus(row.currentEntityCode, resolution.resolvedEntityCode)
+    };
+  });
+}
+
+function summarizeEntityV2ReportRows(
+  rows: readonly EntityV2ReportRow[],
+  outputFiles: EntityV2Summary["outputFiles"]
+): EntityV2Summary {
+  return {
+    generatedAt: new Date().toISOString(),
+    totalRows: rows.length,
+    resolvedRows: rows.filter((row) => row.v2_entity_code).length,
+    unresolvedRows: rows.filter((row) => !row.v2_entity_code).length,
+    sameEntityRows: rows.filter((row) => row.comparison_status === "SAME_ENTITY").length,
+    differentEntityRows: rows.filter((row) => row.comparison_status === "DIFFERENT_ENTITY").length,
+    currentlyUnmappedButV2Resolved: rows.filter((row) => row.comparison_status === "CURRENT_UNMAPPED_V2_RESOLVED").length,
+    currentlyMappedButV2Unmapped: rows.filter((row) => row.comparison_status === "CURRENT_MAPPED_V2_UNMAPPED").length,
+    topSourceFieldsUsed: topCounts(rows.map((row) => row.v2_source_field_used)),
+    topTargetBucketCandidates: topCounts(rows.map((row) => row.v2_target_bucket_candidate)),
+    topMismatchSourceValues: topMismatchSourceValues(rows),
+    examplesByFamily: examplesByFamily(rows),
+    outputFiles,
+    safety: {
+      dashboardChanged: false,
+      databaseUpdated: false,
+      aliasesChanged: false,
+      conditionalRulesChanged: false
+    }
+  };
+}
+
+function parseEntityV2Aliases(value: unknown): readonly BusinessCentralCanonicalEntityAliasInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): BusinessCentralCanonicalEntityAliasInput[] => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const alias = typeof record.alias === "string" ? record.alias : "";
+    if (!alias) return [];
+    return [{
+      alias,
+      aliasNormalized: typeof record.aliasNormalized === "string" ? record.aliasNormalized : null,
+      sourceSystem: typeof record.sourceSystem === "string" ? record.sourceSystem : null,
+      sourceField: typeof record.sourceField === "string" ? record.sourceField : null,
+      isActive: typeof record.isActive === "boolean" ? record.isActive : null
+    }];
+  });
+}
+
+function entityV2ComparisonStatus(
+  currentEntityCode: string | null,
+  v2EntityCode: string | null
+): EntityV2ComparisonStatus {
+  if (currentEntityCode && v2EntityCode) {
+    return currentEntityCode === v2EntityCode ? "SAME_ENTITY" : "DIFFERENT_ENTITY";
+  }
+  if (!currentEntityCode && v2EntityCode) return "CURRENT_UNMAPPED_V2_RESOLVED";
+  if (currentEntityCode && !v2EntityCode) return "CURRENT_MAPPED_V2_UNMAPPED";
+  return "BOTH_UNMAPPED";
+}
+
+function entityV2RowsToCsv(rows: readonly EntityV2ReportRow[]): string {
+  const lines = [
+    entityV2CsvHeaders.join(","),
+    ...rows.map((row) => entityV2CsvHeaders.map((header) => csvField(row[header])).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function csvField(value: unknown): string {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
+}
+
+function topCounts(values: readonly string[], limit = 10): readonly TopCount[] {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const key = value || "(blank)";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, rows]) => ({ value, rows }))
+    .sort((left, right) => right.rows - left.rows || left.value.localeCompare(right.value))
+    .slice(0, limit);
+}
+
+function topMismatchSourceValues(rows: readonly EntityV2ReportRow[], limit = 10): readonly EntityV2MismatchGroup[] {
+  const grouped = new Map<string, {
+    sourceField: string;
+    sourceValue: string;
+    rows: number;
+    comparisonStatuses: Set<string>;
+    currentEntityCodes: Set<string>;
+    v2EntityCodes: Set<string>;
+  }>();
+  for (const row of rows) {
+    if (row.comparison_status === "SAME_ENTITY" || row.comparison_status === "BOTH_UNMAPPED") continue;
+    const sourceField = row.v2_source_field_used;
+    const sourceValue = row.v2_source_value_used || "(blank)";
+    const key = `${sourceField}:${sourceValue}`;
+    const current = grouped.get(key) ?? {
+      sourceField,
+      sourceValue,
+      rows: 0,
+      comparisonStatuses: new Set<string>(),
+      currentEntityCodes: new Set<string>(),
+      v2EntityCodes: new Set<string>()
+    };
+    current.rows += 1;
+    current.comparisonStatuses.add(row.comparison_status);
+    if (row.current_entity_code) current.currentEntityCodes.add(row.current_entity_code);
+    if (row.v2_entity_code) current.v2EntityCodes.add(row.v2_entity_code);
+    grouped.set(key, current);
+  }
+  return [...grouped.values()]
+    .map((group) => ({
+      sourceField: group.sourceField,
+      sourceValue: group.sourceValue,
+      rows: group.rows,
+      comparisonStatuses: sortedStrings(group.comparisonStatuses),
+      currentEntityCodes: sortedStrings(group.currentEntityCodes),
+      v2EntityCodes: sortedStrings(group.v2EntityCodes)
+    }))
+    .sort((left, right) => right.rows - left.rows || left.sourceField.localeCompare(right.sourceField) || left.sourceValue.localeCompare(right.sourceValue))
+    .slice(0, limit);
+}
+
+function examplesByFamily(rows: readonly EntityV2ReportRow[]): Record<EntityV2ExampleFamily, readonly EntityV2Example[]> {
+  const families = ["OMSO", "VFINE", "ILLIG", "REPACKING", "NEWDO", "CAI"] as const;
+  const examples = Object.fromEntries(families.map((family) => [family, []])) as Record<EntityV2ExampleFamily, EntityV2Example[]>;
+  for (const row of rows) {
+    const text = normalizeAliasDisplay([
+      row.g_prod_or_rot_line_description,
+      row.g_prod_or_rot_line_no,
+      row.machine_center_no,
+      row.current_entity_code,
+      row.current_entity_display_name,
+      row.v2_entity_code,
+      row.v2_entity_display_name,
+      row.item_description
+    ].filter(Boolean).join(" "));
+    for (const family of families) {
+      if (examples[family].length >= 5 || !text.includes(family)) continue;
+      examples[family].push({
+        postingDate: row.posting_date,
+        documentNo: row.document_no,
+        itemNo: row.item_no,
+        itemDescription: row.item_description,
+        sourceField: row.v2_source_field_used,
+        sourceValue: row.v2_source_value_used,
+        currentEntityCode: row.current_entity_code,
+        v2EntityCode: row.v2_entity_code,
+        comparisonStatus: row.comparison_status,
+        targetBucketCandidate: row.v2_target_bucket_candidate
+      });
+    }
+  }
+  return examples;
+}
+
+function sortedStrings(values: ReadonlySet<string>): readonly string[] {
+  return [...values].sort((left, right) => left.localeCompare(right));
 }
 
 async function fetchUnmappedSourceGroups(
@@ -1302,6 +1780,71 @@ async function runMappingCandidates(pool: ReturnType<typeof createDatabase>["poo
   );
 }
 
+async function runEntityV2DryRun(pool: DatabasePool) {
+  const csvPath = resolveRepoPath(process.env.ENTITY_V2_DRY_RUN_CSV?.trim() || DEFAULT_ENTITY_V2_CSV_PATH);
+  const jsonPath = resolveRepoPath(process.env.ENTITY_V2_DRY_RUN_JSON?.trim() || DEFAULT_ENTITY_V2_JSON_PATH);
+
+  console.log("Business Central entity resolver v2 dry run");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`CSV output: ${displayRepoPath(csvPath)}`);
+  console.log(`JSON output: ${displayRepoPath(jsonPath)}`);
+  console.log("Safety: read-only; production_outputs.entity_id, aliases, conditional rules, targets, and KPI logic are not changed.");
+
+  const [catalog, sourceRows] = await Promise.all([
+    queryBusinessCentralCanonicalEntityCatalog(pool),
+    queryEntityV2SourceRows(pool)
+  ]);
+  const reportRows = buildEntityV2ReportRows(sourceRows, catalog);
+  const outputFiles = {
+    csv: displayRepoPath(csvPath),
+    json: displayRepoPath(jsonPath)
+  };
+  const summary = summarizeEntityV2ReportRows(reportRows, outputFiles);
+
+  await mkdir(path.dirname(csvPath), { recursive: true });
+  await mkdir(path.dirname(jsonPath), { recursive: true });
+  await writeFile(csvPath, entityV2RowsToCsv(reportRows), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_rows=${summary.totalRows}`);
+  console.log(`- resolved_rows=${summary.resolvedRows}; unresolved_rows=${summary.unresolvedRows}`);
+  console.log(`- same_entity_rows=${summary.sameEntityRows}; different_entity_rows=${summary.differentEntityRows}`);
+  console.log(`- currently_unmapped_but_v2_resolved=${summary.currentlyUnmappedButV2Resolved}`);
+  console.log(`- currently_mapped_but_v2_unmapped=${summary.currentlyMappedButV2Unmapped}`);
+  console.log(`- catalog_entities=${catalog.entries.length}`);
+
+  console.log("");
+  console.log("Top source fields used");
+  for (const item of summary.topSourceFieldsUsed.slice(0, 5)) {
+    console.log(`- ${item.value}: rows=${item.rows}`);
+  }
+
+  console.log("");
+  console.log("Top target bucket candidates");
+  for (const item of summary.topTargetBucketCandidates.slice(0, 8)) {
+    console.log(`- ${item.value}: rows=${item.rows}`);
+  }
+
+  console.log("");
+  console.log("Top mismatch source values");
+  if (summary.topMismatchSourceValues.length === 0) {
+    console.log("- none");
+  }
+  for (const item of summary.topMismatchSourceValues.slice(0, 8)) {
+    console.log(
+      `- ${item.sourceField}=${item.sourceValue}; rows=${item.rows}; statuses=${item.comparisonStatuses.join("|")}; current=${item.currentEntityCodes.join("|") || "none"}; v2=${item.v2EntityCodes.join("|") || "none"}`
+    );
+  }
+
+  console.log("");
+  console.log("Reports written");
+  console.log(`- ${outputFiles.csv}`);
+  console.log(`- ${outputFiles.json}`);
+}
+
 async function runMappingPlan(pool: DatabasePool) {
   const limit = Math.min(Number(process.env.MAPPING_PLAN_LIMIT ?? 250) || 250, 1000);
   const outputPathInput = process.env.MAPPING_PLAN_OUTPUT?.trim() || DEFAULT_MAPPING_PLAN_PATH;
@@ -1862,8 +2405,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -1874,6 +2417,7 @@ async function main() {
     else if (command === "mapping-candidates") await runMappingCandidates(database.pool);
     else if (command === "mapping-plan") await runMappingPlan(database.pool);
     else if (command === "mapping-plan-apply") await runMappingPlanApply(database.pool);
+    else if (command === "entity-v2-dry-run") await runEntityV2DryRun(database.pool);
     else await runMappingApply(database.pool);
   } finally {
     await database.pool.end();

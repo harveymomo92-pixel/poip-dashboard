@@ -187,6 +187,7 @@ pnpm bc:reconcile
 RECONCILE_FROM=2026-06-18 RECONCILE_TO=2026-06-24 pnpm bc:reconcile
 pnpm bc:daily-item-resume
 pnpm bc:target-coverage
+pnpm bc:entity-v2-dry-run
 ```
 
 `pnpm bc:profile` reports row counts, posting-date range, rows by month, entry type, normalized output type, source-system mix, preferred entity source usage, top unmapped machines/entities, top OK items, target coverage, and reject conversion gaps.
@@ -196,6 +197,34 @@ pnpm bc:target-coverage
 `pnpm bc:daily-item-resume` validates the v1-style `Resume Harian per Item`: raw `Entry_Type = Output` row count, grouped row count, positive output, negative correction output, net output, parsed `External_Document_No` shift/work-hours/operator details, deterministic reject attachment statuses, reject-only groups, ambiguous reject examples, conversion gap reason breakdown, target gaps, target reason breakdown, and sample grouped rows. The reject conversion breakdown prints reason-coded counts for `MISSING_OK_GROSS_WEIGHT`, `ZERO_OR_INVALID_OK_GROSS_WEIGHT`, `NO_MATCHED_OK_ROW`, `AMBIGUOUS_REJECT_ATTACHMENT`, `REJECT_ONLY`, and `MISSING_CONVERSION_MAPPING`, plus incomplete-row examples with reject item, attachment status, OK item context, OK gross weight, gross-weight source, and reason.
 
 `pnpm bc:target-coverage` groups net OK Output by month and entity/preferred BC source, then labels rows as `COVERED`, `UNMAPPED_ENTITY`, `NO_ACTIVE_TARGET`, `TARGET_NOT_APPROVED`, `OUTSIDE_EFFECTIVE_DATE`, or `TARGET_ZERO`. Load/approve master entities and targets before expecting achievement to become numeric.
+
+### Business Central entity resolver v2 dry run
+
+Use the P0.7 dry run to compare current `production_outputs.entity_id` mapping with the proposed Business Central resolver v2. It is read-only and does not switch dashboard behavior:
+
+```bash
+pnpm bc:entity-v2-dry-run
+```
+
+Outputs:
+
+- `.tmp/bc-entity-v2-dry-run.csv`: row-level comparison with current entity, v2 entity candidate, source field used, confidence, target bucket candidate, routing evidence, and comparison status.
+- `.tmp/bc-entity-v2-dry-run.json`: summary counts, top source fields, top target buckets, top mismatch source values, examples by family, and safety flags.
+
+Interpret comparison statuses as follows:
+
+- `SAME_ENTITY`: current mapped entity code and resolver v2 entity code are the same.
+- `DIFFERENT_ENTITY`: both current and v2 are mapped, but entity codes differ; review before any future migration.
+- `CURRENT_UNMAPPED_V2_RESOLVED`: current row is unmapped, but resolver v2 found a canonical entity candidate.
+- `CURRENT_MAPPED_V2_UNMAPPED`: current row is mapped, but resolver v2 found no exact canonical match; this usually means canonical entities or safe aliases must be reviewed before P0.8+.
+- `BOTH_UNMAPPED`: neither current mapping nor resolver v2 resolved an entity.
+
+Safety notes:
+
+- The command reads `source_system = 'business-central'` rows and active master entity/catalog data only.
+- It never updates `production_outputs.entity_id`, aliases, conditional rules, targets, target formulas, reject formulas, or dashboard KPI formulas.
+- `Machine_Center_No` is treated as routing evidence and fallback only when `gProdOrRotLine_Description` and `gProdOrRotLine_No` are blank.
+- Target bucket output is only a candidate for later P0.8+ work; it is not used for dashboard target lookup yet.
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: production dashboard scope is `source_system = 'business-central'` and `entry_type = 'Output'`; other entry types remain stored for future panels; negative Output quantity is a correction; main output is net output; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps. Aggregate target coverage can reconcile while per-item resume rows still show `N/A` because aggregate achievement uses mapped entity-days and the resume keeps unmapped groups visible for mapping work.
 
