@@ -467,6 +467,16 @@ pnpm bc:future-use-raw-registry
 
 It reads the latest BC report files and writes `.tmp/bc-future-use-raw-registry/`. Every raw row gets a registry status, P1.0 inclusion status, future module candidate, authoritative entity coverage status, and target profile requirement status. Unknown/source-data-gap rows are exported as queues, not dropped rows.
 
+P0.9p adds the authoritative master review workspace:
+
+```bash
+pnpm bc:authoritative-master-review-workspace
+```
+
+It reads P0.9n seed drafts and the P0.9o raw registry, then writes `.tmp/bc-authoritative-master-review-workspace/` with entity, source mapping, target profile, conflict, source-data-gap, future-use-domain, reviewer-decision, priority, checklist, and manifest files. Every review row defaults to `pending`; no canonical entity, source map, target profile, alias, conditional rule, or dashboard setting is approved or applied.
+
+Target profile review is domain-scoped: `PRODUCTION_OUTPUT_DASHBOARD` requires target profile by default, `REJECT_ATTACHMENT` is conditional, and future-use non-production domains do not become P1 target-profile blockers only because a target profile is missing.
+
 These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 
 ---

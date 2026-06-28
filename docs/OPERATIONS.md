@@ -1027,6 +1027,16 @@ pnpm bc:future-use-raw-registry
 
 `bc:future-use-raw-registry` reads latest BC report files, writes `.tmp/bc-future-use-raw-registry/`, and registers all available raw rows for P1.0 or future-module use. Unknown/source-data-gap rows are explicit backlogs, not dropped rows. Authoritative master and seed-draft outputs are used for coverage only; draft mappings do not become approved coverage.
 
+P0.9p authoritative master review workspace:
+
+```bash
+pnpm bc:authoritative-master-review-workspace
+```
+
+`bc:authoritative-master-review-workspace` reads `.tmp/bc-authoritative-master-seed-draft/`, `.tmp/bc-authoritative-master-intake/`, and `.tmp/bc-future-use-raw-registry/`, then writes `.tmp/bc-authoritative-master-review-workspace/`. Use the generated workbooks for human review of canonical entities, source mappings, conflicts, source-data gaps, future-use domains, and target profiles. The command is export-only and keeps every review row pending.
+
+Target profile review is scoped by domain: production output dashboard rows are target-profile-required by default, reject attachment rows are conditional, and future-use non-production rows stay visible without becoming target-profile blockers by default.
+
 Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 
 Use the approval workspace only as a human-editable template. It keeps `approval_status=pending`, `safe_to_auto_apply=false`, and `safe_to_seed_target_profile=false` for every generated row. It writes source-data, alias/canonical, reject attachment, and target profile approval templates, but it does not mark decisions approved and does not reduce P1.0 blockers by itself.

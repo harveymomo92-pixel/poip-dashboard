@@ -624,3 +624,18 @@ Source-specific reset/remap is allowed only for one reviewed source value at a t
 ### Reject attachment review
 
 Reject attachment overrides must only be used when a reviewer selects one deterministic OK group. The system must not split reject KG automatically. Reject PCS Eq and reject rate remain incomplete or `N/A` until the required equivalent quantity is deterministic.
+
+<!-- P0_9P_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE -->
+## P0.9p Authoritative Master Review Workspace
+
+`pnpm bc:authoritative-master-review-workspace` is review/export only. It produces reviewer-friendly CSVs from authoritative seed drafts and the future-use raw registry, but it does not approve or apply canonical entities, source mappings, aliases, target profiles, conditional rules, or dashboard switches.
+
+Contract rules:
+
+- all generated review rows default to `approval_status=pending`;
+- reviewer decision template rows have no approved action by default;
+- legacy current entity and old target-like names remain evidence only;
+- `PRODUCTION_OUTPUT_DASHBOARD` requires target profile by default;
+- `REJECT_ATTACHMENT` target profile need is conditional;
+- future-use non-production domains do not become target-profile P1 blockers by default;
+- P1.0 remains `BLOCKED` because the workspace is export-only.

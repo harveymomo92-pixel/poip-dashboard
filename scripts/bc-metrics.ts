@@ -158,6 +158,18 @@ import {
   type FutureUseTargetProfileRequirementRow
 } from "../packages/domain/src/master-data/future-use-raw-registry.js";
 import {
+  buildAuthoritativeMasterReviewWorkspace,
+  type AuthoritativeMasterConflictReviewRow,
+  type AuthoritativeMasterEntityReviewRow,
+  type AuthoritativeMasterFutureUseDomainReviewRow,
+  type AuthoritativeMasterReviewerDecisionTemplateRow,
+  type AuthoritativeMasterReviewChecklistRow,
+  type AuthoritativeMasterReviewPriorityBoardRow,
+  type AuthoritativeMasterSourceDataGapReviewRow,
+  type AuthoritativeMasterSourceMappingReviewRow,
+  type AuthoritativeMasterTargetProfileReviewRow
+} from "../packages/domain/src/master-data/authoritative-master-review-workspace.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -216,6 +228,7 @@ type Command =
   | "authoritative-master-intake"
   | "authoritative-master-seed-draft"
   | "future-use-raw-registry"
+  | "authoritative-master-review-workspace"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -927,6 +940,7 @@ const DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR = ".tmp/bc-authoritative-master-inp
 const DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR = ".tmp/bc-authoritative-master-intake";
 const DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR = ".tmp/bc-authoritative-master-seed-draft";
 const DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR = ".tmp/bc-future-use-raw-registry";
+const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR = ".tmp/bc-authoritative-master-review-workspace";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -1038,6 +1052,18 @@ const FUTURE_USE_UNKNOWN_REVIEW_FILE = "unknown-review-backlog.csv";
 const FUTURE_USE_ENTITY_COVERAGE_FILE = "authoritative-entity-coverage-by-domain.csv";
 const FUTURE_USE_TARGET_PROFILE_REQUIREMENT_FILE = "target-profile-requirement-by-domain.csv";
 const FUTURE_USE_SAFETY_REPORT_FILE = "future-use-safety-report.json";
+const AUTHORITATIVE_MASTER_REVIEW_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_MASTER_REVIEW_README_FILE = "README.md";
+const AUTHORITATIVE_MASTER_REVIEW_ENTITY_FILE = "entity-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_SOURCE_MAPPING_FILE = "source-mapping-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_TARGET_PROFILE_FILE = "target-profile-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_CONFLICT_FILE = "conflict-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_SOURCE_GAP_FILE = "source-data-gap-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_FUTURE_USE_FILE = "future-use-domain-review-workbook.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE = "reviewer-decision-template.csv";
+const AUTHORITATIVE_MASTER_REVIEW_PRIORITY_BOARD_FILE = "review-priority-board.csv";
+const AUTHORITATIVE_MASTER_REVIEW_CHECKLIST_FILE = "review-checklist.csv";
+const AUTHORITATIVE_MASTER_REVIEW_IMPORT_MANIFEST_FILE = "import-manifest.json";
 const authoritativeMasterValidationIssueCsvHeaders = [
   "issue_id",
   "severity",
@@ -1213,6 +1239,150 @@ const futureUseTargetProfileRequirementCsvHeaders = [
   "target_profile_missing_rows",
   "target_profile_not_required_rows"
 ] as const satisfies readonly (keyof FutureUseTargetProfileRequirementRow)[];
+const authoritativeReviewEntityCsvHeaders = [
+  "review_id",
+  "priority",
+  "entity_family",
+  "proposed_canonical_entity_code",
+  "proposed_canonical_entity_display_name",
+  "proposed_entity_type",
+  "row_coverage_count",
+  "p10_output_rows",
+  "reject_rows",
+  "future_use_rows",
+  "conflict_rows",
+  "source_data_gap_rows",
+  "legacy_current_entity_codes",
+  "sample_source_values",
+  "sample_documents",
+  "sample_items",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterEntityReviewRow)[];
+const authoritativeReviewSourceMappingCsvHeaders = [
+  "review_id",
+  "priority",
+  "source_system",
+  "source_field",
+  "source_value",
+  "proposed_canonical_entity_code",
+  "mapping_type",
+  "confidence",
+  "rows_covered",
+  "bc_future_use_domains",
+  "p10_inclusion_statuses",
+  "legacy_current_entity_codes",
+  "conflict_flag",
+  "conflict_reason",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterSourceMappingReviewRow)[];
+const authoritativeReviewTargetProfileCsvHeaders = [
+  "review_id",
+  "priority",
+  "canonical_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "affected_output_rows",
+  "affected_reject_rows",
+  "target_profile_required",
+  "target_profile_status",
+  "proposed_target_qty",
+  "proposed_unit",
+  "effective_from",
+  "effective_to",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterTargetProfileReviewRow)[];
+const authoritativeReviewConflictCsvHeaders = [
+  "review_id",
+  "priority",
+  "conflict_type",
+  "source_field",
+  "source_value",
+  "proposed_canonical_entity_code",
+  "legacy_current_entity_codes",
+  "v2_entity_codes",
+  "rows",
+  "bc_future_use_domains",
+  "sample_documents",
+  "sample_items",
+  "risk_level",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterConflictReviewRow)[];
+const authoritativeReviewSourceGapCsvHeaders = [
+  "review_id",
+  "priority",
+  "source_gap_type",
+  "rows",
+  "bc_future_use_domains",
+  "p10_inclusion_statuses",
+  "sample_documents",
+  "sample_items",
+  "item_category_codes",
+  "machine_center_nos",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterSourceDataGapReviewRow)[];
+const authoritativeReviewFutureUseCsvHeaders = [
+  "review_id",
+  "future_use_domain",
+  "future_module_candidate",
+  "rows",
+  "authoritative_entity_status_counts",
+  "target_profile_required_rows",
+  "target_profile_not_required_rows",
+  "unknown_rows",
+  "source_data_gap_rows",
+  "recommended_action",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterFutureUseDomainReviewRow)[];
+const authoritativeReviewDecisionTemplateCsvHeaders = [
+  "review_id",
+  "review_type",
+  "approval_status",
+  "approved_action",
+  "approved_canonical_entity_code",
+  "approved_source_field",
+  "approved_source_value",
+  "approved_mapping_type",
+  "approved_target_bucket",
+  "approved_machine_center_no",
+  "approved_target_qty",
+  "approved_unit",
+  "effective_from",
+  "effective_to",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeMasterReviewerDecisionTemplateRow)[];
+const authoritativeReviewPriorityBoardCsvHeaders = [
+  "review_id",
+  "review_type",
+  "priority",
+  "rows",
+  "review_reason",
+  "recommended_action"
+] as const satisfies readonly (keyof AuthoritativeMasterReviewPriorityBoardRow)[];
+const authoritativeReviewChecklistCsvHeaders = [
+  "checklist_id",
+  "priority",
+  "review_area",
+  "required_check",
+  "completion_status"
+] as const satisfies readonly (keyof AuthoritativeMasterReviewChecklistRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -6632,6 +6802,143 @@ async function readFutureUseConflictRows(filePath: string): Promise<readonly { r
   return rows;
 }
 
+async function readFutureUseRegistryRows(filePath: string): Promise<readonly FutureUseRawRegistryRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: FutureUseRawRegistryRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      registry_key: row.registry_key ?? "",
+      registry_granularity: row.registry_granularity === "GROUP" || row.registry_granularity === "MIXED" ? row.registry_granularity : "ROW",
+      source_system: "business-central",
+      source_file: row.source_file ?? "",
+      posting_date: row.posting_date ?? "",
+      document_no: row.document_no ?? "",
+      item_no: row.item_no ?? "",
+      item_description: row.item_description ?? "",
+      entry_type: row.entry_type ?? "",
+      item_category_code: row.item_category_code ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      bc_current_kpi_scope: isBusinessCentralCurrentKpiScope(row.bc_current_kpi_scope) ? row.bc_current_kpi_scope : "UNKNOWN_SCOPE_REVIEW",
+      bc_future_use_domain: isFutureUseDomain(row.bc_future_use_domain) ? row.bc_future_use_domain : "UNKNOWN_REVIEW",
+      registry_status: isRawRegistryStatus(row.registry_status) ? row.registry_status : "REGISTERED_FOR_UNKNOWN_REVIEW",
+      p10_inclusion_status: isP10InclusionStatus(row.p10_inclusion_status) ? row.p10_inclusion_status : "P10_BLOCKED_UNKNOWN_REVIEW",
+      future_module_candidate: isFutureModuleCandidate(row.future_module_candidate) ? row.future_module_candidate : "unknown-review",
+      authoritative_entity_status: isAuthoritativeEntityStatus(row.authoritative_entity_status) ? row.authoritative_entity_status : "UNKNOWN",
+      authoritative_entity_code: row.authoritative_entity_code ?? "",
+      target_profile_required: row.target_profile_required === "true" ? "true" : "false",
+      target_profile_status: row.target_profile_status === "COVERED" || row.target_profile_status === "MISSING_TARGET_PROFILE" ? row.target_profile_status : "NOT_REQUIRED",
+      review_required: row.review_required === "true" ? "true" : "false",
+      review_reason: row.review_reason ?? "",
+      safety_reason: row.safety_reason ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readFutureUseReviewQueueRows(filePath: string): Promise<readonly FutureUseReviewQueueRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: FutureUseReviewQueueRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      review_type: isFutureUseReviewType(row.review_type) ? row.review_type : "UNKNOWN_REVIEW",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      bc_future_use_domain: isFutureUseDomain(row.bc_future_use_domain) ? row.bc_future_use_domain : "UNKNOWN_REVIEW",
+      rows: Number(row.rows ?? 0),
+      review_reason: row.review_reason ?? "",
+      recommended_action: row.recommended_action ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readFutureUseTargetProfileRequirementRows(filePath: string): Promise<readonly FutureUseTargetProfileRequirementRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: FutureUseTargetProfileRequirementRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      bc_future_use_domain: isFutureUseDomain(row.bc_future_use_domain) ? row.bc_future_use_domain : "UNKNOWN_REVIEW",
+      rows: Number(row.rows ?? 0),
+      target_profile_required_rows: Number(row.target_profile_required_rows ?? 0),
+      target_profile_covered_rows: Number(row.target_profile_covered_rows ?? 0),
+      target_profile_missing_rows: Number(row.target_profile_missing_rows ?? 0),
+      target_profile_not_required_rows: Number(row.target_profile_not_required_rows ?? 0)
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeSeedReviewQueueRows(filePath: string): Promise<readonly AuthoritativeSeedReviewQueueRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeSeedReviewQueueRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      review_category: row.review_category ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      rows: Number(row.rows ?? 0),
+      review_reason: row.review_reason ?? "",
+      recommended_action: row.recommended_action ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeSeedLegacyCrosswalkRows(filePath: string): Promise<readonly AuthoritativeLegacyEvidenceCrosswalkRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeLegacyEvidenceCrosswalkRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      legacy_current_entity_codes: row.legacy_current_entity_codes ?? "",
+      v2_entity_codes: row.v2_entity_codes ?? "",
+      target_bucket_candidates: row.target_bucket_candidates ?? "",
+      machine_center_nos: row.machine_center_nos ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      evidence_reason: row.evidence_reason ?? "",
+      review_required: row.review_required === "true" ? "true" : "false"
+    });
+  });
+  return rows;
+}
+
+function isBusinessCentralCurrentKpiScope(value: unknown): value is BusinessCentralCurrentKpiScope {
+  return value === "OUTPUT_KPI_OK_SCOPE" || value === "OUTPUT_KPI_REJECT_SCOPE" || value === "OUT_OF_CURRENT_KPI_SCOPE" || value === "UNKNOWN_SCOPE_REVIEW";
+}
+
+function isFutureUseDomain(value: unknown): value is FutureUseRawRegistryRow["bc_future_use_domain"] {
+  return value === "PRODUCTION_OUTPUT_DASHBOARD" || value === "REJECT_ATTACHMENT" || value === "SALES_REPORT" || value === "PURCHASE_OR_RECEIVING" || value === "TRANSFER_OR_INVENTORY_MOVEMENT" || value === "CONSUMPTION_OR_MATERIAL_USAGE" || value === "DOWNTIME_SPAREPART_OR_MATERIAL" || value === "SCRAP_WASTE_OR_AVALAN" || value === "MASTER_DATA_QUALITY_REVIEW" || value === "UNKNOWN_REVIEW";
+}
+
+function isRawRegistryStatus(value: unknown): value is FutureUseRawRegistryRow["registry_status"] {
+  return value === "REGISTERED_FOR_P10_OUTPUT_KPI" || value === "REGISTERED_FOR_REJECT_ATTACHMENT" || value === "REGISTERED_FOR_FUTURE_SALES" || value === "REGISTERED_FOR_FUTURE_PURCHASE_RECEIVING" || value === "REGISTERED_FOR_FUTURE_TRANSFER_INVENTORY" || value === "REGISTERED_FOR_FUTURE_CONSUMPTION_MATERIAL_USAGE" || value === "REGISTERED_FOR_FUTURE_SPAREPART_MATERIAL" || value === "REGISTERED_FOR_FUTURE_SCRAP_WASTE" || value === "REGISTERED_FOR_MASTER_DATA_QUALITY_REVIEW" || value === "REGISTERED_FOR_UNKNOWN_REVIEW";
+}
+
+function isP10InclusionStatus(value: unknown): value is FutureUseRawRegistryRow["p10_inclusion_status"] {
+  return value === "P10_INCLUDED_CANDIDATE" || value === "P10_REJECT_ATTACHMENT_CANDIDATE" || value === "P10_EXCLUDED_FUTURE_USE" || value === "P10_BLOCKED_UNKNOWN_REVIEW" || value === "P10_BLOCKED_SOURCE_DATA_GAP" || value === "P10_BLOCKED_HIGH_RISK_REVIEW";
+}
+
+function isFutureModuleCandidate(value: unknown): value is FutureUseRawRegistryRow["future_module_candidate"] {
+  return value === "production-output-dashboard" || value === "reject-attachment" || value === "sales-report" || value === "purchase-receiving" || value === "transfer-inventory-movement" || value === "consumption-material-usage" || value === "downtime-sparepart-material" || value === "scrap-waste-avalan" || value === "master-data-quality" || value === "unknown-review";
+}
+
+function isAuthoritativeEntityStatus(value: unknown): value is FutureUseRawRegistryRow["authoritative_entity_status"] {
+  return value === "AUTHORITATIVE_MAPPED" || value === "DRAFT_ENTITY_CANDIDATE" || value === "DRAFT_ALIAS_CANDIDATE" || value === "SOURCE_DATA_GAP" || value === "LEGACY_EVIDENCE_ONLY" || value === "NOT_REQUIRED_FOR_DOMAIN" || value === "CONFLICT_REVIEW" || value === "UNKNOWN";
+}
+
+function isFutureUseReviewType(value: unknown): value is FutureUseReviewQueueRow["review_type"] {
+  return value === "SOURCE_DATA_GAP" || value === "UNKNOWN_REVIEW" || value === "CONFLICT_REVIEW" || value === "TARGET_PROFILE_REVIEW" || value === "MASTER_DATA_QUALITY_REVIEW";
+}
+
 async function csvFileHasDataRows(filePath: string): Promise<boolean> {
   if (!(await fileExists(filePath))) return false;
   let hasData = false;
@@ -7692,6 +7999,151 @@ Future-use raw data is retained and classified instead of silently ignored. P1.0
 `;
 }
 
+function buildAuthoritativeMasterReviewWorkspaceReadme(summary: { readonly generatedAt: string; readonly workspaceStatus: string; readonly p10Gate: { readonly status: string; readonly reason: string } }): string {
+  return `# Business Central P0.9p Authoritative Master Review Workspace
+
+Generated at: ${summary.generatedAt}
+
+Workspace status: ${summary.workspaceStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This workspace is for human review. It turns the P0.9n seed drafts and P0.9o future-use raw registry into reviewer-friendly CSVs for canonical entities, source mappings, conflicts, source data gaps, future-use domains, and target profiles.
+
+It does not approve or apply master data. Every generated review row defaults to \`pending\`.
+
+## Target Profile Scope
+
+- \`PRODUCTION_OUTPUT_DASHBOARD\` requires target profile by default.
+- \`REJECT_ATTACHMENT\` is conditional.
+- Future-use non-production domains do not require target profile by default.
+
+Future-use raw remains registered and visible, but target profile absence outside the production output dashboard is not treated as a P1 blocker by this workspace.
+
+## Safety
+
+- Review workspace/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No authoritative master approval.
+- No conditional rule changes.
+- No dashboard switch.
+- No P1.0 enablement.
+`;
+}
+
+async function runAuthoritativeMasterReviewWorkspace() {
+  const seedFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_SEED_DRAFT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR);
+  const intakeFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR);
+  const registryFolder = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
+  const scopedDecisionFolder = resolveRepoPath(process.env.SCOPED_DECISION_REVIEW_DIR?.trim() || DEFAULT_SCOPED_DECISION_REVIEW_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_README_FILE),
+    entity: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_ENTITY_FILE),
+    sourceMapping: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_SOURCE_MAPPING_FILE),
+    targetProfile: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_TARGET_PROFILE_FILE),
+    conflict: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_CONFLICT_FILE),
+    sourceGap: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_SOURCE_GAP_FILE),
+    futureUse: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_FUTURE_USE_FILE),
+    decisionTemplate: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE),
+    priorityBoard: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_PRIORITY_BOARD_FILE),
+    checklist: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_CHECKLIST_FILE),
+    importManifest: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_IMPORT_MANIFEST_FILE)
+  };
+
+  console.log("Business Central P0.9p authoritative master review workspace");
+  console.log("Mode: REVIEW_WORKSPACE_EXPORT_ONLY");
+  console.log(`Seed draft folder: ${displayRepoPath(seedFolder)}`);
+  console.log(`Authoritative intake folder: ${displayRepoPath(intakeFolder)}`);
+  console.log(`Future-use registry folder: ${displayRepoPath(registryFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: review workspace/export only; database rows, production_outputs.entity_id, target_profiles, aliases, authoritative masters, conditional rules, and dashboard behavior are not changed.");
+
+  const seedCanonicalFile = path.join(seedFolder, AUTHORITATIVE_MASTER_SEED_CANONICAL_FILE);
+  const seedSourceMapFile = path.join(seedFolder, AUTHORITATIVE_MASTER_SEED_SOURCE_MAP_FILE);
+  const seedTargetProfileFile = path.join(seedFolder, AUTHORITATIVE_MASTER_SEED_TARGET_PROFILES_FILE);
+  const registryFile = path.join(registryFolder, FUTURE_USE_RAW_REGISTRY_FILE);
+  const sourceGapFile = path.join(registryFolder, FUTURE_USE_SOURCE_DATA_GAP_FILE);
+  const targetRequirementFile = path.join(registryFolder, FUTURE_USE_TARGET_PROFILE_REQUIREMENT_FILE);
+  const inputsAvailable = await fileExists(seedCanonicalFile) && await fileExists(seedSourceMapFile) && await fileExists(registryFile);
+
+  const workspace = buildAuthoritativeMasterReviewWorkspace({
+    seedCanonicalRows: await readAuthoritativeCanonicalEntityRows(seedCanonicalFile),
+    seedSourceMapRows: await readAuthoritativeSourceMapRows(seedSourceMapFile),
+    seedTargetProfileRows: await readAuthoritativeTargetProfileRows(seedTargetProfileFile),
+    seedReviewQueueRows: await readAuthoritativeSeedReviewQueueRows(path.join(seedFolder, AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE)),
+    legacyCrosswalkRows: await readAuthoritativeSeedLegacyCrosswalkRows(path.join(seedFolder, AUTHORITATIVE_MASTER_SEED_LEGACY_CROSSWALK_FILE)),
+    registryRows: await readFutureUseRegistryRows(registryFile),
+    sourceDataGapRows: await readFutureUseReviewQueueRows(sourceGapFile),
+    targetProfileRequirementRows: await readFutureUseTargetProfileRequirementRows(targetRequirementFile),
+    sourceFolders: [
+      displayRepoPath(seedFolder),
+      displayRepoPath(intakeFolder),
+      displayRepoPath(registryFolder),
+      displayRepoPath(resolveRepoPath(".tmp/bc-unmapped-diagnosis")),
+      displayRepoPath(scopedDecisionFolder)
+    ],
+    outputFolder: displayRepoPath(outputDir),
+    inputsAvailable
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(workspace.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeMasterReviewWorkspaceReadme(workspace.summary), "utf8");
+  await writeFile(outputFiles.entity, resolutionPackageCsv(authoritativeReviewEntityCsvHeaders, workspace.entityReviewRows), "utf8");
+  await writeFile(outputFiles.sourceMapping, resolutionPackageCsv(authoritativeReviewSourceMappingCsvHeaders, workspace.sourceMappingReviewRows), "utf8");
+  await writeFile(outputFiles.targetProfile, resolutionPackageCsv(authoritativeReviewTargetProfileCsvHeaders, workspace.targetProfileReviewRows), "utf8");
+  await writeFile(outputFiles.conflict, resolutionPackageCsv(authoritativeReviewConflictCsvHeaders, workspace.conflictReviewRows), "utf8");
+  await writeFile(outputFiles.sourceGap, resolutionPackageCsv(authoritativeReviewSourceGapCsvHeaders, workspace.sourceDataGapReviewRows), "utf8");
+  await writeFile(outputFiles.futureUse, resolutionPackageCsv(authoritativeReviewFutureUseCsvHeaders, workspace.futureUseDomainReviewRows), "utf8");
+  await writeFile(outputFiles.decisionTemplate, resolutionPackageCsv(authoritativeReviewDecisionTemplateCsvHeaders, workspace.reviewerDecisionTemplateRows), "utf8");
+  await writeFile(outputFiles.priorityBoard, resolutionPackageCsv(authoritativeReviewPriorityBoardCsvHeaders, workspace.reviewPriorityBoardRows), "utf8");
+  await writeFile(outputFiles.checklist, resolutionPackageCsv(authoritativeReviewChecklistCsvHeaders, workspace.reviewChecklistRows), "utf8");
+  await writeFile(outputFiles.importManifest, `${JSON.stringify(workspace.importManifest, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- workspace_status=${workspace.summary.workspaceStatus}`);
+  console.log(`- entity_review_rows=${workspace.summary.entityReviewRows}`);
+  console.log(`- source_mapping_review_rows=${workspace.summary.sourceMappingReviewRows}`);
+  console.log(`- target_profile_review_rows=${workspace.summary.targetProfileReviewRows}`);
+  console.log(`- conflict_review_rows=${workspace.summary.conflictReviewRows}`);
+  console.log(`- source_data_gap_review_rows=${workspace.summary.sourceDataGapReviewRows}`);
+  console.log(`- future_use_domain_review_rows=${workspace.summary.futureUseDomainReviewRows}`);
+  console.log(`- p1_rows=${workspace.summary.p1Rows}`);
+  console.log(`- p2_rows=${workspace.summary.p2Rows}`);
+  console.log(`- p3_rows=${workspace.summary.p3Rows}`);
+  console.log(`- p10_status=${workspace.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top review priorities");
+  for (const row of workspace.reviewPriorityBoardRows.slice(0, 10)) {
+    console.log(`- ${row.priority}; ${row.review_type}; ${row.review_id}; rows=${row.rows}; action=${row.recommended_action}`);
+  }
+  if (workspace.reviewPriorityBoardRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Target profile review");
+  for (const row of workspace.targetProfileReviewRows.slice(0, 10)) {
+    console.log(`- ${row.priority}; entity=${row.canonical_entity_code || "(blank)"}; output_rows=${row.affected_output_rows}; required=${row.target_profile_required}; status=${row.target_profile_status}`);
+  }
+  if (workspace.targetProfileReviewRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
 async function runFutureUseRawRegistry() {
   const outputDir = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
   const entitySourceFile = (await fileExists(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH)))
@@ -8540,8 +8992,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -8573,6 +9025,10 @@ async function main() {
   }
   if (command === "future-use-raw-registry") {
     await runFutureUseRawRegistry();
+    return;
+  }
+  if (command === "authoritative-master-review-workspace") {
+    await runAuthoritativeMasterReviewWorkspace();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
