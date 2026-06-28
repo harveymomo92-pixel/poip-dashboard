@@ -170,6 +170,21 @@ import {
   type AuthoritativeMasterTargetProfileReviewRow
 } from "../packages/domain/src/master-data/authoritative-master-review-workspace.js";
 import {
+  buildAuthoritativeMasterReviewDecisionIntake,
+  type AuthoritativeReviewDecisionBacklogPreviewRow,
+  type AuthoritativeReviewDecisionInputRow,
+  type AuthoritativeReviewDecisionIssueRow,
+  type AuthoritativeReviewDecisionNormalizedRow,
+  type AuthoritativeReviewDecisionPreviewCanonicalRow,
+  type AuthoritativeReviewDecisionPreviewSourceMapRow,
+  type AuthoritativeReviewDecisionPreviewTargetProfileRow
+} from "../packages/domain/src/master-data/authoritative-master-review-decision-intake.js";
+import {
+  buildAuthoritativeReviewDecisionSampleFixture,
+  type AuthoritativeReviewDecisionSampleExpectationRow,
+  type AuthoritativeReviewDecisionSampleRow
+} from "../packages/domain/src/master-data/authoritative-review-decision-sample-fixture.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -229,6 +244,8 @@ type Command =
   | "authoritative-master-seed-draft"
   | "future-use-raw-registry"
   | "authoritative-master-review-workspace"
+  | "authoritative-master-review-decision-intake"
+  | "authoritative-review-decision-sample-fixture"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -941,6 +958,9 @@ const DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR = ".tmp/bc-authoritative-master-in
 const DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR = ".tmp/bc-authoritative-master-seed-draft";
 const DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR = ".tmp/bc-future-use-raw-registry";
 const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR = ".tmp/bc-authoritative-master-review-workspace";
+const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR = ".tmp/bc-authoritative-master-review-input";
+const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR = ".tmp/bc-authoritative-master-review-decision-intake";
+const DEFAULT_AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FIXTURE_DIR = ".tmp/bc-authoritative-review-decision-sample-fixture";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -1064,6 +1084,33 @@ const AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE = "reviewer-decision-te
 const AUTHORITATIVE_MASTER_REVIEW_PRIORITY_BOARD_FILE = "review-priority-board.csv";
 const AUTHORITATIVE_MASTER_REVIEW_CHECKLIST_FILE = "review-checklist.csv";
 const AUTHORITATIVE_MASTER_REVIEW_IMPORT_MANIFEST_FILE = "import-manifest.json";
+const AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE = "reviewer-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DECISIONS_TEMPLATE_FILE = "reviewer-decisions.template.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_README_FILE = "README.md";
+const AUTHORITATIVE_MASTER_REVIEW_ACCEPTED_FILE = "accepted-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_BLOCKED_FILE = "blocked-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_INVALID_FILE = "invalid-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DUPLICATE_FILE = "duplicate-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_UNKNOWN_FILE = "unknown-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_PENDING_FILE = "pending-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_REJECTED_FILE = "rejected-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DEFERRED_FILE = "deferred-review-decisions.csv";
+const AUTHORITATIVE_MASTER_REVIEW_APPROVED_CANONICAL_FILE = "approved-canonical-entity-preview.csv";
+const AUTHORITATIVE_MASTER_REVIEW_APPROVED_SOURCE_MAP_FILE = "approved-source-mapping-preview.csv";
+const AUTHORITATIVE_MASTER_REVIEW_APPROVED_TARGET_PROFILE_FILE = "approved-target-profile-preview.csv";
+const AUTHORITATIVE_MASTER_REVIEW_SOURCE_BACKLOG_FILE = "source-data-backlog-preview.csv";
+const AUTHORITATIVE_MASTER_REVIEW_FUTURE_USE_ONLY_FILE = "future-use-only-preview.csv";
+const AUTHORITATIVE_MASTER_REVIEW_INTAKE_ERRORS_FILE = "decision-intake-errors.csv";
+const AUTHORITATIVE_MASTER_REVIEW_INTAKE_WARNINGS_FILE = "decision-intake-warnings.csv";
+const AUTHORITATIVE_MASTER_REVIEW_DECISION_IMPORT_MANIFEST_FILE = "import-manifest.json";
+const AUTHORITATIVE_REVIEW_DECISION_SAMPLE_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_REVIEW_DECISION_SAMPLE_README_FILE = "README.md";
+const AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FILE = "reviewer-decisions.sample.csv";
+const AUTHORITATIVE_REVIEW_DECISION_SAFE_DEFER_FILE = "reviewer-decisions.safe-defer-all.csv";
+const AUTHORITATIVE_REVIEW_DECISION_MIXED_FILE = "reviewer-decisions.mixed-simulation.csv";
+const AUTHORITATIVE_REVIEW_DECISION_EXPECTATIONS_FILE = "sample-validation-expectations.csv";
+const AUTHORITATIVE_REVIEW_DECISION_USAGE_FILE = "sample-usage-instructions.md";
 const authoritativeMasterValidationIssueCsvHeaders = [
   "issue_id",
   "severity",
@@ -1383,6 +1430,93 @@ const authoritativeReviewChecklistCsvHeaders = [
   "required_check",
   "completion_status"
 ] as const satisfies readonly (keyof AuthoritativeMasterReviewChecklistRow)[];
+const authoritativeReviewDecisionNormalizedCsvHeaders = [
+  "review_id",
+  "review_type",
+  "approval_status",
+  "approved_action",
+  "approved_canonical_entity_code",
+  "approved_source_field",
+  "approved_source_value",
+  "approved_mapping_type",
+  "approved_target_bucket",
+  "approved_machine_center_no",
+  "approved_target_qty",
+  "approved_unit",
+  "effective_from",
+  "effective_to",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionNormalizedRow)[];
+const authoritativeReviewDecisionIssueCsvHeaders = [
+  "issue_id",
+  "severity",
+  "issue_code",
+  "issue_message",
+  ...authoritativeReviewDecisionNormalizedCsvHeaders
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionIssueRow)[];
+const authoritativeReviewDecisionPreviewCanonicalCsvHeaders = [
+  "canonical_entity_code",
+  "canonical_entity_display_name",
+  "entity_family",
+  "entity_type",
+  "production_area",
+  "is_active",
+  "source_of_truth_status",
+  "reviewer",
+  "reviewer_notes",
+  "effective_from",
+  "effective_to",
+  "source_review_id"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionPreviewCanonicalRow)[];
+const authoritativeReviewDecisionPreviewSourceMapCsvHeaders = [
+  "source_system",
+  "source_field",
+  "source_value",
+  "canonical_entity_code",
+  "mapping_type",
+  "confidence",
+  "is_active",
+  "reviewer",
+  "reviewer_notes",
+  "effective_from",
+  "effective_to",
+  "source_review_id"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionPreviewSourceMapRow)[];
+const authoritativeReviewDecisionPreviewTargetProfileCsvHeaders = [
+  "canonical_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "target_qty",
+  "unit",
+  "effective_from",
+  "effective_to",
+  "is_active",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes",
+  "source_review_id"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionPreviewTargetProfileRow)[];
+const authoritativeReviewDecisionBacklogPreviewCsvHeaders = [
+  "review_id",
+  "review_type",
+  "approved_action",
+  "reviewer",
+  "reviewer_notes"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionBacklogPreviewRow)[];
+const authoritativeReviewDecisionSampleCsvHeaders = authoritativeReviewDecisionNormalizedCsvHeaders satisfies readonly (keyof AuthoritativeReviewDecisionSampleRow)[];
+const authoritativeReviewDecisionSampleExpectationCsvHeaders = [
+  "fixture_file",
+  "expected_total_rows",
+  "expected_accepted_min",
+  "expected_deferred_min",
+  "expected_rejected_min",
+  "expected_invalid_min",
+  "expected_duplicate_min",
+  "expected_unknown_min",
+  "expected_p10_status",
+  "expected_safety"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionSampleExpectationRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -6911,6 +7045,58 @@ async function readAuthoritativeSeedLegacyCrosswalkRows(filePath: string): Promi
   return rows;
 }
 
+async function readAuthoritativeMasterReviewerDecisionTemplateRows(filePath: string): Promise<readonly AuthoritativeMasterReviewerDecisionTemplateRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterReviewerDecisionTemplateRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      review_type: row.review_type ?? "",
+      approval_status: "pending",
+      approved_action: "",
+      approved_canonical_entity_code: row.approved_canonical_entity_code ?? "",
+      approved_source_field: row.approved_source_field ?? "",
+      approved_source_value: row.approved_source_value ?? "",
+      approved_mapping_type: row.approved_mapping_type ?? "",
+      approved_target_bucket: row.approved_target_bucket ?? "",
+      approved_machine_center_no: row.approved_machine_center_no ?? "",
+      approved_target_qty: row.approved_target_qty ?? "",
+      approved_unit: row.approved_unit ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? "",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeMasterReviewerDecisionRows(filePath: string): Promise<readonly AuthoritativeReviewDecisionInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeReviewDecisionInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      review_type: row.review_type ?? "",
+      approval_status: row.approval_status ?? "",
+      approved_action: row.approved_action ?? "",
+      approved_canonical_entity_code: row.approved_canonical_entity_code ?? "",
+      approved_source_field: row.approved_source_field ?? "",
+      approved_source_value: row.approved_source_value ?? "",
+      approved_mapping_type: row.approved_mapping_type ?? "",
+      approved_target_bucket: row.approved_target_bucket ?? "",
+      approved_machine_center_no: row.approved_machine_center_no ?? "",
+      approved_target_qty: row.approved_target_qty ?? "",
+      approved_unit: row.approved_unit ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? ""
+    });
+  });
+  return rows;
+}
+
 function isBusinessCentralCurrentKpiScope(value: unknown): value is BusinessCentralCurrentKpiScope {
   return value === "OUTPUT_KPI_OK_SCOPE" || value === "OUTPUT_KPI_REJECT_SCOPE" || value === "OUT_OF_CURRENT_KPI_SCOPE" || value === "UNKNOWN_SCOPE_REVIEW";
 }
@@ -8144,6 +8330,267 @@ async function runAuthoritativeMasterReviewWorkspace() {
   for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
 }
 
+function buildAuthoritativeMasterReviewDecisionIntakeReadme(summary: { readonly generatedAt: string; readonly intakeStatus: string; readonly p10Gate: { readonly status: string; readonly reason: string } }): string {
+  return `# Business Central P0.9q Authoritative Master Review Decision Intake
+
+Generated at: ${summary.generatedAt}
+
+Intake status: ${summary.intakeStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This command validates human reviewer decisions from the P0.9p authoritative master review workspace. It exports accepted, blocked, invalid, duplicate, unknown, pending, rejected, and deferred decision files plus preview CSVs for future dry-run planning.
+
+Accepted previews are not database changes. The next step after this milestone is a separate dry-run application of accepted decisions, not mutation.
+
+## Safety
+
+- Decision intake/validation/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No authoritative master approval applied automatically.
+- No conditional rule changes.
+- No dashboard switch.
+- No P1.0 enablement.
+`;
+}
+
+async function runAuthoritativeMasterReviewDecisionIntake() {
+  const inputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR);
+  const workspaceDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR);
+  const workspaceTemplateFile = path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE);
+  const reviewerInputFile = path.join(inputDir, AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE);
+  const reviewerTemplateFile = path.join(inputDir, AUTHORITATIVE_MASTER_REVIEW_DECISIONS_TEMPLATE_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_README_FILE),
+    accepted: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_ACCEPTED_FILE),
+    blocked: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_BLOCKED_FILE),
+    invalid: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_INVALID_FILE),
+    duplicate: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DUPLICATE_FILE),
+    unknown: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_UNKNOWN_FILE),
+    pending: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_PENDING_FILE),
+    rejected: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_REJECTED_FILE),
+    deferred: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DEFERRED_FILE),
+    canonicalPreview: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_APPROVED_CANONICAL_FILE),
+    sourcePreview: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_APPROVED_SOURCE_MAP_FILE),
+    targetProfilePreview: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_APPROVED_TARGET_PROFILE_FILE),
+    sourceBacklog: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_SOURCE_BACKLOG_FILE),
+    futureUseOnly: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_FUTURE_USE_ONLY_FILE),
+    errors: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_INTAKE_ERRORS_FILE),
+    warnings: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_INTAKE_WARNINGS_FILE),
+    importManifest: path.join(outputDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_IMPORT_MANIFEST_FILE)
+  };
+
+  console.log("Business Central P0.9q authoritative master review decision intake");
+  console.log("Mode: DECISION_INTAKE_VALIDATION_EXPORT_ONLY");
+  console.log(`Input folder: ${displayRepoPath(inputDir)}`);
+  console.log(`Source workspace folder: ${displayRepoPath(workspaceDir)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: decision intake/export only; database rows, production_outputs.entity_id, target_profiles, aliases, authoritative masters, conditional rules, and dashboard behavior are not changed.");
+
+  const workspaceRows = await readAuthoritativeMasterReviewerDecisionTemplateRows(workspaceTemplateFile);
+  const reviewerInputExists = await fileExists(reviewerInputFile);
+  const reviewerRows = await readAuthoritativeMasterReviewerDecisionRows(reviewerInputFile);
+  const intake = buildAuthoritativeMasterReviewDecisionIntake({
+    workspaceRows,
+    reviewerRows,
+    reviewerInputExists,
+    inputFolder: displayRepoPath(inputDir),
+    sourceWorkspaceFolder: displayRepoPath(workspaceDir),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await mkdir(inputDir, { recursive: true });
+  await mkdir(outputDir, { recursive: true });
+  if (!reviewerInputExists) {
+    await writeFile(reviewerTemplateFile, resolutionPackageCsv(authoritativeReviewDecisionTemplateCsvHeaders, intake.templateRows), "utf8");
+  }
+  await writeFile(outputFiles.summary, `${JSON.stringify(intake.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeMasterReviewDecisionIntakeReadme(intake.summary), "utf8");
+  await writeFile(outputFiles.accepted, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, intake.acceptedRows), "utf8");
+  await writeFile(outputFiles.blocked, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.blockedRows), "utf8");
+  await writeFile(outputFiles.invalid, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.invalidRows), "utf8");
+  await writeFile(outputFiles.duplicate, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.duplicateRows), "utf8");
+  await writeFile(outputFiles.unknown, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.unknownRows), "utf8");
+  await writeFile(outputFiles.pending, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, intake.pendingRows), "utf8");
+  await writeFile(outputFiles.rejected, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, intake.rejectedRows), "utf8");
+  await writeFile(outputFiles.deferred, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, intake.deferredRows), "utf8");
+  await writeFile(outputFiles.canonicalPreview, resolutionPackageCsv(authoritativeReviewDecisionPreviewCanonicalCsvHeaders, intake.canonicalEntityPreviewRows), "utf8");
+  await writeFile(outputFiles.sourcePreview, resolutionPackageCsv(authoritativeReviewDecisionPreviewSourceMapCsvHeaders, intake.sourceMappingPreviewRows), "utf8");
+  await writeFile(outputFiles.targetProfilePreview, resolutionPackageCsv(authoritativeReviewDecisionPreviewTargetProfileCsvHeaders, intake.targetProfilePreviewRows), "utf8");
+  await writeFile(outputFiles.sourceBacklog, resolutionPackageCsv(authoritativeReviewDecisionBacklogPreviewCsvHeaders, intake.sourceDataBacklogPreviewRows), "utf8");
+  await writeFile(outputFiles.futureUseOnly, resolutionPackageCsv(authoritativeReviewDecisionBacklogPreviewCsvHeaders, intake.futureUseOnlyPreviewRows), "utf8");
+  await writeFile(outputFiles.errors, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.errors), "utf8");
+  await writeFile(outputFiles.warnings, resolutionPackageCsv(authoritativeReviewDecisionIssueCsvHeaders, intake.warnings), "utf8");
+  await writeFile(outputFiles.importManifest, `${JSON.stringify(intake.importManifest, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- intake_status=${intake.summary.intakeStatus}`);
+  console.log(`- total_workspace_review_rows=${intake.summary.totalWorkspaceReviewRows}`);
+  console.log(`- total_reviewer_input_rows=${intake.summary.totalReviewerInputRows}`);
+  console.log(`- accepted_rows=${intake.summary.acceptedRows}`);
+  console.log(`- blocked_rows=${intake.summary.blockedRows}`);
+  console.log(`- invalid_rows=${intake.summary.invalidRows}`);
+  console.log(`- duplicate_rows=${intake.summary.duplicateRows}`);
+  console.log(`- unknown_rows=${intake.summary.unknownRows}`);
+  console.log(`- pending_rows=${intake.summary.pendingRows}`);
+  console.log(`- canonical_entity_approval_rows=${intake.summary.canonicalEntityApprovalRows}`);
+  console.log(`- source_mapping_approval_rows=${intake.summary.sourceMappingApprovalRows}`);
+  console.log(`- reviewed_alias_approval_rows=${intake.summary.reviewedAliasApprovalRows}`);
+  console.log(`- target_profile_approval_rows=${intake.summary.targetProfileApprovalRows}`);
+  console.log(`- warning_rows=${intake.summary.warningRows}`);
+  console.log(`- error_rows=${intake.summary.errorRows}`);
+  console.log(`- p10_status=${intake.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top blocked reasons");
+  const blockedReasons = topCounts([...intake.blockedRows, ...intake.invalidRows, ...intake.duplicateRows, ...intake.unknownRows].map((row) => row.issue_code), 10);
+  for (const row of blockedReasons) console.log(`- ${row.value}; rows=${row.rows}`);
+  if (blockedReasons.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  if (!reviewerInputExists) console.log(`- ${displayRepoPath(reviewerTemplateFile)}`);
+}
+
+function buildAuthoritativeReviewDecisionSampleFixtureReadme(summary: { readonly generatedAt: string; readonly fixtureStatus: string; readonly p10Gate: { readonly status: string; readonly reason: string } }): string {
+  return `# Business Central P0.9r Authoritative Review Decision Sample Fixture
+
+Generated at: ${summary.generatedAt}
+
+Fixture status: ${summary.fixtureStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This package generates sample reviewer decision CSVs for local simulation of P0.9q review-decision intake.
+
+The sample files are not real business approvals. Every generated note contains \`TEST_FIXTURE_DRY_RUN_ONLY\`, and every generated reviewer is \`TEST_REVIEWER\`.
+
+## Safety
+
+- Fixture/export only.
+- Does not write or overwrite \`.tmp/bc-authoritative-master-review-input/reviewer-decisions.csv\`.
+- Does not approve authoritative master data.
+- Does not mutate the database.
+- Does not update \`production_outputs.entity_id\`.
+- Does not insert, update, or delete \`target_profiles\`.
+- Does not create, update, or delete aliases.
+- Does not change conditional rules.
+- Does not switch dashboard behavior.
+- Does not enable P1.0.
+`;
+}
+
+function buildAuthoritativeReviewDecisionSampleUsageInstructions(): string {
+  return `# Sample Fixture Usage
+
+These files are for local simulation only. They are not business approval.
+
+To simulate intake with the representative sample:
+
+\`\`\`bash
+cp .tmp/bc-authoritative-master-review-input/reviewer-decisions.sample.csv \\
+ .tmp/bc-authoritative-master-review-input/reviewer-decisions.csv
+
+pnpm bc:authoritative-master-review-decision-intake
+
+rm .tmp/bc-authoritative-master-review-input/reviewer-decisions.csv
+
+pnpm bc:authoritative-master-review-decision-intake
+\`\`\`
+
+Remove \`reviewer-decisions.csv\` after testing. P1.0 must remain blocked; these fixture decisions do not apply or approve master data.
+`;
+}
+
+async function runAuthoritativeReviewDecisionSampleFixture() {
+  const workspaceDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR);
+  const decisionIntakeDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR);
+  const inputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FIXTURE_DIR?.trim() || DEFAULT_AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FIXTURE_DIR);
+  const workspaceTemplateFile = path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE);
+  const convenienceSampleFile = path.join(inputDir, AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_SAMPLE_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_SAMPLE_README_FILE),
+    sample: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FILE),
+    safeDefer: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_SAFE_DEFER_FILE),
+    mixed: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_MIXED_FILE),
+    expectations: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_EXPECTATIONS_FILE),
+    usage: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_USAGE_FILE)
+  };
+
+  console.log("Business Central P0.9r authoritative review decision sample fixture");
+  console.log("Mode: FIXTURE_EXPORT_ONLY");
+  console.log(`Source workspace folder: ${displayRepoPath(workspaceDir)}`);
+  console.log(`Source decision intake folder: ${displayRepoPath(decisionIntakeDir)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: fixture/export only; reviewer-decisions.csv, database rows, production_outputs.entity_id, target_profiles, aliases, authoritative masters, conditional rules, and dashboard behavior are not changed.");
+
+  const workspaceAvailable = await fileExists(workspaceTemplateFile);
+  const workspaceRows = workspaceAvailable
+    ? await readAuthoritativeMasterReviewerDecisionTemplateRows(workspaceTemplateFile)
+    : [];
+  const fixture = buildAuthoritativeReviewDecisionSampleFixture({
+    workspaceRows,
+    sourceWorkspaceFolder: displayRepoPath(workspaceDir),
+    outputFolder: displayRepoPath(outputDir),
+    wroteConvenienceSampleFile: workspaceRows.length > 0
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await mkdir(inputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(fixture.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeReviewDecisionSampleFixtureReadme(fixture.summary), "utf8");
+  await writeFile(outputFiles.sample, resolutionPackageCsv(authoritativeReviewDecisionSampleCsvHeaders, fixture.sampleRows), "utf8");
+  await writeFile(outputFiles.safeDefer, resolutionPackageCsv(authoritativeReviewDecisionSampleCsvHeaders, fixture.safeDeferRows), "utf8");
+  await writeFile(outputFiles.mixed, resolutionPackageCsv(authoritativeReviewDecisionSampleCsvHeaders, fixture.mixedSimulationRows), "utf8");
+  await writeFile(outputFiles.expectations, resolutionPackageCsv(authoritativeReviewDecisionSampleExpectationCsvHeaders, fixture.sampleValidationExpectations), "utf8");
+  await writeFile(outputFiles.usage, buildAuthoritativeReviewDecisionSampleUsageInstructions(), "utf8");
+  if (workspaceRows.length > 0) {
+    await writeFile(convenienceSampleFile, resolutionPackageCsv(authoritativeReviewDecisionSampleCsvHeaders, fixture.sampleRows), "utf8");
+  }
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- fixture_status=${fixture.summary.fixtureStatus}`);
+  console.log(`- sample_rows=${fixture.summary.sampleRows}`);
+  console.log(`- safe_defer_rows=${fixture.summary.safeDeferRows}`);
+  console.log(`- mixed_simulation_rows=${fixture.summary.mixedSimulationRows}`);
+  console.log(`- wrote_convenience_sample_file=${fixture.summary.wroteConvenienceSampleFile}`);
+  console.log(`- overwrote_real_reviewer_decision_file=${fixture.summary.overwroteRealReviewerDecisionFile}`);
+  console.log(`- p10_status=${fixture.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Sample validation expectations");
+  for (const row of fixture.sampleValidationExpectations) {
+    console.log(`- ${row.fixture_file}; total=${row.expected_total_rows}; accepted_min=${row.expected_accepted_min}; deferred_min=${row.expected_deferred_min}; invalid_min=${row.expected_invalid_min}; duplicate_min=${row.expected_duplicate_min}; unknown_min=${row.expected_unknown_min}`);
+  }
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  if (workspaceRows.length > 0) console.log(`- ${displayRepoPath(convenienceSampleFile)}`);
+}
+
 async function runFutureUseRawRegistry() {
   const outputDir = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
   const entitySourceFile = (await fileExists(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH)))
@@ -8992,8 +9439,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "authoritative-master-review-decision-intake", "authoritative-review-decision-sample-fixture", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|authoritative-master-review-decision-intake|authoritative-review-decision-sample-fixture|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -9029,6 +9476,14 @@ async function main() {
   }
   if (command === "authoritative-master-review-workspace") {
     await runAuthoritativeMasterReviewWorkspace();
+    return;
+  }
+  if (command === "authoritative-master-review-decision-intake") {
+    await runAuthoritativeMasterReviewDecisionIntake();
+    return;
+  }
+  if (command === "authoritative-review-decision-sample-fixture") {
+    await runAuthoritativeReviewDecisionSampleFixture();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
