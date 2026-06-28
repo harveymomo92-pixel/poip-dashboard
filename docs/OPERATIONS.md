@@ -46,6 +46,7 @@ pnpm bc:scoped-decision-validate
 pnpm bc:scoped-decision-approval-workspace
 pnpm bc:scoped-decision-approval-intake
 pnpm bc:scoped-decision-apply-dry-run
+pnpm bc:authoritative-master-intake
 pnpm bc:kpi-compare-v1-v2
 ```
 
@@ -76,6 +77,14 @@ If files are missing, the command should generate templates and return:
 ```text
 AWAITING_MASTER_INPUT
 ```
+
+The command writes:
+
+```text
+.tmp/bc-authoritative-master-intake/
+```
+
+It includes normalized canonical entity, source map, and target profile CSVs, validation errors/warnings, source and target coverage previews, top unmapped source values, legacy conflict evidence, and a template manifest.
 
 ### 4. Validate but do not apply
 
@@ -971,6 +980,14 @@ pnpm bc:scoped-decision-apply-dry-run
 `bc:scoped-decision-approval-intake` reads `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv`, optional `.tmp/bc-scoped-decision-manual-approval-input/reviewer-decisions.csv`, and writes `.tmp/bc-scoped-decision-approval-intake/`. It also writes `.tmp/bc-scoped-decision-manual-approval-input/reviewer-decisions.template.csv`.
 
 `bc:scoped-decision-apply-dry-run` reads `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv`, optional `.tmp/bc-scoped-decision-approval-intake/`, and writes `.tmp/bc-scoped-decision-apply-dry-run/`.
+
+P0.9m authoritative master intake:
+
+```bash
+pnpm bc:authoritative-master-intake
+```
+
+`bc:authoritative-master-intake` reads `.tmp/bc-authoritative-master-input/`, creates blank templates when input is missing, and writes `.tmp/bc-authoritative-master-intake/`. Coverage preview is authoritative-map-only: legacy current entity and old target-like names are shown as evidence or conflicts, not successful mapping. The command is intake/validation/export only and cannot enable P1.0.
 
 Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 

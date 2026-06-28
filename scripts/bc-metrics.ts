@@ -118,6 +118,23 @@ import {
   type ScopedDecisionReviewerInputTemplateRow
 } from "../packages/domain/src/master-data/scoped-decision-approval-intake.js";
 import {
+  authoritativeMasterInputCsvHeaders,
+  buildAuthoritativeMasterIntake,
+  type AuthoritativeBcCoverageInputRow,
+  type AuthoritativeCanonicalEntityInputRow,
+  type AuthoritativeLegacyConflictEvidenceRow,
+  type AuthoritativeMasterIntakeSummary,
+  type AuthoritativeMasterValidationIssueRow,
+  type AuthoritativeNormalizedCanonicalEntityRow,
+  type AuthoritativeNormalizedSourceMapRow,
+  type AuthoritativeNormalizedTargetProfileRow,
+  type AuthoritativeSourceCoveragePreviewRow,
+  type AuthoritativeSourceToEntityMapInputRow,
+  type AuthoritativeTargetProfileCoveragePreviewRow,
+  type AuthoritativeTargetProfileInputRow,
+  type AuthoritativeUnmappedSourceValueRow
+} from "../packages/domain/src/master-data/authoritative-master-intake.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -173,6 +190,7 @@ type Command =
   | "scoped-decision-approval-workspace"
   | "scoped-decision-apply-dry-run"
   | "scoped-decision-approval-intake"
+  | "authoritative-master-intake"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -880,6 +898,8 @@ const DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR = ".tmp/bc-scoped-decision-
 const DEFAULT_SCOPED_DECISION_APPLY_DRY_RUN_DIR = ".tmp/bc-scoped-decision-apply-dry-run";
 const DEFAULT_SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR = ".tmp/bc-scoped-decision-manual-approval-input";
 const DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR = ".tmp/bc-scoped-decision-approval-intake";
+const DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR = ".tmp/bc-authoritative-master-input";
+const DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR = ".tmp/bc-authoritative-master-intake";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -948,6 +968,74 @@ const SCOPED_DECISION_INTAKE_INVALID_FILE = "invalid-reviewer-decisions.csv";
 const SCOPED_DECISION_INTAKE_READINESS_FILE = "approval-readiness-report.json";
 const SCOPED_DECISION_INTAKE_P10_GATE_FILE = "p10-gate-preview.json";
 const SCOPED_DECISION_INTAKE_SAFETY_FILE = "safety-report.json";
+const AUTHORITATIVE_MASTER_CANONICAL_FILE = "canonical-entities.csv";
+const AUTHORITATIVE_MASTER_SOURCE_MAP_FILE = "source-to-entity-map.csv";
+const AUTHORITATIVE_MASTER_TARGET_PROFILES_FILE = "target-profiles.csv";
+const AUTHORITATIVE_MASTER_CANONICAL_TEMPLATE_FILE = "canonical-entities.template.csv";
+const AUTHORITATIVE_MASTER_SOURCE_MAP_TEMPLATE_FILE = "source-to-entity-map.template.csv";
+const AUTHORITATIVE_MASTER_TARGET_PROFILES_TEMPLATE_FILE = "target-profiles.template.csv";
+const AUTHORITATIVE_MASTER_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_MASTER_README_FILE = "README.md";
+const AUTHORITATIVE_MASTER_CANONICAL_NORMALIZED_FILE = "canonical-entities.normalized.csv";
+const AUTHORITATIVE_MASTER_SOURCE_MAP_NORMALIZED_FILE = "source-to-entity-map.normalized.csv";
+const AUTHORITATIVE_MASTER_TARGET_PROFILES_NORMALIZED_FILE = "target-profiles.normalized.csv";
+const AUTHORITATIVE_MASTER_ERRORS_FILE = "master-validation-errors.csv";
+const AUTHORITATIVE_MASTER_WARNINGS_FILE = "master-validation-warnings.csv";
+const AUTHORITATIVE_MASTER_SOURCE_COVERAGE_FILE = "source-coverage-preview.csv";
+const AUTHORITATIVE_MASTER_TARGET_COVERAGE_FILE = "target-profile-coverage-preview.csv";
+const AUTHORITATIVE_MASTER_LEGACY_CONFLICT_FILE = "legacy-conflict-evidence.csv";
+const AUTHORITATIVE_MASTER_UNMAPPED_SOURCE_FILE = "unmapped-source-values.csv";
+const AUTHORITATIVE_MASTER_TEMPLATES_MANIFEST_FILE = "authoritative-master-templates-manifest.json";
+const authoritativeMasterValidationIssueCsvHeaders = [
+  "issue_id",
+  "severity",
+  "record_type",
+  "row_number",
+  "field",
+  "issue_code",
+  "issue_message",
+  "required_action"
+] as const satisfies readonly (keyof AuthoritativeMasterValidationIssueRow)[];
+const authoritativeMasterSourceCoverageCsvHeaders = [
+  "source_field",
+  "source_value",
+  "rows",
+  "authoritative_status",
+  "canonical_entity_code",
+  "bc_scopes",
+  "current_entity_codes_legacy_evidence",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeSourceCoveragePreviewRow)[];
+const authoritativeMasterTargetCoverageCsvHeaders = [
+  "canonical_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "rows",
+  "coverage_status",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeTargetProfileCoveragePreviewRow)[];
+const authoritativeMasterLegacyConflictCsvHeaders = [
+  "evidence_id",
+  "source_field",
+  "source_value",
+  "rows",
+  "current_entity_codes_legacy_evidence",
+  "proposed_legacy_entity_codes",
+  "conflict_reason",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeLegacyConflictEvidenceRow)[];
+const authoritativeMasterUnmappedSourceCsvHeaders = [
+  "source_field",
+  "source_value",
+  "rows",
+  "bc_scopes",
+  "current_entity_codes_legacy_evidence",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeUnmappedSourceValueRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -6170,6 +6258,113 @@ async function readScopedDecisionApprovalIntakeSummary(filePath: string): Promis
   return JSON.parse(await readFile(filePath, "utf8")) as ScopedDecisionApprovalIntakeSummary;
 }
 
+async function readAuthoritativeCanonicalEntityRows(filePath: string): Promise<readonly AuthoritativeCanonicalEntityInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeCanonicalEntityInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      canonical_entity_display_name: row.canonical_entity_display_name ?? "",
+      entity_family: row.entity_family ?? "",
+      entity_type: row.entity_type ?? "",
+      production_area: row.production_area ?? "",
+      is_active: row.is_active ?? "",
+      source_of_truth_status: row.source_of_truth_status ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeSourceMapRows(filePath: string): Promise<readonly AuthoritativeSourceToEntityMapInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeSourceToEntityMapInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      source_system: row.source_system ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      mapping_type: row.mapping_type ?? "",
+      confidence: row.confidence ?? "",
+      is_active: row.is_active ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeTargetProfileRows(filePath: string): Promise<readonly AuthoritativeTargetProfileInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeTargetProfileInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      target_qty: row.target_qty ?? "",
+      unit: row.unit ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? "",
+      is_active: row.is_active ?? "",
+      approval_status: row.approval_status ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeEntityCoverageRows(filePath: string): Promise<readonly AuthoritativeBcCoverageInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeBcCoverageInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      source_field: row.source_field ?? row.v2_source_field_used ?? "",
+      source_value: row.source_value ?? row.v2_source_value_used ?? "",
+      g_prod_or_rot_line_description: row.g_prod_or_rot_line_description ?? "",
+      g_prod_or_rot_line_no: row.g_prod_or_rot_line_no ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      current_entity_code: row.current_entity_code ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      v2_entity_code: row.v2_entity_code ?? "",
+      bc_current_kpi_scope: row.bc_current_kpi_scope ?? "",
+      document_no: row.document_no ?? "",
+      item_no: row.item_no ?? "",
+      target_bucket: row.target_bucket ?? "",
+      v2_target_bucket_candidate: row.v2_target_bucket_candidate ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeTargetCoverageRows(filePath: string): Promise<readonly AuthoritativeBcCoverageInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeBcCoverageInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      source_field: row.resolver_v2_source_field_used ?? "",
+      source_value: row.resolver_v2_source_value_used ?? "",
+      g_prod_or_rot_line_description: row.g_prod_or_rot_line_description ?? "",
+      g_prod_or_rot_line_no: row.g_prod_or_rot_line_no ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      current_entity_code: row.resolver_v2_entity_code ?? "",
+      resolver_v2_entity_code: row.resolver_v2_entity_code ?? "",
+      bc_current_kpi_scope: row.bc_current_kpi_scope ?? "",
+      document_no: row.document_no ?? "",
+      item_no: row.item_no ?? "",
+      resolver_v2_target_bucket_candidate: row.resolver_v2_target_bucket_candidate ?? ""
+    });
+  });
+  return rows;
+}
+
 async function readScopedDecisionValidationIssues(filePath: string): Promise<readonly ScopedDecisionValidationIssueRow[]> {
   if (!(await fileExists(filePath))) return [];
   const rows: ScopedDecisionValidationIssueRow[] = [];
@@ -6836,6 +7031,179 @@ async function runScopedDecisionApplyDryRun() {
   console.log("");
   console.log("Files written");
   for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
+function buildAuthoritativeMasterIntakeReadme(summary: AuthoritativeMasterIntakeSummary): string {
+  return `# Business Central P0.9m Authoritative Master Intake
+
+Generated at: ${summary.generatedAt}
+
+Intake status: ${summary.intakeStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Source Of Truth Pivot
+
+From P0.9m onward:
+
+- Current entity values are legacy evidence only.
+- Old target-like entity names are legacy evidence only.
+- Old aliases are conflict evidence only.
+- Old target naming is reference only.
+- Authoritative canonical entity master is the source of truth.
+- Authoritative source-to-entity map is the source of truth.
+- Authoritative target profile master is the source of truth.
+
+## Input Files
+
+Fill these files in \`${DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR}/\`:
+
+- \`${AUTHORITATIVE_MASTER_CANONICAL_FILE}\`
+- \`${AUTHORITATIVE_MASTER_SOURCE_MAP_FILE}\`
+- \`${AUTHORITATIVE_MASTER_TARGET_PROFILES_FILE}\`
+
+Templates are written beside them:
+
+- \`${AUTHORITATIVE_MASTER_CANONICAL_TEMPLATE_FILE}\`
+- \`${AUTHORITATIVE_MASTER_SOURCE_MAP_TEMPLATE_FILE}\`
+- \`${AUTHORITATIVE_MASTER_TARGET_PROFILES_TEMPLATE_FILE}\`
+
+## Output Files
+
+- \`${AUTHORITATIVE_MASTER_SUMMARY_FILE}\`: intake status, counts, coverage preview summary, P1.0 gate, and safety flags.
+- \`${AUTHORITATIVE_MASTER_CANONICAL_NORMALIZED_FILE}\`: normalized canonical entity input.
+- \`${AUTHORITATIVE_MASTER_SOURCE_MAP_NORMALIZED_FILE}\`: normalized authoritative source mapping input.
+- \`${AUTHORITATIVE_MASTER_TARGET_PROFILES_NORMALIZED_FILE}\`: normalized target profile input.
+- \`${AUTHORITATIVE_MASTER_ERRORS_FILE}\`: validation errors.
+- \`${AUTHORITATIVE_MASTER_WARNINGS_FILE}\`: validation warnings.
+- \`${AUTHORITATIVE_MASTER_SOURCE_COVERAGE_FILE}\`: coverage preview using authoritative source map only.
+- \`${AUTHORITATIVE_MASTER_TARGET_COVERAGE_FILE}\`: target profile coverage preview using authoritative target profile input only.
+- \`${AUTHORITATIVE_MASTER_LEGACY_CONFLICT_FILE}\`: legacy current-entity conflict evidence.
+- \`${AUTHORITATIVE_MASTER_UNMAPPED_SOURCE_FILE}\`: top source values not covered by authoritative source map.
+- \`${AUTHORITATIVE_MASTER_TEMPLATES_MANIFEST_FILE}\`: template and working-file manifest.
+
+## Safety
+
+- Intake/validation/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No conditional rule changes.
+- No dashboard switch.
+- No P1.0 enablement.
+- No master data is applied by this command.
+`;
+}
+
+async function runAuthoritativeMasterIntake() {
+  const inputFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR);
+  const canonicalFile = path.join(inputFolder, AUTHORITATIVE_MASTER_CANONICAL_FILE);
+  const sourceMapFile = path.join(inputFolder, AUTHORITATIVE_MASTER_SOURCE_MAP_FILE);
+  const targetProfilesFile = path.join(inputFolder, AUTHORITATIVE_MASTER_TARGET_PROFILES_FILE);
+  const inputFilesExist = (await fileExists(canonicalFile)) || (await fileExists(sourceMapFile)) || (await fileExists(targetProfilesFile));
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_MASTER_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_MASTER_README_FILE),
+    canonicalNormalized: path.join(outputDir, AUTHORITATIVE_MASTER_CANONICAL_NORMALIZED_FILE),
+    sourceMapNormalized: path.join(outputDir, AUTHORITATIVE_MASTER_SOURCE_MAP_NORMALIZED_FILE),
+    targetProfilesNormalized: path.join(outputDir, AUTHORITATIVE_MASTER_TARGET_PROFILES_NORMALIZED_FILE),
+    errors: path.join(outputDir, AUTHORITATIVE_MASTER_ERRORS_FILE),
+    warnings: path.join(outputDir, AUTHORITATIVE_MASTER_WARNINGS_FILE),
+    sourceCoverage: path.join(outputDir, AUTHORITATIVE_MASTER_SOURCE_COVERAGE_FILE),
+    targetCoverage: path.join(outputDir, AUTHORITATIVE_MASTER_TARGET_COVERAGE_FILE),
+    legacyConflict: path.join(outputDir, AUTHORITATIVE_MASTER_LEGACY_CONFLICT_FILE),
+    unmappedSource: path.join(outputDir, AUTHORITATIVE_MASTER_UNMAPPED_SOURCE_FILE),
+    manifest: path.join(outputDir, AUTHORITATIVE_MASTER_TEMPLATES_MANIFEST_FILE)
+  };
+  const templateFiles = {
+    canonical: path.join(inputFolder, AUTHORITATIVE_MASTER_CANONICAL_TEMPLATE_FILE),
+    sourceMap: path.join(inputFolder, AUTHORITATIVE_MASTER_SOURCE_MAP_TEMPLATE_FILE),
+    targetProfiles: path.join(inputFolder, AUTHORITATIVE_MASTER_TARGET_PROFILES_TEMPLATE_FILE)
+  };
+
+  console.log("Business Central P0.9m authoritative master intake");
+  console.log("Mode: INTAKE_VALIDATION_EXPORT_ONLY");
+  console.log(`Input folder: ${displayRepoPath(inputFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: intake/export only; database rows, production_outputs.entity_id, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  await mkdir(inputFolder, { recursive: true });
+  await mkdir(outputDir, { recursive: true });
+  if (!(await fileExists(canonicalFile))) await writeFile(canonicalFile, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.canonicalEntities, []), "utf8");
+  if (!(await fileExists(sourceMapFile))) await writeFile(sourceMapFile, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.sourceToEntityMap, []), "utf8");
+  if (!(await fileExists(targetProfilesFile))) await writeFile(targetProfilesFile, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.targetProfiles, []), "utf8");
+  await writeFile(templateFiles.canonical, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.canonicalEntities, []), "utf8");
+  await writeFile(templateFiles.sourceMap, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.sourceToEntityMap, []), "utf8");
+  await writeFile(templateFiles.targetProfiles, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.targetProfiles, []), "utf8");
+
+  const canonicalRows = await readAuthoritativeCanonicalEntityRows(canonicalFile);
+  const sourceMapRows = await readAuthoritativeSourceMapRows(sourceMapFile);
+  const targetProfileRows = await readAuthoritativeTargetProfileRows(targetProfilesFile);
+  const entityCoverageRows = await readAuthoritativeEntityCoverageRows(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH));
+  const entityBackfillCoverageRows = entityCoverageRows.length > 0
+    ? entityCoverageRows
+    : await readAuthoritativeEntityCoverageRows(resolveRepoPath(DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_CSV_PATH));
+  const targetCoverageRows = await readAuthoritativeTargetCoverageRows(resolveRepoPath(DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH));
+  const intake = buildAuthoritativeMasterIntake({
+    canonicalEntityRows: canonicalRows,
+    sourceMappingRows: sourceMapRows,
+    targetProfileRows,
+    bcCoverageRows: entityBackfillCoverageRows,
+    targetProfileCoverageRows: targetCoverageRows,
+    inputFilesExist,
+    inputFolder: displayRepoPath(inputFolder),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await writeFile(outputFiles.summary, `${JSON.stringify(intake.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeMasterIntakeReadme(intake.summary), "utf8");
+  await writeFile(outputFiles.canonicalNormalized, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.canonicalEntities, intake.canonicalEntitiesNormalizedRows satisfies readonly AuthoritativeNormalizedCanonicalEntityRow[]), "utf8");
+  await writeFile(outputFiles.sourceMapNormalized, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.sourceToEntityMap, intake.sourceToEntityMapNormalizedRows satisfies readonly AuthoritativeNormalizedSourceMapRow[]), "utf8");
+  await writeFile(outputFiles.targetProfilesNormalized, resolutionPackageCsv(authoritativeMasterInputCsvHeaders.targetProfiles, intake.targetProfilesNormalizedRows satisfies readonly AuthoritativeNormalizedTargetProfileRow[]), "utf8");
+  await writeFile(outputFiles.errors, resolutionPackageCsv(authoritativeMasterValidationIssueCsvHeaders, intake.validationErrorRows), "utf8");
+  await writeFile(outputFiles.warnings, resolutionPackageCsv(authoritativeMasterValidationIssueCsvHeaders, intake.validationWarningRows), "utf8");
+  await writeFile(outputFiles.sourceCoverage, resolutionPackageCsv(authoritativeMasterSourceCoverageCsvHeaders, intake.sourceCoveragePreviewRows), "utf8");
+  await writeFile(outputFiles.targetCoverage, resolutionPackageCsv(authoritativeMasterTargetCoverageCsvHeaders, intake.targetProfileCoveragePreviewRows), "utf8");
+  await writeFile(outputFiles.legacyConflict, resolutionPackageCsv(authoritativeMasterLegacyConflictCsvHeaders, intake.legacyConflictEvidenceRows), "utf8");
+  await writeFile(outputFiles.unmappedSource, resolutionPackageCsv(authoritativeMasterUnmappedSourceCsvHeaders, intake.unmappedSourceValueRows), "utf8");
+  await writeFile(outputFiles.manifest, `${JSON.stringify(intake.templatesManifest, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- intake_status=${intake.summary.intakeStatus}`);
+  console.log(`- canonical_entity_rows=${intake.summary.canonicalEntityRows}`);
+  console.log(`- source_mapping_rows=${intake.summary.sourceMappingRows}`);
+  console.log(`- target_profile_rows=${intake.summary.targetProfileRows}`);
+  console.log(`- validation_error_rows=${intake.summary.validationErrorRows}`);
+  console.log(`- validation_warning_rows=${intake.summary.validationWarningRows}`);
+  console.log(`- total_bc_rows=${intake.summary.coveragePreview.totalBcRows}`);
+  console.log(`- authoritative_mapped_rows=${intake.summary.coveragePreview.authoritativeMappedRows}`);
+  console.log(`- authoritative_unmapped_rows=${intake.summary.coveragePreview.authoritativeUnmappedRows}`);
+  console.log(`- p10_status=${intake.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top unmapped source values");
+  for (const row of intake.unmappedSourceValueRows.slice(0, 10)) console.log(`- ${row.source_field}; ${row.source_value}; rows=${row.rows}; scopes=${row.bc_scopes}`);
+  if (intake.unmappedSourceValueRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Top legacy conflict evidence");
+  for (const row of intake.legacyConflictEvidenceRows.slice(0, 10)) console.log(`- ${row.source_field}; ${row.source_value}; rows=${row.rows}; current=${row.current_entity_codes_legacy_evidence}; proposed=${row.proposed_legacy_entity_codes}`);
+  if (intake.legacyConflictEvidenceRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  for (const file of Object.values(templateFiles)) console.log(`- ${displayRepoPath(file)}`);
+  console.log(`- ${displayRepoPath(canonicalFile)}`);
+  console.log(`- ${displayRepoPath(sourceMapFile)}`);
+  console.log(`- ${displayRepoPath(targetProfilesFile)}`);
 }
 
 async function runScopedDecisionApprovalIntake() {
@@ -7590,8 +7958,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -7611,6 +7979,10 @@ async function main() {
   }
   if (command === "scoped-decision-approval-intake") {
     await runScopedDecisionApprovalIntake();
+    return;
+  }
+  if (command === "authoritative-master-intake") {
+    await runAuthoritativeMasterIntake();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });

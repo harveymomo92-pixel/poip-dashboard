@@ -91,13 +91,15 @@ It must not:
 
 ## Next Milestone
 
-P0.9m should implement:
+P0.9m implements:
 
 ```bash
 pnpm bc:authoritative-master-intake
 ```
 
-This command prepares and validates authoritative master input templates without applying anything.
+This command prepares and validates authoritative master input templates without applying anything. If the input files are absent or empty, it creates `.tmp/bc-authoritative-master-input/` templates and working CSVs, writes `.tmp/bc-authoritative-master-intake/`, returns `AWAITING_MASTER_INPUT`, and keeps P1.0 blocked.
+
+P0.9m output includes normalized master CSVs, validation errors/warnings, source coverage preview, target profile coverage preview, unmapped source values, legacy conflict evidence, and a template manifest. Coverage uses only the authoritative source-to-entity map as success mapping; current/legacy entity values appear only as evidence.
 
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
@@ -408,6 +410,26 @@ Output folder:
 P0.9k writes normalized, accepted, blocked, missing, duplicate, and invalid reviewer decision reports plus readiness, P1.0 gate preview, safety, `summary.json`, and `README.md`. If `reviewer-decisions.csv` is absent, it creates `reviewer-decisions.template.csv` and reports all workspace rows as missing reviewer input.
 
 P0.9l makes the apply dry-run reviewer-input-aware: `bc:scoped-decision-apply-dry-run` now reads `.tmp/bc-scoped-decision-approval-intake/` when available and merges only accepted reviewer decisions into its dry-run input. Missing, blocked, invalid, duplicate, unknown, pending, rejected, and deferred reviewer decisions remain non-executable. The apply dry-run also writes `intake-source-summary.csv` so the reviewer input source can be audited.
+
+P0.9m adds authoritative master intake:
+
+```bash
+pnpm bc:authoritative-master-intake
+```
+
+Input folder:
+
+```text
+.tmp/bc-authoritative-master-input/
+```
+
+Output folder:
+
+```text
+.tmp/bc-authoritative-master-intake/
+```
+
+The command validates `canonical-entities.csv`, `source-to-entity-map.csv`, and `target-profiles.csv`, creates blank templates when needed, previews coverage from existing BC reports, and keeps legacy current entity/old target names as conflict evidence only.
 
 These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 

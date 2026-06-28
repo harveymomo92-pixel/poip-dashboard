@@ -88,6 +88,29 @@ P1.0 must remain blocked if any of the following are true:
 - KPI compare is not reviewed,
 - unresolved high-risk rows remain.
 
+## P0.9m Intake Contract
+
+`pnpm bc:authoritative-master-intake` consumes `.tmp/bc-authoritative-master-input/` and writes `.tmp/bc-authoritative-master-intake/`.
+
+Input files:
+
+- `canonical-entities.csv`
+- `source-to-entity-map.csv`
+- `target-profiles.csv`
+
+If input is missing or empty, the command creates blank templates and working CSVs, returns `AWAITING_MASTER_INPUT`, writes validation outputs with zero data errors, and keeps P1.0 blocked.
+
+Validation is authoritative-master-only:
+
+- approved canonical entities require code, display name, active/status values, and reviewer evidence,
+- source mappings must use reviewed Business Central OData source fields,
+- `machineCenterNo` is fallback only,
+- blank/UNMAPPED and broad family-only values are invalid source mappings,
+- target profiles must reference approved active canonical entities,
+- target profile rows are not executable and do not insert into `target_profiles`.
+
+Coverage preview must count success only from the authoritative source-to-entity map and authoritative target profile master. Legacy current entity, old aliases, and old target-like names may be included only as audit/conflict evidence.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Metric Contract
@@ -228,6 +251,8 @@ P0.9l extends `bc:scoped-decision-apply-dry-run` to read `.tmp/bc-scoped-decisio
 - Target profile decisions remain blocked unless the entity/canonical dependency is accepted/approved or explicitly not required.
 - The command writes `intake-source-summary.csv` alongside the existing apply dry-run files.
 - The command never mutates data and never enables P1.0.
+
+P0.9m adds `bc:authoritative-master-intake`. The command creates/validates authoritative master templates, writes normalized master CSVs, validation issue CSVs, source/target coverage previews, unmapped source values, legacy conflict evidence, `summary.json`, `README.md`, and `authoritative-master-templates-manifest.json`. It never applies master data and never enables P1.0.
 
 ## Target Rule
 
