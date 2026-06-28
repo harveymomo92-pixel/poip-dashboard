@@ -843,13 +843,14 @@ PURCHASE -> PURCHASE_OR_RECEIVING
 
 They are all `OUT_OF_CURRENT_KPI_SCOPE`, remain visible in reports, and no longer block P1.0 after scope. Do not treat `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern candidates as implemented rules yet.
 
-P0.9f/P0.9g/P0.9h scoped review commands:
+P0.9f/P0.9g/P0.9h/P0.9i/P0.9j scoped review commands:
 
 ```bash
 pnpm bc:scoped-blocker-package
 pnpm bc:scoped-decision-review
 pnpm bc:scoped-decision-validate
 pnpm bc:scoped-decision-approval-workspace
+pnpm bc:scoped-decision-apply-dry-run
 ```
 
 `bc:scoped-decision-review` reads `.tmp/bc-scoped-blocker-package/true-p10-blockers.csv` and writes `.tmp/bc-scoped-decision-review/`.
@@ -858,9 +859,13 @@ pnpm bc:scoped-decision-approval-workspace
 
 `bc:scoped-decision-approval-workspace` reads `.tmp/bc-scoped-decision-review/` plus `.tmp/bc-scoped-decision-validation/` and writes `.tmp/bc-scoped-decision-approval-workspace/`.
 
+`bc:scoped-decision-apply-dry-run` reads `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv` and writes `.tmp/bc-scoped-decision-apply-dry-run/`.
+
 Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 
 Use the approval workspace only as a human-editable template. It keeps `approval_status=pending`, `safe_to_auto_apply=false`, and `safe_to_seed_target_profile=false` for every generated row. It writes source-data, alias/canonical, reject attachment, and target profile approval templates, but it does not mark decisions approved and does not reduce P1.0 blockers by itself.
+
+Use the apply dry-run only to preview what reviewed approvals would produce later. Pending, empty, rejected, and deferred rows are blocked; approved rows still need reviewer evidence and review-only actions. It writes executable and blocked dry-run plans plus P1.0 impact estimates, but it does not apply decisions and cannot unblock P1.0.
 
 ### P1.0 planned comparison command
 

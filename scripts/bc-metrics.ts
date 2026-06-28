@@ -95,6 +95,15 @@ import {
   type ScopedDecisionReviewerChecklistRow
 } from "../packages/domain/src/master-data/scoped-decision-approval-workspace.js";
 import {
+  buildScopedDecisionApplyDryRun,
+  type ScopedDecisionApplyDryRunInputRow,
+  type ScopedDecisionApplyDryRunSummary,
+  type ScopedDecisionBlockedPlanRow,
+  type ScopedDecisionCategoryDryRunRow,
+  type ScopedDecisionExecutablePlanRow,
+  type ScopedDecisionP10ImpactEstimateRow
+} from "../packages/domain/src/master-data/scoped-decision-apply-dry-run.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -148,6 +157,7 @@ type Command =
   | "scoped-decision-review"
   | "scoped-decision-validate"
   | "scoped-decision-approval-workspace"
+  | "scoped-decision-apply-dry-run"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -852,6 +862,7 @@ const DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR = ".tmp/bc-scoped-blocker-package";
 const DEFAULT_SCOPED_DECISION_REVIEW_DIR = ".tmp/bc-scoped-decision-review";
 const DEFAULT_SCOPED_DECISION_VALIDATION_DIR = ".tmp/bc-scoped-decision-validation";
 const DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR = ".tmp/bc-scoped-decision-approval-workspace";
+const DEFAULT_SCOPED_DECISION_APPLY_DRY_RUN_DIR = ".tmp/bc-scoped-decision-apply-dry-run";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -896,6 +907,16 @@ const SCOPED_DECISION_APPROVAL_REJECT_ATTACHMENT_FILE = "reject-attachment-appro
 const SCOPED_DECISION_APPROVAL_TARGET_PROFILE_FILE = "target-profile-approval-template.csv";
 const SCOPED_DECISION_APPROVAL_REVIEWER_CHECKLIST_FILE = "reviewer-checklist.csv";
 const SCOPED_DECISION_APPROVAL_IMPORT_MANIFEST_FILE = "import-manifest.json";
+const SCOPED_DECISION_APPLY_SUMMARY_FILE = "summary.json";
+const SCOPED_DECISION_APPLY_README_FILE = "README.md";
+const SCOPED_DECISION_APPLY_EXECUTABLE_FILE = "executable-decision-plan.csv";
+const SCOPED_DECISION_APPLY_BLOCKED_FILE = "blocked-decision-plan.csv";
+const SCOPED_DECISION_APPLY_ALIAS_FILE = "alias-apply-dry-run.csv";
+const SCOPED_DECISION_APPLY_CANONICAL_FILE = "canonical-entity-apply-dry-run.csv";
+const SCOPED_DECISION_APPLY_REJECT_FILE = "reject-attachment-apply-dry-run.csv";
+const SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE = "target-profile-apply-dry-run.csv";
+const SCOPED_DECISION_APPLY_P10_IMPACT_FILE = "p10-impact-estimate.csv";
+const SCOPED_DECISION_APPLY_SAFETY_FILE = "safety-report.json";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -1310,6 +1331,60 @@ const scopedDecisionReviewerChecklistCsvHeaders = [
   "required_before_approval",
   "status"
 ] as const satisfies readonly (keyof ScopedDecisionReviewerChecklistRow)[];
+
+const scopedDecisionExecutablePlanCsvHeaders = [
+  "plan_id",
+  "decision_id",
+  "priority",
+  "decision_family",
+  "decision_category",
+  "approved_action",
+  "plan_type",
+  "source_value",
+  "grouped_rows",
+  "reviewer",
+  "reviewer_notes",
+  "business_approval_reference",
+  "sample_documents",
+  "sample_items",
+  "p10_gate_effect",
+  "execution_mode"
+] as const satisfies readonly (keyof ScopedDecisionExecutablePlanRow)[];
+
+const scopedDecisionBlockedPlanCsvHeaders = [
+  "block_id",
+  "decision_id",
+  "priority",
+  "decision_family",
+  "decision_category",
+  "approval_status",
+  "approved_action",
+  "blocker_code",
+  "blocker_reason",
+  "required_before_execution",
+  "grouped_rows",
+  "source_value",
+  "p10_gate_effect"
+] as const satisfies readonly (keyof ScopedDecisionBlockedPlanRow)[];
+
+const scopedDecisionCategoryDryRunCsvHeaders = [
+  "plan_id",
+  "decision_id",
+  "decision_family",
+  "decision_category",
+  "approved_action",
+  "source_value",
+  "grouped_rows",
+  "reviewer",
+  "reviewer_notes",
+  "dry_run_notes"
+] as const satisfies readonly (keyof ScopedDecisionCategoryDryRunRow)[];
+
+const scopedDecisionP10ImpactCsvHeaders = [
+  "metric",
+  "value",
+  "note"
+] as const satisfies readonly (keyof ScopedDecisionP10ImpactEstimateRow)[];
 
 const manualApprovalQueueCsvHeaders = [
   "priority",
@@ -5823,6 +5898,46 @@ async function readScopedDecisionApprovalRows(filePath: string): Promise<readonl
   return rows;
 }
 
+async function readScopedDecisionApplyDryRunRows(filePath: string): Promise<readonly ScopedDecisionApplyDryRunInputRow[]> {
+  const rows: ScopedDecisionApplyDryRunInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      decision_id: row.decision_id ?? "",
+      priority: row.priority ?? "",
+      decision_family: row.decision_family ?? "",
+      decision_category: row.decision_category ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      current_entity_codes: row.current_entity_codes ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      grouped_rows: row.grouped_rows ?? "0",
+      affected_scopes: row.affected_scopes ?? "",
+      affected_future_use_domains: row.affected_future_use_domains ?? "",
+      recommended_decision: row.recommended_decision ?? "",
+      rationale: row.rationale ?? "",
+      risk_level: row.risk_level ?? "",
+      blocks_p10_after_scope: row.blocks_p10_after_scope ?? "",
+      validation_status: row.validation_status ?? "",
+      validation_warnings: row.validation_warnings ?? "",
+      approval_status: row.approval_status ?? "",
+      approved_action: row.approved_action ?? "",
+      safe_to_auto_apply: row.safe_to_auto_apply ?? "false",
+      safe_to_seed_target_profile: row.safe_to_seed_target_profile ?? "false",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      business_approval_reference: row.business_approval_reference ?? "",
+      decision_date: row.decision_date ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      entity_dependency_status: row.entity_dependency_status ?? "",
+      target_qty: row.target_qty ?? "",
+      unit: row.unit ?? ""
+    });
+  });
+  return rows;
+}
+
 async function readScopedDecisionValidationIssues(filePath: string): Promise<readonly ScopedDecisionValidationIssueRow[]> {
   if (!(await fileExists(filePath))) return [];
   const rows: ScopedDecisionValidationIssueRow[] = [];
@@ -6031,6 +6146,72 @@ Allowed \`approved_action\` values are review-only:
 - No conditional rule change.
 - No dashboard switch.
 - No decision is marked approved automatically.
+- P1.0 remains blocked.
+`;
+}
+
+function buildScopedDecisionApplyDryRunReadme(summary: ScopedDecisionApplyDryRunSummary): string {
+  return `# Business Central P0.9j Scoped Decision Apply Dry-Run
+
+Generated at: ${summary.generatedAt}
+
+Dry-run status: ${summary.dryRunStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Files
+
+- \`${SCOPED_DECISION_APPLY_SUMMARY_FILE}\`: dry-run counts, P1.0 gate, impact estimate, and safety flags.
+- \`${SCOPED_DECISION_APPLY_EXECUTABLE_FILE}\`: approved rows that pass dry-run validation, if any.
+- \`${SCOPED_DECISION_APPLY_BLOCKED_FILE}\`: rows that are not executable and the reason.
+- \`${SCOPED_DECISION_APPLY_ALIAS_FILE}\`: alias/canonical review dry-run rows only.
+- \`${SCOPED_DECISION_APPLY_CANONICAL_FILE}\`: canonical entity dry-run rows only.
+- \`${SCOPED_DECISION_APPLY_REJECT_FILE}\`: reject attachment dry-run rows only.
+- \`${SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE}\`: target profile dry-run rows only.
+- \`${SCOPED_DECISION_APPLY_P10_IMPACT_FILE}\`: P1.0 impact estimate.
+- \`${SCOPED_DECISION_APPLY_SAFETY_FILE}\`: explicit no-mutation safety report.
+
+## Current Counts
+
+- Total input rows: ${summary.totalInputRows}
+- Approved input rows: ${summary.approvedInputRows}
+- Pending input rows: ${summary.pendingInputRows}
+- Rejected input rows: ${summary.rejectedInputRows}
+- Deferred input rows: ${summary.deferredInputRows}
+- Executable dry-run rows: ${summary.executableRows}
+- Blocked rows: ${summary.blockedRows}
+- Alias dry-run rows: ${summary.aliasDryRunRows}
+- Canonical entity dry-run rows: ${summary.canonicalEntityDryRunRows}
+- Reject attachment dry-run rows: ${summary.rejectAttachmentDryRunRows}
+- Target profile dry-run rows: ${summary.targetProfileDryRunRows}
+- Source data backlog rows: ${summary.sourceDataBacklogRows}
+- Invalid action rows: ${summary.invalidActionRows}
+- Missing reviewer rows: ${summary.missingReviewerRows}
+- Missing reviewer notes rows: ${summary.missingReviewerNotesRows}
+
+## Rules
+
+- Only \`approval_status=approved\` can become executable in dry-run.
+- Pending, empty, rejected, and deferred rows are blocked.
+- Approved rows require \`reviewer\`, \`reviewer_notes\`, and an allowed review-only \`approved_action\`.
+- Direct mutation actions are invalid.
+- \`safe_to_auto_apply=true\` never applies data and is still blocked for OMSO, VFINE, LONGSUN, POLYPRINT, THERMO HENGFENG, and blank/unmapped safeguards.
+- Target profile rows never insert target profiles from this command.
+- P1.0 cannot be unblocked by this command.
+
+## Safety
+
+- Dry-run/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` mutation.
+- No alias change.
+- No conditional rule change.
+- No dashboard switch.
 - P1.0 remains blocked.
 `;
 }
@@ -6247,6 +6428,76 @@ async function runScopedDecisionApprovalWorkspace() {
     console.log(`- ${row.decision_id}; ${row.decision_family}; ${row.decision_category}; rows=${row.grouped_rows}; source=${row.source_value}`);
   }
   if (workspace.approvalWorkbookP2Rows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
+async function runScopedDecisionApplyDryRun() {
+  const sourceApprovalWorkspace = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_WORKSPACE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR);
+  const sourceValidationFolder = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
+  const outputDir = resolveRepoPath(process.env.SCOPED_DECISION_APPLY_DRY_RUN_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPLY_DRY_RUN_DIR);
+  const approvalWorkbookFile = path.join(sourceApprovalWorkspace, SCOPED_DECISION_APPROVAL_WORKBOOK_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, SCOPED_DECISION_APPLY_SUMMARY_FILE),
+    readme: path.join(outputDir, SCOPED_DECISION_APPLY_README_FILE),
+    executable: path.join(outputDir, SCOPED_DECISION_APPLY_EXECUTABLE_FILE),
+    blocked: path.join(outputDir, SCOPED_DECISION_APPLY_BLOCKED_FILE),
+    alias: path.join(outputDir, SCOPED_DECISION_APPLY_ALIAS_FILE),
+    canonical: path.join(outputDir, SCOPED_DECISION_APPLY_CANONICAL_FILE),
+    reject: path.join(outputDir, SCOPED_DECISION_APPLY_REJECT_FILE),
+    targetProfile: path.join(outputDir, SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE),
+    p10Impact: path.join(outputDir, SCOPED_DECISION_APPLY_P10_IMPACT_FILE),
+    safety: path.join(outputDir, SCOPED_DECISION_APPLY_SAFETY_FILE)
+  };
+
+  console.log("Business Central P0.9j scoped decision apply dry-run");
+  console.log("Mode: DRY_RUN_ONLY");
+  console.log(`Source approval workspace: ${displayRepoPath(sourceApprovalWorkspace)}`);
+  console.log(`Source validation folder: ${displayRepoPath(sourceValidationFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: dry-run/export only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  const rows = await readScopedDecisionApplyDryRunRows(approvalWorkbookFile);
+  const dryRun = buildScopedDecisionApplyDryRun({
+    rows,
+    sourceApprovalWorkspace: displayRepoPath(sourceApprovalWorkspace),
+    sourceValidationFolder: displayRepoPath(sourceValidationFolder),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(dryRun.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildScopedDecisionApplyDryRunReadme(dryRun.summary), "utf8");
+  await writeFile(outputFiles.executable, resolutionPackageCsv(scopedDecisionExecutablePlanCsvHeaders, dryRun.executableDecisionPlanRows), "utf8");
+  await writeFile(outputFiles.blocked, resolutionPackageCsv(scopedDecisionBlockedPlanCsvHeaders, dryRun.blockedDecisionPlanRows), "utf8");
+  await writeFile(outputFiles.alias, resolutionPackageCsv(scopedDecisionCategoryDryRunCsvHeaders, dryRun.aliasApplyDryRunRows), "utf8");
+  await writeFile(outputFiles.canonical, resolutionPackageCsv(scopedDecisionCategoryDryRunCsvHeaders, dryRun.canonicalEntityApplyDryRunRows), "utf8");
+  await writeFile(outputFiles.reject, resolutionPackageCsv(scopedDecisionCategoryDryRunCsvHeaders, dryRun.rejectAttachmentApplyDryRunRows), "utf8");
+  await writeFile(outputFiles.targetProfile, resolutionPackageCsv(scopedDecisionCategoryDryRunCsvHeaders, dryRun.targetProfileApplyDryRunRows), "utf8");
+  await writeFile(outputFiles.p10Impact, resolutionPackageCsv(scopedDecisionP10ImpactCsvHeaders, dryRun.p10ImpactEstimateRows), "utf8");
+  await writeFile(outputFiles.safety, `${JSON.stringify(dryRun.safetyReport, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- dry_run_status=${dryRun.summary.dryRunStatus}`);
+  console.log(`- total_input_rows=${dryRun.summary.totalInputRows}`);
+  console.log(`- approved_input_rows=${dryRun.summary.approvedInputRows}`);
+  console.log(`- pending_input_rows=${dryRun.summary.pendingInputRows}`);
+  console.log(`- executable_rows=${dryRun.summary.executableRows}`);
+  console.log(`- blocked_rows=${dryRun.summary.blockedRows}`);
+  console.log(`- alias_dry_run_rows=${dryRun.summary.aliasDryRunRows}`);
+  console.log(`- canonical_entity_dry_run_rows=${dryRun.summary.canonicalEntityDryRunRows}`);
+  console.log(`- reject_attachment_dry_run_rows=${dryRun.summary.rejectAttachmentDryRunRows}`);
+  console.log(`- target_profile_dry_run_rows=${dryRun.summary.targetProfileDryRunRows}`);
+  console.log(`- p10_status=${dryRun.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top blocked reasons");
+  const blockedReasonCounts = topCounts(dryRun.blockedDecisionPlanRows.map((row) => row.blocker_code), 10);
+  for (const row of blockedReasonCounts) console.log(`- ${row.value}; rows=${row.rows}`);
+  if (blockedReasonCounts.length === 0) console.log("- none");
 
   console.log("");
   console.log("Files written");
@@ -6918,8 +7169,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -6931,6 +7182,10 @@ async function main() {
   }
   if (command === "scoped-decision-approval-workspace") {
     await runScopedDecisionApprovalWorkspace();
+    return;
+  }
+  if (command === "scoped-decision-apply-dry-run") {
+    await runScopedDecisionApplyDryRun();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });

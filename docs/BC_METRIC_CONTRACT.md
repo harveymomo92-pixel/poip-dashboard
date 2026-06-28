@@ -110,6 +110,15 @@ P0.9i consumes `.tmp/bc-scoped-decision-review/` and `.tmp/bc-scoped-decision-va
 - Blank/unmapped rows route to source-data approval, reject rows route to reject attachment approval, target profile rows route to dependency-blocked target profile approval, and alias/canonical conflicts route to manual alias/canonical approval.
 - The workspace never creates aliases, updates entities, inserts target profiles, changes conditional rules, switches dashboard behavior, or enables P1.0.
 
+P0.9j consumes `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv` and writes `.tmp/bc-scoped-decision-apply-dry-run/`. The apply dry-run contract is dry-run/export-only:
+
+- Only `approval_status=approved` rows can be considered executable in dry-run.
+- Pending, empty, rejected, and deferred rows are blocked.
+- Approved rows require `reviewer`, `reviewer_notes`, and an allowed review-only `approved_action`.
+- Direct mutation actions such as `CREATE_ALIAS_NOW`, `UPDATE_ENTITY_NOW`, `INSERT_TARGET_PROFILE_NOW`, and `SWITCH_DASHBOARD_NOW` are invalid.
+- Alias, canonical entity, reject attachment, target profile, and source-data backlog rows produce dry-run plan rows only.
+- The command never mutates data and never enables P1.0.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

@@ -220,7 +220,7 @@ These rows remain exported in every report and are excluded only from P1.0 block
 
 ---
 
-## 10. P0.9f/P0.9g/P0.9h/P0.9i Scoped Blocker, Decision, Validation, and Approval Workspace
+## 10. P0.9f/P0.9g/P0.9h/P0.9i/P0.9j Scoped Review and Apply Dry-Run
 
 P0.9f narrows material/sparepart scope and packages remaining true P1.0 blockers:
 
@@ -270,7 +270,21 @@ Output folder:
 
 P0.9i writes the full approval workbook, P1/P2 slices, source-data, alias/canonical, reject attachment, and target-profile templates, a reviewer checklist, an import manifest, `summary.json`, and `README.md`. It keeps `approval_status=pending`, `safe_to_auto_apply=false`, and `safe_to_seed_target_profile=false`; no decision is approved automatically.
 
-These packages are decision review, validation, and approval-template preparation only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, or unapproved workspace rows remain.
+P0.9j turns the approval workspace into an apply dry-run plan:
+
+```bash
+pnpm bc:scoped-decision-apply-dry-run
+```
+
+Output folder:
+
+```text
+.tmp/bc-scoped-decision-apply-dry-run/
+```
+
+P0.9j writes executable and blocked decision plans, category-specific dry-run CSVs, a P1.0 impact estimate, `summary.json`, `safety-report.json`, and `README.md`. Only `approval_status=approved` rows with reviewer evidence and review-only actions can become executable dry-run rows. Pending, empty, rejected, or deferred rows remain blocked.
+
+These packages are decision review, validation, approval-template preparation, and dry-run planning only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even approved rows are never applied by P0.9j. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, or blocked dry-run rows remain.
 
 ---
 
