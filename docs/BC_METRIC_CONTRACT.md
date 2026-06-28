@@ -128,6 +128,15 @@ P0.9k consumes `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv
 - Unknown, duplicate, unsupported-status, direct-mutation, blank/unmapped canonical creation, auto-approved OMSO/VFINE/LONGSUN/POLYPRINT/THERMO HENGFENG, reject-to-OK, and dependency-blocked target profile rows are blocked or invalid.
 - Accepted reviewer rows are exported only; the command never writes back to the approval workspace, never mutates apply dry-run outputs, and never enables P1.0.
 
+P0.9l extends `bc:scoped-decision-apply-dry-run` to read `.tmp/bc-scoped-decision-approval-intake/` when available. The reviewer-input-aware apply dry-run contract remains dry-run/export-only:
+
+- Accepted intake rows are merged into the dry-run input by `decision_id`; the approval workbook is not modified.
+- Missing, pending, rejected, deferred, blocked, invalid, duplicate, and unknown reviewer decisions are never executable.
+- Accepted rows must still pass apply dry-run checks for reviewer evidence, review-only actions, blank/unmapped safeguards, OMSO/VFINE/LONGSUN safeguards, reject scope integrity, and target profile entity dependencies.
+- Target profile decisions remain blocked unless the entity/canonical dependency is accepted/approved or explicitly not required.
+- The command writes `intake-source-summary.csv` alongside the existing apply dry-run files.
+- The command never mutates data and never enables P1.0.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

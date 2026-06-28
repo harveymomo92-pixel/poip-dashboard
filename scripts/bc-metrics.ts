@@ -95,9 +95,11 @@ import {
   type ScopedDecisionReviewerChecklistRow
 } from "../packages/domain/src/master-data/scoped-decision-approval-workspace.js";
 import {
+  applyAcceptedReviewerDecisionsToWorkspaceRows,
   buildScopedDecisionApplyDryRun,
   type ScopedDecisionApplyDryRunInputRow,
   type ScopedDecisionApplyDryRunSummary,
+  type ScopedDecisionApplyDryRunSourceSummaryRow,
   type ScopedDecisionBlockedPlanRow,
   type ScopedDecisionCategoryDryRunRow,
   type ScopedDecisionExecutablePlanRow,
@@ -932,6 +934,7 @@ const SCOPED_DECISION_APPLY_REJECT_FILE = "reject-attachment-apply-dry-run.csv";
 const SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE = "target-profile-apply-dry-run.csv";
 const SCOPED_DECISION_APPLY_P10_IMPACT_FILE = "p10-impact-estimate.csv";
 const SCOPED_DECISION_APPLY_SAFETY_FILE = "safety-report.json";
+const SCOPED_DECISION_APPLY_INTAKE_SOURCE_FILE = "intake-source-summary.csv";
 const SCOPED_DECISION_REVIEWER_DECISIONS_FILE = "reviewer-decisions.csv";
 const SCOPED_DECISION_REVIEWER_DECISIONS_TEMPLATE_FILE = "reviewer-decisions.template.csv";
 const SCOPED_DECISION_INTAKE_SUMMARY_FILE = "summary.json";
@@ -1413,6 +1416,12 @@ const scopedDecisionP10ImpactCsvHeaders = [
   "value",
   "note"
 ] as const satisfies readonly (keyof ScopedDecisionP10ImpactEstimateRow)[];
+
+const scopedDecisionApplyIntakeSourceCsvHeaders = [
+  "metric",
+  "value",
+  "note"
+] as const satisfies readonly (keyof ScopedDecisionApplyDryRunSourceSummaryRow)[];
 
 const scopedDecisionReviewerInputTemplateCsvHeaders = [
   "decision_id",
@@ -6124,6 +6133,43 @@ async function readScopedDecisionReviewerInputRows(filePath: string): Promise<re
   return rows;
 }
 
+async function readScopedDecisionAcceptedReviewerRows(filePath: string): Promise<readonly ScopedDecisionNormalizedReviewerDecisionRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: ScopedDecisionNormalizedReviewerDecisionRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      intake_id: row.intake_id ?? "",
+      decision_id: row.decision_id ?? "",
+      stable_decision_key: row.stable_decision_key ?? "",
+      priority: row.priority ?? "",
+      decision_family: row.decision_family ?? "",
+      decision_category: row.decision_category ?? "",
+      source_value: row.source_value ?? "",
+      grouped_rows: Number(row.grouped_rows ?? 0) || 0,
+      approval_status: row.approval_status === "rejected" || row.approval_status === "deferred" || row.approval_status === "pending" ? row.approval_status : "approved",
+      approved_action: row.approved_action ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      business_approval_reference: row.business_approval_reference ?? "",
+      decision_date: row.decision_date ?? "",
+      safe_to_auto_apply: row.safe_to_auto_apply === "true" ? "true" : "false",
+      safe_to_seed_target_profile: row.safe_to_seed_target_profile === "true" ? "true" : "false",
+      entity_dependency_status: row.entity_dependency_status ?? "",
+      target_bucket: row.target_bucket ?? "",
+      target_qty: row.target_qty ?? "",
+      unit: row.unit ?? "",
+      intake_status: row.intake_status === "BLOCKED" ? "BLOCKED" : "ACCEPTED",
+      intake_reason: row.intake_reason ?? ""
+    });
+  });
+  return rows.filter((row) => row.intake_status === "ACCEPTED");
+}
+
+async function readScopedDecisionApprovalIntakeSummary(filePath: string): Promise<ScopedDecisionApprovalIntakeSummary | null> {
+  if (!(await fileExists(filePath))) return null;
+  return JSON.parse(await readFile(filePath, "utf8")) as ScopedDecisionApprovalIntakeSummary;
+}
+
 async function readScopedDecisionValidationIssues(filePath: string): Promise<readonly ScopedDecisionValidationIssueRow[]> {
   if (!(await fileExists(filePath))) return [];
   const rows: ScopedDecisionValidationIssueRow[] = [];
@@ -6360,9 +6406,16 @@ ${summary.p10Gate.reason}
 - \`${SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE}\`: target profile dry-run rows only.
 - \`${SCOPED_DECISION_APPLY_P10_IMPACT_FILE}\`: P1.0 impact estimate.
 - \`${SCOPED_DECISION_APPLY_SAFETY_FILE}\`: explicit no-mutation safety report.
+- \`${SCOPED_DECISION_APPLY_INTAKE_SOURCE_FILE}\`: approval intake counts used by this dry-run.
 
 ## Current Counts
 
+- Total workspace rows: ${summary.totalWorkspaceRows}
+- Total reviewer input rows: ${summary.totalReviewerInputRows}
+- Accepted reviewer rows: ${summary.acceptedReviewerRows}
+- Blocked reviewer rows: ${summary.blockedReviewerRows}
+- Invalid reviewer rows: ${summary.invalidReviewerRows}
+- Missing reviewer rows: ${summary.missingReviewerRows}
 - Total input rows: ${summary.totalInputRows}
 - Approved input rows: ${summary.approvedInputRows}
 - Pending input rows: ${summary.pendingInputRows}
@@ -6376,11 +6429,12 @@ ${summary.p10Gate.reason}
 - Target profile dry-run rows: ${summary.targetProfileDryRunRows}
 - Source data backlog rows: ${summary.sourceDataBacklogRows}
 - Invalid action rows: ${summary.invalidActionRows}
-- Missing reviewer rows: ${summary.missingReviewerRows}
+- Missing reviewer field rows: ${summary.missingReviewerFieldRows}
 - Missing reviewer notes rows: ${summary.missingReviewerNotesRows}
 
 ## Rules
 
+- Accepted reviewer decisions from approval intake are merged into the dry-run input when present.
 - Only \`approval_status=approved\` can become executable in dry-run.
 - Pending, empty, rejected, and deferred rows are blocked.
 - Approved rows require \`reviewer\`, \`reviewer_notes\`, and an allowed review-only \`approved_action\`.
@@ -6689,9 +6743,12 @@ async function runScopedDecisionApprovalWorkspace() {
 
 async function runScopedDecisionApplyDryRun() {
   const sourceApprovalWorkspace = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_WORKSPACE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR);
+  const sourceApprovalIntake = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_INTAKE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR);
   const sourceValidationFolder = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
   const outputDir = resolveRepoPath(process.env.SCOPED_DECISION_APPLY_DRY_RUN_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPLY_DRY_RUN_DIR);
   const approvalWorkbookFile = path.join(sourceApprovalWorkspace, SCOPED_DECISION_APPROVAL_WORKBOOK_FILE);
+  const approvalIntakeSummaryFile = path.join(sourceApprovalIntake, SCOPED_DECISION_INTAKE_SUMMARY_FILE);
+  const acceptedReviewerFile = path.join(sourceApprovalIntake, SCOPED_DECISION_INTAKE_ACCEPTED_FILE);
   const outputFiles = {
     summary: path.join(outputDir, SCOPED_DECISION_APPLY_SUMMARY_FILE),
     readme: path.join(outputDir, SCOPED_DECISION_APPLY_README_FILE),
@@ -6702,22 +6759,39 @@ async function runScopedDecisionApplyDryRun() {
     reject: path.join(outputDir, SCOPED_DECISION_APPLY_REJECT_FILE),
     targetProfile: path.join(outputDir, SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE),
     p10Impact: path.join(outputDir, SCOPED_DECISION_APPLY_P10_IMPACT_FILE),
-    safety: path.join(outputDir, SCOPED_DECISION_APPLY_SAFETY_FILE)
+    safety: path.join(outputDir, SCOPED_DECISION_APPLY_SAFETY_FILE),
+    intakeSource: path.join(outputDir, SCOPED_DECISION_APPLY_INTAKE_SOURCE_FILE)
   };
 
   console.log("Business Central P0.9j scoped decision apply dry-run");
   console.log("Mode: DRY_RUN_ONLY");
   console.log(`Source approval workspace: ${displayRepoPath(sourceApprovalWorkspace)}`);
+  console.log(`Source approval intake: ${displayRepoPath(sourceApprovalIntake)}`);
   console.log(`Source validation folder: ${displayRepoPath(sourceValidationFolder)}`);
   console.log(`Output folder: ${displayRepoPath(outputDir)}`);
   console.log("Safety: dry-run/export only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
 
-  const rows = await readScopedDecisionApplyDryRunRows(approvalWorkbookFile);
+  const workspaceRows = await readScopedDecisionApplyDryRunRows(approvalWorkbookFile);
+  const intakeSummary = await readScopedDecisionApprovalIntakeSummary(approvalIntakeSummaryFile);
+  const acceptedReviewerRows = await readScopedDecisionAcceptedReviewerRows(acceptedReviewerFile);
+  const rows = applyAcceptedReviewerDecisionsToWorkspaceRows({
+    workspaceRows,
+    acceptedReviewerRows
+  });
   const dryRun = buildScopedDecisionApplyDryRun({
     rows,
     sourceApprovalWorkspace: displayRepoPath(sourceApprovalWorkspace),
+    sourceApprovalIntake: displayRepoPath(sourceApprovalIntake),
     sourceValidationFolder: displayRepoPath(sourceValidationFolder),
-    outputFolder: displayRepoPath(outputDir)
+    outputFolder: displayRepoPath(outputDir),
+    intakeSummary: intakeSummary ? {
+      totalWorkspaceRows: intakeSummary.totalWorkspaceRows,
+      totalReviewerInputRows: intakeSummary.totalReviewerInputRows,
+      acceptedReviewerRows: intakeSummary.acceptedReviewerRows,
+      blockedReviewerRows: intakeSummary.blockedReviewerRows,
+      invalidReviewerRows: intakeSummary.invalidReviewerRows,
+      missingReviewerRows: intakeSummary.missingReviewerRows
+    } : undefined
   });
 
   await mkdir(outputDir, { recursive: true });
@@ -6731,10 +6805,17 @@ async function runScopedDecisionApplyDryRun() {
   await writeFile(outputFiles.targetProfile, resolutionPackageCsv(scopedDecisionCategoryDryRunCsvHeaders, dryRun.targetProfileApplyDryRunRows), "utf8");
   await writeFile(outputFiles.p10Impact, resolutionPackageCsv(scopedDecisionP10ImpactCsvHeaders, dryRun.p10ImpactEstimateRows), "utf8");
   await writeFile(outputFiles.safety, `${JSON.stringify(dryRun.safetyReport, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.intakeSource, resolutionPackageCsv(scopedDecisionApplyIntakeSourceCsvHeaders, dryRun.intakeSourceSummaryRows), "utf8");
 
   console.log("");
   console.log("Summary");
   console.log(`- dry_run_status=${dryRun.summary.dryRunStatus}`);
+  console.log(`- total_workspace_rows=${dryRun.summary.totalWorkspaceRows}`);
+  console.log(`- total_reviewer_input_rows=${dryRun.summary.totalReviewerInputRows}`);
+  console.log(`- accepted_reviewer_rows=${dryRun.summary.acceptedReviewerRows}`);
+  console.log(`- blocked_reviewer_rows=${dryRun.summary.blockedReviewerRows}`);
+  console.log(`- invalid_reviewer_rows=${dryRun.summary.invalidReviewerRows}`);
+  console.log(`- missing_reviewer_rows=${dryRun.summary.missingReviewerRows}`);
   console.log(`- total_input_rows=${dryRun.summary.totalInputRows}`);
   console.log(`- approved_input_rows=${dryRun.summary.approvedInputRows}`);
   console.log(`- pending_input_rows=${dryRun.summary.pendingInputRows}`);

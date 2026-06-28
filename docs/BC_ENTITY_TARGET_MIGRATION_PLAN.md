@@ -304,7 +304,9 @@ Output folder:
 
 P0.9k writes normalized, accepted, blocked, missing, duplicate, and invalid reviewer decision reports plus readiness, P1.0 gate preview, safety, `summary.json`, and `README.md`. If `reviewer-decisions.csv` is absent, it creates `reviewer-decisions.template.csv` and reports all workspace rows as missing reviewer input.
 
-These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
+P0.9l makes the apply dry-run reviewer-input-aware: `bc:scoped-decision-apply-dry-run` now reads `.tmp/bc-scoped-decision-approval-intake/` when available and merges only accepted reviewer decisions into its dry-run input. Missing, blocked, invalid, duplicate, unknown, pending, rejected, and deferred reviewer decisions remain non-executable. The apply dry-run also writes `intake-source-summary.csv` so the reviewer input source can be audited.
+
+These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 
 ---
 

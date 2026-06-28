@@ -1,8 +1,13 @@
 import {
   scopedDecisionAllowedApprovedActions,
   scopedDecisionForbiddenDirectMutationActions,
+  type ScopedDecisionApprovalWorkbookRow,
   type ScopedDecisionApprovedAction
 } from "./scoped-decision-approval-workspace.js";
+import type {
+  ScopedDecisionApprovalIntakeSummary,
+  ScopedDecisionNormalizedReviewerDecisionRow
+} from "./scoped-decision-approval-intake.js";
 
 export type ScopedDecisionApplyDryRunStatus = "NO_EXECUTABLE_DECISIONS" | "BLOCKED" | "READY_FOR_REVIEW";
 export type ScopedDecisionApplyApprovalStatus = "pending" | "approved" | "rejected" | "deferred";
@@ -95,11 +100,24 @@ export interface ScopedDecisionP10ImpactEstimateRow {
   readonly note: string;
 }
 
+export interface ScopedDecisionApplyDryRunSourceSummaryRow {
+  readonly metric: string;
+  readonly value: number | string;
+  readonly note: string;
+}
+
 export interface ScopedDecisionApplyDryRunSummary {
   readonly generatedAt: string;
   readonly sourceApprovalWorkspace: string;
+  readonly sourceApprovalIntake: string;
   readonly sourceValidationFolder: string;
   readonly outputFolder: string;
+  readonly totalWorkspaceRows: number;
+  readonly totalReviewerInputRows: number;
+  readonly acceptedReviewerRows: number;
+  readonly blockedReviewerRows: number;
+  readonly invalidReviewerRows: number;
+  readonly missingReviewerRows: number;
   readonly totalInputRows: number;
   readonly approvedInputRows: number;
   readonly pendingInputRows: number;
@@ -113,7 +131,7 @@ export interface ScopedDecisionApplyDryRunSummary {
   readonly targetProfileDryRunRows: number;
   readonly sourceDataBacklogRows: number;
   readonly invalidActionRows: number;
-  readonly missingReviewerRows: number;
+  readonly missingReviewerFieldRows: number;
   readonly missingReviewerNotesRows: number;
   readonly p10ImpactEstimate: {
     readonly currentBlockingDecisionRows: number;
@@ -142,8 +160,18 @@ export function buildScopedDecisionApplyDryRun(input: {
   readonly rows: readonly ScopedDecisionApplyDryRunInputRow[];
   readonly generatedAt?: string;
   readonly sourceApprovalWorkspace: string;
+  readonly sourceApprovalIntake?: string;
   readonly sourceValidationFolder: string;
   readonly outputFolder: string;
+  readonly intakeSummary?: Pick<
+    ScopedDecisionApprovalIntakeSummary,
+    "totalWorkspaceRows"
+    | "totalReviewerInputRows"
+    | "acceptedReviewerRows"
+    | "blockedReviewerRows"
+    | "invalidReviewerRows"
+    | "missingReviewerRows"
+  >;
 }): {
   readonly executableDecisionPlanRows: readonly ScopedDecisionExecutablePlanRow[];
   readonly blockedDecisionPlanRows: readonly ScopedDecisionBlockedPlanRow[];
@@ -152,6 +180,7 @@ export function buildScopedDecisionApplyDryRun(input: {
   readonly rejectAttachmentApplyDryRunRows: readonly ScopedDecisionCategoryDryRunRow[];
   readonly targetProfileApplyDryRunRows: readonly ScopedDecisionCategoryDryRunRow[];
   readonly p10ImpactEstimateRows: readonly ScopedDecisionP10ImpactEstimateRow[];
+  readonly intakeSourceSummaryRows: readonly ScopedDecisionApplyDryRunSourceSummaryRow[];
   readonly safetyReport: ScopedDecisionApplyDryRunSummary["safety"] & {
     readonly mode: "DRY_RUN_ONLY";
     readonly executableRows: number;
@@ -192,8 +221,15 @@ export function buildScopedDecisionApplyDryRun(input: {
   const summary: ScopedDecisionApplyDryRunSummary = {
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     sourceApprovalWorkspace: input.sourceApprovalWorkspace,
+    sourceApprovalIntake: input.sourceApprovalIntake ?? "",
     sourceValidationFolder: input.sourceValidationFolder,
     outputFolder: input.outputFolder,
+    totalWorkspaceRows: input.intakeSummary?.totalWorkspaceRows ?? rows.length,
+    totalReviewerInputRows: input.intakeSummary?.totalReviewerInputRows ?? 0,
+    acceptedReviewerRows: input.intakeSummary?.acceptedReviewerRows ?? approvedInputRows,
+    blockedReviewerRows: input.intakeSummary?.blockedReviewerRows ?? 0,
+    invalidReviewerRows: input.intakeSummary?.invalidReviewerRows ?? 0,
+    missingReviewerRows: input.intakeSummary?.missingReviewerRows ?? 0,
     totalInputRows: rows.length,
     approvedInputRows,
     pendingInputRows,
@@ -207,7 +243,7 @@ export function buildScopedDecisionApplyDryRun(input: {
     targetProfileDryRunRows: targetProfileApplyDryRunRows.length,
     sourceDataBacklogRows,
     invalidActionRows: blockedRows.filter((row) => ["APPROVED_ACTION_REQUIRED", "APPROVED_ACTION_NOT_ALLOWED", "INVALID_DIRECT_MUTATION_ACTION"].includes(row.blocker_code)).length,
-    missingReviewerRows: blockedRows.filter((row) => row.blocker_code === "APPROVED_REQUIRES_REVIEWER").length,
+    missingReviewerFieldRows: blockedRows.filter((row) => row.blocker_code === "APPROVED_REQUIRES_REVIEWER").length,
     missingReviewerNotesRows: blockedRows.filter((row) => row.blocker_code === "APPROVED_REQUIRES_REVIEWER_NOTES").length,
     p10ImpactEstimate: {
       currentBlockingDecisionRows,
@@ -233,6 +269,7 @@ export function buildScopedDecisionApplyDryRun(input: {
     rejectAttachmentApplyDryRunRows,
     targetProfileApplyDryRunRows,
     p10ImpactEstimateRows: buildP10ImpactEstimateRows(summary),
+    intakeSourceSummaryRows: buildIntakeSourceSummaryRows(summary),
     safetyReport: {
       ...safety,
       mode: "DRY_RUN_ONLY",
@@ -241,6 +278,52 @@ export function buildScopedDecisionApplyDryRun(input: {
     },
     summary
   };
+}
+
+export function applyAcceptedReviewerDecisionsToWorkspaceRows(input: {
+  readonly workspaceRows: readonly ScopedDecisionApplyDryRunInputRow[];
+  readonly acceptedReviewerRows: readonly ScopedDecisionNormalizedReviewerDecisionRow[];
+}): readonly ScopedDecisionApplyDryRunInputRow[] {
+  if (input.acceptedReviewerRows.length === 0) return input.workspaceRows;
+  const acceptedByDecisionId = new Map(input.acceptedReviewerRows.map((row) => [row.decision_id, row]));
+  return input.workspaceRows.map((workspaceRow) => {
+    const acceptedRow = acceptedByDecisionId.get(workspaceRow.decision_id);
+    if (!acceptedRow) return workspaceRow;
+    return {
+      ...workspaceRow,
+      approval_status: "approved",
+      approved_action: acceptedRow.approved_action,
+      reviewer: acceptedRow.reviewer,
+      reviewer_notes: acceptedRow.reviewer_notes,
+      business_approval_reference: acceptedRow.business_approval_reference,
+      decision_date: acceptedRow.decision_date,
+      safe_to_auto_apply: acceptedRow.safe_to_auto_apply,
+      safe_to_seed_target_profile: acceptedRow.safe_to_seed_target_profile,
+      entity_dependency_status: acceptedRow.entity_dependency_status,
+      target_bucket: acceptedRow.target_bucket || workspaceRow.target_bucket,
+      target_qty: acceptedRow.target_qty,
+      unit: acceptedRow.unit
+    };
+  });
+}
+
+export function applyAcceptedReviewerDecisionsToApprovalWorkbookRows(input: {
+  readonly workspaceRows: readonly ScopedDecisionApprovalWorkbookRow[];
+  readonly acceptedReviewerRows: readonly ScopedDecisionNormalizedReviewerDecisionRow[];
+}): readonly ScopedDecisionApplyDryRunInputRow[] {
+  return applyAcceptedReviewerDecisionsToWorkspaceRows({
+    workspaceRows: input.workspaceRows.map((row) => ({
+      ...row,
+      grouped_rows: row.grouped_rows,
+      approval_status: row.approval_status,
+      approved_action: row.approved_action,
+      reviewer: row.reviewer,
+      reviewer_notes: row.reviewer_notes,
+      business_approval_reference: row.business_approval_reference,
+      decision_date: row.decision_date
+    })),
+    acceptedReviewerRows: input.acceptedReviewerRows
+  });
 }
 
 interface NormalizedRow extends ScopedDecisionApplyDryRunInputRow {
@@ -324,7 +407,7 @@ function autoApplyBlock(row: NormalizedRow): { readonly code: string; readonly r
 }
 
 function targetProfileBlock(row: NormalizedRow): { readonly code: string; readonly reason: string; readonly required: string } | null {
-  if (row.entityDependencyStatusValue && !["approved", "not_required"].includes(row.entityDependencyStatusValue)) {
+  if (!["approved", "not_required"].includes(row.entityDependencyStatusValue)) {
     return { code: "TARGET_PROFILE_ENTITY_DEPENDENCY_PENDING", reason: "Target profile row remains blocked while entity dependency is pending.", required: "Approve entity/canonical dependency or mark it not required before target profile dry-run." };
   }
   if (!row.safeToSeedTargetProfile) return null;
@@ -408,6 +491,17 @@ function buildP10ImpactEstimateRows(summary: ScopedDecisionApplyDryRunSummary): 
   ];
 }
 
+function buildIntakeSourceSummaryRows(summary: ScopedDecisionApplyDryRunSummary): readonly ScopedDecisionApplyDryRunSourceSummaryRow[] {
+  return [
+    { metric: "total_workspace_rows", value: summary.totalWorkspaceRows, note: "Approval workspace rows available to apply dry-run." },
+    { metric: "total_reviewer_input_rows", value: summary.totalReviewerInputRows, note: "Reviewer input rows seen by approval intake." },
+    { metric: "accepted_reviewer_rows", value: summary.acceptedReviewerRows, note: "Intake-accepted reviewer rows merged into dry-run input." },
+    { metric: "blocked_reviewer_rows", value: summary.blockedReviewerRows, note: "Reviewer rows blocked by approval intake and never executable." },
+    { metric: "invalid_reviewer_rows", value: summary.invalidReviewerRows, note: "Reviewer rows marked invalid by approval intake and never executable." },
+    { metric: "missing_reviewer_rows", value: summary.missingReviewerRows, note: "Workspace rows missing reviewer input and not executable." }
+  ];
+}
+
 function approvalBlockCode(approval: ScopedDecisionApplyApprovalStatus): string {
   if (approval === "rejected") return "REJECTED_NOT_EXECUTABLE";
   if (approval === "deferred") return "DEFERRED_NOT_EXECUTABLE";
@@ -440,7 +534,9 @@ function isAllowedApprovedAction(value: string): value is ScopedDecisionApproved
 }
 
 function isForbiddenDirectMutationAction(value: string): boolean {
-  return scopedDecisionForbiddenDirectMutationActions.includes(value as (typeof scopedDecisionForbiddenDirectMutationActions)[number]);
+  return scopedDecisionForbiddenDirectMutationActions.includes(value as (typeof scopedDecisionForbiddenDirectMutationActions)[number])
+    || value === "APPLY_NOW"
+    || value === "ENABLE_P1_NOW";
 }
 
 function planId(prefix: "B" | "X", decisionId: string): string {
