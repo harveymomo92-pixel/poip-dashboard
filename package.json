@@ -35,6 +35,7 @@
     "bc:high-risk-review-plan": "bash scripts/bc-metrics.sh high-risk-review-plan",
     "bc:resolution-package": "bash scripts/bc-metrics.sh resolution-package",
     "bc:unknown-scope-profile": "bash scripts/bc-metrics.sh unknown-scope-profile",
+    "bc:scoped-blocker-package": "bash scripts/bc-metrics.sh scoped-blocker-package",
     "bc:kpi-compare-v1-v2": "bash scripts/bc-metrics.sh kpi-compare-v1-v2",
     "v1:master-profile": "bash scripts/v1-master.sh profile",
     "v1:master-import": "bash scripts/v1-master.sh import",
