@@ -843,6 +843,17 @@ PURCHASE -> PURCHASE_OR_RECEIVING
 
 They are all `OUT_OF_CURRENT_KPI_SCOPE`, remain visible in reports, and no longer block P1.0 after scope. Do not treat `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern candidates as implemented rules yet.
 
+P0.9f/P0.9g scoped review commands:
+
+```bash
+pnpm bc:scoped-blocker-package
+pnpm bc:scoped-decision-review
+```
+
+`bc:scoped-decision-review` reads `.tmp/bc-scoped-blocker-package/true-p10-blockers.csv` and writes `.tmp/bc-scoped-decision-review/`.
+
+Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Every row defaults `safe_to_auto_apply=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from this package. P1.0 remains blocked until pending decisions are reviewed and the dry-run gates are rerun.
+
 ### P1.0 planned comparison command
 
 ```bash

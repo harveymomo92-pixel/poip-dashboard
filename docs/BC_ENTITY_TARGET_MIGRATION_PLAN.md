@@ -220,7 +220,33 @@ These rows remain exported in every report and are excluded only from P1.0 block
 
 ---
 
-## 10. Rollback
+## 10. P0.9f/P0.9g Scoped Blocker and Decision Review
+
+P0.9f narrows material/sparepart scope and packages remaining true P1.0 blockers:
+
+```bash
+pnpm bc:scoped-blocker-package
+```
+
+P0.9g groups those true blockers into reviewed decision families:
+
+```bash
+pnpm bc:scoped-decision-review
+```
+
+Output folder:
+
+```text
+.tmp/bc-scoped-decision-review/
+```
+
+P0.9g writes `decision-board.csv`, family-specific review CSVs, `entity-family-rollup.csv`, `next-action-checklist.csv`, `summary.json`, and `README.md`.
+
+This package is a decision board only. It does not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` defaults to `false` for every decision row. P1.0 remains blocked while true scoped blockers or pending decision rows remain.
+
+---
+
+## 11. Rollback
 
 Preferred rollback:
 

@@ -72,6 +72,14 @@ import {
   type UnknownScopeRuleConfidence
 } from "../packages/domain/src/master-data/unknown-scope-profile.js";
 import {
+  buildScopedDecisionReview,
+  type ScopedDecisionFamilyRollupRow,
+  type ScopedDecisionNextActionRow,
+  type ScopedDecisionReviewInputRow,
+  type ScopedDecisionReviewRow,
+  type ScopedDecisionReviewSummary
+} from "../packages/domain/src/master-data/scoped-decision-review.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -122,6 +130,7 @@ type Command =
   | "kpi-compare-v1-v2"
   | "unknown-scope-profile"
   | "scoped-blocker-package"
+  | "scoped-decision-review"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -823,6 +832,7 @@ const DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH = ".tmp/bc-unknown-scope-profile.cs
 const DEFAULT_UNKNOWN_SCOPE_PROFILE_JSON_PATH = ".tmp/bc-unknown-scope-profile.json";
 const DEFAULT_RESOLUTION_PACKAGE_DIR = ".tmp/bc-resolution-package";
 const DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR = ".tmp/bc-scoped-blocker-package";
+const DEFAULT_SCOPED_DECISION_REVIEW_DIR = ".tmp/bc-scoped-decision-review";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -840,6 +850,15 @@ const SCOPED_BLOCKER_TARGET_PROFILE_FILE = "target-profile-blockers.csv";
 const SCOPED_BLOCKER_ALIAS_TEMPLATE_FILE = "alias-cleanup-decision-template.csv";
 const SCOPED_BLOCKER_CANONICAL_TEMPLATE_FILE = "canonical-entity-decision-template.csv";
 const SCOPED_BLOCKER_TARGET_PROFILE_TEMPLATE_FILE = "target-profile-decision-template.csv";
+const SCOPED_DECISION_REVIEW_SUMMARY_FILE = "summary.json";
+const SCOPED_DECISION_REVIEW_README_FILE = "README.md";
+const SCOPED_DECISION_REVIEW_BOARD_FILE = "decision-board.csv";
+const SCOPED_DECISION_REVIEW_ALIAS_CANONICAL_FILE = "alias-canonical-review.csv";
+const SCOPED_DECISION_REVIEW_UNKNOWN_SOURCE_FILE = "unknown-source-review.csv";
+const SCOPED_DECISION_REVIEW_REJECT_ATTACHMENT_FILE = "reject-attachment-review.csv";
+const SCOPED_DECISION_REVIEW_TARGET_PROFILE_FILE = "target-profile-dependency-review.csv";
+const SCOPED_DECISION_REVIEW_FAMILY_ROLLUP_FILE = "entity-family-rollup.csv";
+const SCOPED_DECISION_REVIEW_NEXT_ACTION_FILE = "next-action-checklist.csv";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -1128,6 +1147,48 @@ const scopedTargetProfileDecisionTemplateCsvHeaders = [
   "approved_by",
   "notes"
 ] as const satisfies readonly (keyof ScopedTargetProfileDecisionTemplateCsvRow)[];
+
+const scopedDecisionReviewCsvHeaders = [
+  "decision_id",
+  "decision_family",
+  "decision_category",
+  "source_values",
+  "blocker_group_ids",
+  "blocker_categories",
+  "review_group_types",
+  "rows",
+  "risk_levels",
+  "reason",
+  "recommended_action",
+  "required_decision",
+  "safe_to_auto_apply",
+  "decision_status",
+  "p10_gate_effect",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof ScopedDecisionReviewRow)[];
+
+const scopedDecisionFamilyRollupCsvHeaders = [
+  "decision_family",
+  "decision_rows",
+  "blocker_groups",
+  "grouped_rows",
+  "categories",
+  "top_source_values",
+  "safe_to_auto_apply",
+  "p10_gate_effect"
+] as const satisfies readonly (keyof ScopedDecisionFamilyRollupRow)[];
+
+const scopedDecisionNextActionCsvHeaders = [
+  "action_id",
+  "decision_family",
+  "decision_category",
+  "priority",
+  "action",
+  "owner",
+  "status",
+  "safe_to_auto_apply"
+] as const satisfies readonly (keyof ScopedDecisionNextActionRow)[];
 
 const manualApprovalQueueCsvHeaders = [
   "priority",
@@ -5548,6 +5609,152 @@ function sampleValues(values: readonly string[]): readonly string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 5);
 }
 
+async function readScopedBlockerRows(filePath: string): Promise<readonly ScopedDecisionReviewInputRow[]> {
+  const rows: ScopedDecisionReviewInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      blocker_group_id: row.blocker_group_id ?? "",
+      blocker_category: row.blocker_category ?? "",
+      review_group_type: row.review_group_type ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      current_entity_codes: row.current_entity_codes ?? "",
+      proposed_entity_code: row.proposed_entity_code ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      rows: row.rows ?? "0",
+      risk_level: row.risk_level ?? "",
+      risk_reason: row.risk_reason ?? "",
+      review_decision: row.review_decision ?? "",
+      recommended_action: row.recommended_action ?? "",
+      p10_blocker_before_scope: row.p10_blocker_before_scope ?? "",
+      blocks_p10_after_scope: row.blocks_p10_after_scope ?? "",
+      bc_current_kpi_scope: row.bc_current_kpi_scope ?? "",
+      bc_future_use_domain: row.bc_future_use_domain ?? "",
+      bc_scope_reason: row.bc_scope_reason ?? "",
+      bc_scope_evidence_fields: row.bc_scope_evidence_fields ?? "",
+      bc_entity_source_status: row.bc_entity_source_status ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? ""
+    });
+  });
+  return rows;
+}
+
+function buildScopedDecisionReviewReadme(summary: ScopedDecisionReviewSummary): string {
+  return `# Business Central P0.9g Scoped Decision Review
+
+Generated at: ${summary.generatedAt}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Files
+
+- \`${SCOPED_DECISION_REVIEW_SUMMARY_FILE}\`: decision review counts, family rollup, next actions, P1.0 gate, and safety flags.
+- \`${SCOPED_DECISION_REVIEW_BOARD_FILE}\`: complete pending decision board grouped by family/category/source.
+- \`${SCOPED_DECISION_REVIEW_ALIAS_CANONICAL_FILE}\`: alias, canonical, and manual entity review decisions.
+- \`${SCOPED_DECISION_REVIEW_UNKNOWN_SOURCE_FILE}\`: blank/unmapped source-data review decisions.
+- \`${SCOPED_DECISION_REVIEW_REJECT_ATTACHMENT_FILE}\`: reject attachment review decisions.
+- \`${SCOPED_DECISION_REVIEW_TARGET_PROFILE_FILE}\`: target profile decisions blocked by entity/canonical review.
+- \`${SCOPED_DECISION_REVIEW_FAMILY_ROLLUP_FILE}\`: family-level blocker rollup.
+- \`${SCOPED_DECISION_REVIEW_NEXT_ACTION_FILE}\`: prioritized review checklist.
+
+## Review Rules
+
+- \`safe_to_auto_apply\` defaults to \`false\` for every row.
+- OMSO conflicts require manual review.
+- VFINE and LONGSUN size/variant conflicts require manual review.
+- POLYPRINT naming/canonical normalization requires manual review.
+- THERMO HENGFENG legacy target-variant collapse requires reviewed canonical decision.
+- Blank/unmapped source rows go to source-data review, not canonical entity creation.
+- Reject rows with RJ evidence go to reject attachment review.
+- Target profile rows stay blocked until entity/canonical decisions are approved.
+- Never create broad/global aliases.
+
+## Recommended Next Actions
+
+${summary.recommendedNextActions.map((action) => `- ${action}`).join("\n")}
+
+## Safety
+
+- Reporting/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` mutation.
+- No alias change.
+- No conditional rule change.
+- No dashboard switch.
+- P1.0 remains blocked while decision rows are pending.
+`;
+}
+
+async function runScopedDecisionReview() {
+  const sourcePackage = resolveRepoPath(process.env.SCOPED_BLOCKER_PACKAGE_DIR?.trim() || DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR);
+  const outputDir = resolveRepoPath(process.env.SCOPED_DECISION_REVIEW_DIR?.trim() || DEFAULT_SCOPED_DECISION_REVIEW_DIR);
+  const sourceFile = path.join(sourcePackage, SCOPED_BLOCKER_TRUE_P10_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, SCOPED_DECISION_REVIEW_SUMMARY_FILE),
+    readme: path.join(outputDir, SCOPED_DECISION_REVIEW_README_FILE),
+    decisionBoard: path.join(outputDir, SCOPED_DECISION_REVIEW_BOARD_FILE),
+    aliasCanonical: path.join(outputDir, SCOPED_DECISION_REVIEW_ALIAS_CANONICAL_FILE),
+    unknownSource: path.join(outputDir, SCOPED_DECISION_REVIEW_UNKNOWN_SOURCE_FILE),
+    rejectAttachment: path.join(outputDir, SCOPED_DECISION_REVIEW_REJECT_ATTACHMENT_FILE),
+    targetProfile: path.join(outputDir, SCOPED_DECISION_REVIEW_TARGET_PROFILE_FILE),
+    familyRollup: path.join(outputDir, SCOPED_DECISION_REVIEW_FAMILY_ROLLUP_FILE),
+    nextAction: path.join(outputDir, SCOPED_DECISION_REVIEW_NEXT_ACTION_FILE)
+  };
+
+  console.log("Business Central P0.9g scoped decision review");
+  console.log("Mode: EXPORT_ONLY");
+  console.log(`Source package: ${displayRepoPath(sourcePackage)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: reporting/export only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  const inputRows = await readScopedBlockerRows(sourceFile);
+  const review = buildScopedDecisionReview({
+    rows: inputRows,
+    sourcePackage: displayRepoPath(sourcePackage),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(review.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildScopedDecisionReviewReadme(review.summary), "utf8");
+  await writeFile(outputFiles.decisionBoard, resolutionPackageCsv(scopedDecisionReviewCsvHeaders, review.decisionRows), "utf8");
+  await writeFile(outputFiles.aliasCanonical, resolutionPackageCsv(scopedDecisionReviewCsvHeaders, review.aliasCanonicalRows), "utf8");
+  await writeFile(outputFiles.unknownSource, resolutionPackageCsv(scopedDecisionReviewCsvHeaders, review.unknownSourceRows), "utf8");
+  await writeFile(outputFiles.rejectAttachment, resolutionPackageCsv(scopedDecisionReviewCsvHeaders, review.rejectAttachmentRows), "utf8");
+  await writeFile(outputFiles.targetProfile, resolutionPackageCsv(scopedDecisionReviewCsvHeaders, review.targetProfileDependencyRows), "utf8");
+  await writeFile(outputFiles.familyRollup, resolutionPackageCsv(scopedDecisionFamilyRollupCsvHeaders, review.familyRollupRows), "utf8");
+  await writeFile(outputFiles.nextAction, resolutionPackageCsv(scopedDecisionNextActionCsvHeaders, review.nextActionRows), "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_decision_families=${review.summary.totalDecisionFamilies}`);
+  console.log(`- true_p10_blocker_groups=${review.summary.trueP10BlockerGroups}`);
+  console.log(`- true_p10_blocker_grouped_rows=${review.summary.trueP10BlockerGroupedRows}`);
+  console.log(`- unknown_source_review_rows=${review.summary.unknownSourceReviewRows}`);
+  console.log(`- alias_canonical_review_rows=${review.summary.aliasCanonicalReviewRows}`);
+  console.log(`- reject_attachment_review_rows=${review.summary.rejectAttachmentReviewRows}`);
+  console.log(`- target_profile_dependency_rows=${review.summary.targetProfileDependencyRows}`);
+  console.log(`- p10_status=${review.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top decision families");
+  for (const family of review.summary.topDecisionFamilies.slice(0, 10)) {
+    console.log(`- ${family.decision_family}; rows=${family.grouped_rows}; groups=${family.blocker_groups}; categories=${family.categories}`);
+  }
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
 function higherRiskLevel(current: BackfillRiskLevel, next: BackfillRiskLevel): BackfillRiskLevel {
   return riskSort(next) > riskSort(current) ? next : current;
 }
@@ -6213,8 +6420,12 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|kpi-compare-v1-v2>");
+  }
+  if (command === "scoped-decision-review") {
+    await runScopedDecisionReview();
+    return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {

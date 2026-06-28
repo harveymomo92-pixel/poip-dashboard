@@ -83,6 +83,16 @@ P0.9e classifies only deterministic high-confidence Business Central entry types
 
 These classifications do not change stored rows or dashboard behavior. `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, and weak sparepart/material text-pattern candidates remain `UNKNOWN_SCOPE_REVIEW` for later review.
 
+P0.9f adds reviewed material/sparepart rules for non-output `SP*` item numbers, non-output `TINTA-*` item numbers, non-output `KONS*` documents, and non-output `PB*` documents. It still does not add broad `SPK*`, broad `SP*` document, `MOCK*`, output-row, or extra reject rules.
+
+P0.9g consumes `.tmp/bc-scoped-blocker-package/true-p10-blockers.csv` and writes `.tmp/bc-scoped-decision-review/`. The decision review contract is export-only:
+
+- `safe_to_auto_apply` is always `false` by default.
+- Blank/unmapped source rows are source-data review, not canonical entity creation.
+- Reject scoped rows are reject attachment review.
+- Target profile rows depend on approved entity/canonical decisions.
+- P1.0 gate remains `BLOCKED` while decision rows remain pending.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.
