@@ -284,7 +284,27 @@ Output folder:
 
 P0.9j writes executable and blocked decision plans, category-specific dry-run CSVs, a P1.0 impact estimate, `summary.json`, `safety-report.json`, and `README.md`. Only `approval_status=approved` rows with reviewer evidence and review-only actions can become executable dry-run rows. Pending, empty, rejected, or deferred rows remain blocked.
 
-These packages are decision review, validation, approval-template preparation, and dry-run planning only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even approved rows are never applied by P0.9j. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, or blocked dry-run rows remain.
+P0.9k intakes optional human reviewer decisions without mutating the approval workspace:
+
+```bash
+pnpm bc:scoped-decision-approval-intake
+```
+
+Input folder:
+
+```text
+.tmp/bc-scoped-decision-manual-approval-input/
+```
+
+Output folder:
+
+```text
+.tmp/bc-scoped-decision-approval-intake/
+```
+
+P0.9k writes normalized, accepted, blocked, missing, duplicate, and invalid reviewer decision reports plus readiness, P1.0 gate preview, safety, `summary.json`, and `README.md`. If `reviewer-decisions.csv` is absent, it creates `reviewer-decisions.template.csv` and reports all workspace rows as missing reviewer input.
+
+These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 
 ---
 

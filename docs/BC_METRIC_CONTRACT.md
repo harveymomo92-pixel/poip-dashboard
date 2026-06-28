@@ -119,6 +119,15 @@ P0.9j consumes `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv
 - Alias, canonical entity, reject attachment, target profile, and source-data backlog rows produce dry-run plan rows only.
 - The command never mutates data and never enables P1.0.
 
+P0.9k consumes `.tmp/bc-scoped-decision-approval-workspace/approval-workbook.csv` and optional `.tmp/bc-scoped-decision-manual-approval-input/reviewer-decisions.csv`, then writes `.tmp/bc-scoped-decision-approval-intake/`. The approval intake contract is intake/export-only:
+
+- Missing reviewer input produces `reviewer-decisions.template.csv`, reports all workspace rows as missing reviewer decisions, and sets readiness to `AWAITING_REVIEWER_INPUT`.
+- Reviewer decisions match workspace rows by `decision_id` or deterministic `stable_decision_key`.
+- Empty `approval_status` is treated as `pending`; only `approved` rows can be accepted.
+- Approved reviewer decisions require `reviewer`, non-empty `reviewer_notes`, and an allowed review-only `approved_action`.
+- Unknown, duplicate, unsupported-status, direct-mutation, blank/unmapped canonical creation, auto-approved OMSO/VFINE/LONGSUN/POLYPRINT/THERMO HENGFENG, reject-to-OK, and dependency-blocked target profile rows are blocked or invalid.
+- Accepted reviewer rows are exported only; the command never writes back to the approval workspace, never mutates apply dry-run outputs, and never enables P1.0.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

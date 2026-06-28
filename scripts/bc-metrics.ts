@@ -104,6 +104,18 @@ import {
   type ScopedDecisionP10ImpactEstimateRow
 } from "../packages/domain/src/master-data/scoped-decision-apply-dry-run.js";
 import {
+  buildScopedDecisionApprovalIntake,
+  type ScopedDecisionApprovalIntakeSummary,
+  type ScopedDecisionApprovalReadinessReport,
+  type ScopedDecisionBlockedReviewerDecisionRow,
+  type ScopedDecisionDuplicateReviewerDecisionRow,
+  type ScopedDecisionInvalidReviewerDecisionRow,
+  type ScopedDecisionMissingReviewerDecisionRow,
+  type ScopedDecisionNormalizedReviewerDecisionRow,
+  type ScopedDecisionReviewerInputRow,
+  type ScopedDecisionReviewerInputTemplateRow
+} from "../packages/domain/src/master-data/scoped-decision-approval-intake.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -158,6 +170,7 @@ type Command =
   | "scoped-decision-validate"
   | "scoped-decision-approval-workspace"
   | "scoped-decision-apply-dry-run"
+  | "scoped-decision-approval-intake"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -863,6 +876,8 @@ const DEFAULT_SCOPED_DECISION_REVIEW_DIR = ".tmp/bc-scoped-decision-review";
 const DEFAULT_SCOPED_DECISION_VALIDATION_DIR = ".tmp/bc-scoped-decision-validation";
 const DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR = ".tmp/bc-scoped-decision-approval-workspace";
 const DEFAULT_SCOPED_DECISION_APPLY_DRY_RUN_DIR = ".tmp/bc-scoped-decision-apply-dry-run";
+const DEFAULT_SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR = ".tmp/bc-scoped-decision-manual-approval-input";
+const DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR = ".tmp/bc-scoped-decision-approval-intake";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -917,6 +932,19 @@ const SCOPED_DECISION_APPLY_REJECT_FILE = "reject-attachment-apply-dry-run.csv";
 const SCOPED_DECISION_APPLY_TARGET_PROFILE_FILE = "target-profile-apply-dry-run.csv";
 const SCOPED_DECISION_APPLY_P10_IMPACT_FILE = "p10-impact-estimate.csv";
 const SCOPED_DECISION_APPLY_SAFETY_FILE = "safety-report.json";
+const SCOPED_DECISION_REVIEWER_DECISIONS_FILE = "reviewer-decisions.csv";
+const SCOPED_DECISION_REVIEWER_DECISIONS_TEMPLATE_FILE = "reviewer-decisions.template.csv";
+const SCOPED_DECISION_INTAKE_SUMMARY_FILE = "summary.json";
+const SCOPED_DECISION_INTAKE_README_FILE = "README.md";
+const SCOPED_DECISION_INTAKE_NORMALIZED_FILE = "normalized-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_ACCEPTED_FILE = "accepted-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_BLOCKED_FILE = "blocked-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_MISSING_FILE = "missing-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_DUPLICATE_FILE = "duplicate-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_INVALID_FILE = "invalid-reviewer-decisions.csv";
+const SCOPED_DECISION_INTAKE_READINESS_FILE = "approval-readiness-report.json";
+const SCOPED_DECISION_INTAKE_P10_GATE_FILE = "p10-gate-preview.json";
+const SCOPED_DECISION_INTAKE_SAFETY_FILE = "safety-report.json";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -1385,6 +1413,100 @@ const scopedDecisionP10ImpactCsvHeaders = [
   "value",
   "note"
 ] as const satisfies readonly (keyof ScopedDecisionP10ImpactEstimateRow)[];
+
+const scopedDecisionReviewerInputTemplateCsvHeaders = [
+  "decision_id",
+  "stable_decision_key",
+  "priority",
+  "decision_family",
+  "decision_category",
+  "source_value",
+  "grouped_rows",
+  "recommended_decision",
+  "rationale",
+  "approval_status",
+  "approved_action",
+  "reviewer",
+  "reviewer_notes",
+  "business_approval_reference",
+  "decision_date",
+  "safe_to_auto_apply",
+  "safe_to_seed_target_profile",
+  "entity_dependency_status",
+  "target_bucket",
+  "target_qty",
+  "unit"
+] as const satisfies readonly (keyof ScopedDecisionReviewerInputTemplateRow)[];
+
+const scopedDecisionNormalizedReviewerDecisionCsvHeaders = [
+  "intake_id",
+  "decision_id",
+  "stable_decision_key",
+  "priority",
+  "decision_family",
+  "decision_category",
+  "source_value",
+  "grouped_rows",
+  "approval_status",
+  "approved_action",
+  "reviewer",
+  "reviewer_notes",
+  "business_approval_reference",
+  "decision_date",
+  "safe_to_auto_apply",
+  "safe_to_seed_target_profile",
+  "entity_dependency_status",
+  "target_bucket",
+  "target_qty",
+  "unit",
+  "intake_status",
+  "intake_reason"
+] as const satisfies readonly (keyof ScopedDecisionNormalizedReviewerDecisionRow)[];
+
+const scopedDecisionBlockedReviewerDecisionCsvHeaders = [
+  "block_id",
+  "decision_id",
+  "stable_decision_key",
+  "decision_family",
+  "decision_category",
+  "source_value",
+  "approval_status",
+  "approved_action",
+  "blocker_code",
+  "blocker_reason",
+  "required_before_acceptance"
+] as const satisfies readonly (keyof ScopedDecisionBlockedReviewerDecisionRow)[];
+
+const scopedDecisionMissingReviewerDecisionCsvHeaders = [
+  "decision_id",
+  "stable_decision_key",
+  "priority",
+  "decision_family",
+  "decision_category",
+  "source_value",
+  "grouped_rows",
+  "approval_status",
+  "required_reviewer_fields"
+] as const satisfies readonly (keyof ScopedDecisionMissingReviewerDecisionRow)[];
+
+const scopedDecisionDuplicateReviewerDecisionCsvHeaders = [
+  "duplicate_id",
+  "decision_id",
+  "stable_decision_key",
+  "duplicate_count",
+  "blocker_code",
+  "blocker_reason"
+] as const satisfies readonly (keyof ScopedDecisionDuplicateReviewerDecisionRow)[];
+
+const scopedDecisionInvalidReviewerDecisionCsvHeaders = [
+  "invalid_id",
+  "decision_id",
+  "stable_decision_key",
+  "approval_status",
+  "approved_action",
+  "invalid_code",
+  "invalid_reason"
+] as const satisfies readonly (keyof ScopedDecisionInvalidReviewerDecisionRow)[];
 
 const manualApprovalQueueCsvHeaders = [
   "priority",
@@ -5938,6 +6060,70 @@ async function readScopedDecisionApplyDryRunRows(filePath: string): Promise<read
   return rows;
 }
 
+async function readScopedDecisionApprovalWorkbookRows(filePath: string): Promise<readonly ScopedDecisionApprovalWorkbookRow[]> {
+  const rows: ScopedDecisionApprovalWorkbookRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      decision_id: row.decision_id ?? "",
+      priority: row.priority === "P2" || row.priority === "P3" ? row.priority : "P1",
+      decision_family: row.decision_family ?? "",
+      decision_category: row.decision_category ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      current_entity_codes: row.current_entity_codes ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      grouped_rows: Number(row.grouped_rows ?? 0) || 0,
+      affected_scopes: row.affected_scopes ?? "",
+      affected_future_use_domains: row.affected_future_use_domains ?? "",
+      recommended_decision: row.recommended_decision ?? "",
+      rationale: row.rationale ?? "",
+      risk_level: row.risk_level ?? "",
+      blocks_p10_after_scope: row.blocks_p10_after_scope === "false" ? "false" : "true",
+      validation_status: row.validation_status === "ERROR" || row.validation_status === "WARNING" ? row.validation_status : "PENDING",
+      validation_warnings: row.validation_warnings ?? "",
+      approval_status: "pending",
+      approved_action: "",
+      safe_to_auto_apply: "false",
+      safe_to_seed_target_profile: "false",
+      reviewer: "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      business_approval_reference: "",
+      decision_date: "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readScopedDecisionReviewerInputRows(filePath: string): Promise<readonly ScopedDecisionReviewerInputRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: ScopedDecisionReviewerInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      decision_id: row.decision_id ?? "",
+      stable_decision_key: row.stable_decision_key ?? "",
+      approval_status: row.approval_status ?? "",
+      approved_action: row.approved_action ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      business_approval_reference: row.business_approval_reference ?? "",
+      decision_date: row.decision_date ?? "",
+      safe_to_auto_apply: row.safe_to_auto_apply ?? "false",
+      safe_to_seed_target_profile: row.safe_to_seed_target_profile ?? "false",
+      entity_dependency_status: row.entity_dependency_status ?? "",
+      target_bucket: row.target_bucket ?? "",
+      target_qty: row.target_qty ?? "",
+      unit: row.unit ?? "",
+      source_value: row.source_value ?? "",
+      decision_family: row.decision_family ?? "",
+      decision_category: row.decision_category ?? ""
+    });
+  });
+  return rows;
+}
+
 async function readScopedDecisionValidationIssues(filePath: string): Promise<readonly ScopedDecisionValidationIssueRow[]> {
   if (!(await fileExists(filePath))) return [];
   const rows: ScopedDecisionValidationIssueRow[] = [];
@@ -6212,6 +6398,73 @@ ${summary.p10Gate.reason}
 - No alias change.
 - No conditional rule change.
 - No dashboard switch.
+- P1.0 remains blocked.
+`;
+}
+
+function buildScopedDecisionApprovalIntakeReadme(summary: ScopedDecisionApprovalIntakeSummary): string {
+  return `# Business Central P0.9k Scoped Decision Approval Intake
+
+Generated at: ${summary.generatedAt}
+
+Readiness status: ${summary.readinessStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Files
+
+- \`${SCOPED_DECISION_INTAKE_SUMMARY_FILE}\`: approval intake counts, gate status, and safety flags.
+- \`${SCOPED_DECISION_INTAKE_NORMALIZED_FILE}\`: normalized reviewer decisions from the optional input file.
+- \`${SCOPED_DECISION_INTAKE_ACCEPTED_FILE}\`: approved reviewer decisions that passed intake validation for future dry-run review.
+- \`${SCOPED_DECISION_INTAKE_BLOCKED_FILE}\`: reviewer decisions blocked by pending/rejected/deferred status or safety rules.
+- \`${SCOPED_DECISION_INTAKE_MISSING_FILE}\`: approval workspace rows without reviewer input.
+- \`${SCOPED_DECISION_INTAKE_DUPLICATE_FILE}\`: duplicate reviewer decisions for the same row.
+- \`${SCOPED_DECISION_INTAKE_INVALID_FILE}\`: invalid reviewer decisions.
+- \`${SCOPED_DECISION_INTAKE_READINESS_FILE}\`: machine-readable readiness report.
+- \`${SCOPED_DECISION_INTAKE_P10_GATE_FILE}\`: P1.0 gate preview.
+- \`${SCOPED_DECISION_INTAKE_SAFETY_FILE}\`: explicit no-mutation safety report.
+- \`${DEFAULT_SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR}/${SCOPED_DECISION_REVIEWER_DECISIONS_TEMPLATE_FILE}\`: editable reviewer input template.
+
+## Current Counts
+
+- Total workspace rows: ${summary.totalWorkspaceRows}
+- Total reviewer input rows: ${summary.totalReviewerInputRows}
+- Matched reviewer rows: ${summary.matchedReviewerRows}
+- Missing reviewer rows: ${summary.missingReviewerRows}
+- Duplicate reviewer rows: ${summary.duplicateReviewerRows}
+- Unknown reviewer rows: ${summary.unknownReviewerRows}
+- Accepted reviewer rows: ${summary.acceptedReviewerRows}
+- Blocked reviewer rows: ${summary.blockedReviewerRows}
+- Invalid reviewer rows: ${summary.invalidReviewerRows}
+- Approved reviewer rows: ${summary.approvedReviewerRows}
+- Rejected reviewer rows: ${summary.rejectedReviewerRows}
+- Deferred reviewer rows: ${summary.deferredReviewerRows}
+- Pending reviewer rows: ${summary.pendingReviewerRows}
+
+## Rules
+
+- If \`${SCOPED_DECISION_REVIEWER_DECISIONS_FILE}\` is missing, all workspace rows are reported as missing reviewer decisions.
+- Empty \`approval_status\` is treated as pending.
+- Only \`approval_status=approved\` can be accepted, and approved rows still require reviewer, reviewer_notes, and a review-only approved_action.
+- Duplicate and unknown reviewer decisions are blocked.
+- Direct mutation actions are invalid.
+- Accepted rows are exported only for future dry-run review; they are not written back into the approval workspace.
+- P1.0 cannot be unblocked by this command.
+
+## Safety
+
+- Intake/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` mutation.
+- No alias change.
+- No conditional rule change.
+- No dashboard switch.
+- Approval workspace and apply dry-run outputs are not mutated.
 - P1.0 remains blocked.
 `;
 }
@@ -6502,6 +6755,93 @@ async function runScopedDecisionApplyDryRun() {
   console.log("");
   console.log("Files written");
   for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
+async function runScopedDecisionApprovalIntake() {
+  const sourceApprovalWorkspace = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_WORKSPACE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR);
+  const sourceValidationFolder = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
+  const reviewerInputFolder = resolveRepoPath(process.env.SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR?.trim() || DEFAULT_SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR);
+  const outputDir = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_INTAKE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR);
+  const approvalWorkbookFile = path.join(sourceApprovalWorkspace, SCOPED_DECISION_APPROVAL_WORKBOOK_FILE);
+  const reviewerInputFile = path.join(reviewerInputFolder, SCOPED_DECISION_REVIEWER_DECISIONS_FILE);
+  const reviewerTemplateFile = path.join(reviewerInputFolder, SCOPED_DECISION_REVIEWER_DECISIONS_TEMPLATE_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, SCOPED_DECISION_INTAKE_SUMMARY_FILE),
+    readme: path.join(outputDir, SCOPED_DECISION_INTAKE_README_FILE),
+    normalized: path.join(outputDir, SCOPED_DECISION_INTAKE_NORMALIZED_FILE),
+    accepted: path.join(outputDir, SCOPED_DECISION_INTAKE_ACCEPTED_FILE),
+    blocked: path.join(outputDir, SCOPED_DECISION_INTAKE_BLOCKED_FILE),
+    missing: path.join(outputDir, SCOPED_DECISION_INTAKE_MISSING_FILE),
+    duplicate: path.join(outputDir, SCOPED_DECISION_INTAKE_DUPLICATE_FILE),
+    invalid: path.join(outputDir, SCOPED_DECISION_INTAKE_INVALID_FILE),
+    readiness: path.join(outputDir, SCOPED_DECISION_INTAKE_READINESS_FILE),
+    p10Gate: path.join(outputDir, SCOPED_DECISION_INTAKE_P10_GATE_FILE),
+    safety: path.join(outputDir, SCOPED_DECISION_INTAKE_SAFETY_FILE)
+  };
+
+  console.log("Business Central P0.9k scoped decision approval intake");
+  console.log("Mode: INTAKE_EXPORT_ONLY");
+  console.log(`Source approval workspace: ${displayRepoPath(sourceApprovalWorkspace)}`);
+  console.log(`Source validation folder: ${displayRepoPath(sourceValidationFolder)}`);
+  console.log(`Reviewer input folder: ${displayRepoPath(reviewerInputFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: intake/export only; database rows, target_profiles, aliases, conditional rules, approval workspace, apply dry-run outputs, and dashboard behavior are not changed.");
+
+  const workspaceRows = await readScopedDecisionApprovalWorkbookRows(approvalWorkbookFile);
+  const reviewerInputExists = await fileExists(reviewerInputFile);
+  const reviewerRows = await readScopedDecisionReviewerInputRows(reviewerInputFile);
+  const intake = buildScopedDecisionApprovalIntake({
+    workspaceRows,
+    reviewerRows,
+    reviewerInputExists,
+    sourceApprovalWorkspace: displayRepoPath(sourceApprovalWorkspace),
+    sourceValidationFolder: displayRepoPath(sourceValidationFolder),
+    reviewerInputFolder: displayRepoPath(reviewerInputFolder),
+    reviewerInputFile: displayRepoPath(reviewerInputFile),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await mkdir(reviewerInputFolder, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(intake.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildScopedDecisionApprovalIntakeReadme(intake.summary), "utf8");
+  await writeFile(outputFiles.normalized, resolutionPackageCsv(scopedDecisionNormalizedReviewerDecisionCsvHeaders, intake.normalizedReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.accepted, resolutionPackageCsv(scopedDecisionNormalizedReviewerDecisionCsvHeaders, intake.acceptedReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.blocked, resolutionPackageCsv(scopedDecisionBlockedReviewerDecisionCsvHeaders, intake.blockedReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.missing, resolutionPackageCsv(scopedDecisionMissingReviewerDecisionCsvHeaders, intake.missingReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.duplicate, resolutionPackageCsv(scopedDecisionDuplicateReviewerDecisionCsvHeaders, intake.duplicateReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.invalid, resolutionPackageCsv(scopedDecisionInvalidReviewerDecisionCsvHeaders, intake.invalidReviewerDecisionRows), "utf8");
+  await writeFile(outputFiles.readiness, `${JSON.stringify(intake.approvalReadinessReport satisfies ScopedDecisionApprovalReadinessReport, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.p10Gate, `${JSON.stringify(intake.p10GatePreview, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.safety, `${JSON.stringify(intake.safetyReport, null, 2)}\n`, "utf8");
+  await writeFile(reviewerTemplateFile, resolutionPackageCsv(scopedDecisionReviewerInputTemplateCsvHeaders, intake.reviewerInputTemplateRows), "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- readiness_status=${intake.summary.readinessStatus}`);
+  console.log(`- total_workspace_rows=${intake.summary.totalWorkspaceRows}`);
+  console.log(`- total_reviewer_input_rows=${intake.summary.totalReviewerInputRows}`);
+  console.log(`- matched_reviewer_rows=${intake.summary.matchedReviewerRows}`);
+  console.log(`- accepted_reviewer_rows=${intake.summary.acceptedReviewerRows}`);
+  console.log(`- blocked_reviewer_rows=${intake.summary.blockedReviewerRows}`);
+  console.log(`- missing_reviewer_rows=${intake.summary.missingReviewerRows}`);
+  console.log(`- duplicate_reviewer_rows=${intake.summary.duplicateReviewerRows}`);
+  console.log(`- invalid_reviewer_rows=${intake.summary.invalidReviewerRows}`);
+  console.log(`- p10_status=${intake.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top blocked reasons");
+  const blockedReasonCounts = topCounts([
+    ...intake.blockedReviewerDecisionRows.map((row) => row.blocker_code),
+    ...intake.invalidReviewerDecisionRows.map((row) => row.invalid_code)
+  ], 10);
+  for (const row of blockedReasonCounts) console.log(`- ${row.value}; rows=${row.rows}`);
+  if (blockedReasonCounts.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  console.log(`- ${displayRepoPath(reviewerTemplateFile)}`);
 }
 
 function higherRiskLevel(current: BackfillRiskLevel, next: BackfillRiskLevel): BackfillRiskLevel {
@@ -7169,8 +7509,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -7186,6 +7526,10 @@ async function main() {
   }
   if (command === "scoped-decision-apply-dry-run") {
     await runScopedDecisionApplyDryRun();
+    return;
+  }
+  if (command === "scoped-decision-approval-intake") {
+    await runScopedDecisionApprovalIntake();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
