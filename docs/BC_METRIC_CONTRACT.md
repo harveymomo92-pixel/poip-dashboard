@@ -126,6 +126,25 @@ The seed draft contract is draft/export-only:
 
 Seed drafts never become executable by themselves. They must be reviewed, edited, and revalidated through `pnpm bc:authoritative-master-intake` before any future migration dry-run can consider them.
 
+## P0.9o Future-Use Raw Registry Contract
+
+`pnpm bc:future-use-raw-registry` registers Business Central raw rows for current P1.0 or future module use.
+
+The registry contract is export/coverage-only:
+
+- every available raw row receives a `bc_future_use_domain`, `registry_status`, `p10_inclusion_status`, and future module candidate,
+- `OUTPUT_KPI_OK_SCOPE` remains the production output dashboard candidate domain,
+- `OUTPUT_KPI_REJECT_SCOPE` remains reject attachment or scrap/waste review,
+- out-of-current-KPI rows are retained for future sales, purchase/receiving, transfer/inventory, consumption/material usage, sparepart/material, scrap/waste, or master-data quality modules,
+- unknown/source-data-gap rows are registered as visible backlogs, not dropped,
+- authoritative master intake/seed data is used only for coverage status,
+- seed draft mappings count as draft coverage, not approved authoritative coverage,
+- legacy current entity and old target-like names remain evidence only.
+
+Target profile requirement is production-output-first: `PRODUCTION_OUTPUT_DASHBOARD` rows require target profile coverage by default, while non-production future-use domains do not become target-profile blockers unless a future module explicitly requires it.
+
+The command never mutates data and never enables P1.0.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Metric Contract
@@ -270,6 +289,8 @@ P0.9l extends `bc:scoped-decision-apply-dry-run` to read `.tmp/bc-scoped-decisio
 P0.9m adds `bc:authoritative-master-intake`. The command creates/validates authoritative master templates, writes normalized master CSVs, validation issue CSVs, source/target coverage previews, unmapped source values, legacy conflict evidence, `summary.json`, `README.md`, and `authoritative-master-templates-manifest.json`. It never applies master data and never enables P1.0.
 
 P0.9n adds `bc:authoritative-master-seed-draft`. The command writes seed draft CSVs, review queue, excluded source values, warnings, legacy crosswalk, `summary.json`, and `README.md`. It may fill empty authoritative master input CSVs, but does not overwrite non-empty human input files unless explicitly forced. It never approves generated rows, applies master data, or enables P1.0.
+
+P0.9o adds `bc:future-use-raw-registry`. The command writes a raw registry, domain rollups, module readiness rollups, P1.0-vs-future split, source coverage, review queues, source-data-gap and unknown-review backlogs, authoritative coverage by domain, target profile requirements, `summary.json`, `README.md`, and `future-use-safety-report.json`. It never treats the registry as KPI output and never enables P1.0.
 
 ## Target Rule
 

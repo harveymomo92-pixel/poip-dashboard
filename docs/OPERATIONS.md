@@ -48,6 +48,7 @@ pnpm bc:scoped-decision-approval-intake
 pnpm bc:scoped-decision-apply-dry-run
 pnpm bc:authoritative-master-intake
 pnpm bc:authoritative-master-seed-draft
+pnpm bc:future-use-raw-registry
 pnpm bc:kpi-compare-v1-v2
 ```
 
@@ -109,6 +110,16 @@ pnpm bc:authoritative-master-seed-draft
 This writes `.tmp/bc-authoritative-master-seed-draft/` and draft authoritative master CSVs. If the working input files are still empty/header-only, the command fills them. If a human has already added rows, it writes `.draft.csv` files instead of overwriting.
 
 Generated rows are not approved. Review canonical entities, exact source mappings, target profiles, review queue, excluded source values, and quality warnings before running intake again.
+
+### 6. Register future-use raw rows
+
+```bash
+pnpm bc:future-use-raw-registry
+```
+
+This writes `.tmp/bc-future-use-raw-registry/`. The registry is not KPI output. It gives every available raw Business Central row a current KPI scope, future-use domain, registry status, P1.0 inclusion status, future module candidate, authoritative entity coverage status, and target profile requirement status.
+
+Use the registry to keep sales, purchase/receiving, transfer/inventory, consumption/material usage, sparepart/material, scrap/waste, master-data-quality, source-data-gap, and unknown-review rows visible for future modules. Target profile coverage is required for production output rows by default; non-production future-use domains do not become target-profile blockers unless a future module explicitly requires it.
 
 ## Operational Meaning of Legacy Data
 
@@ -1007,6 +1018,14 @@ pnpm bc:authoritative-master-seed-draft
 ```
 
 `bc:authoritative-master-seed-draft` reads latest BC report files, writes `.tmp/bc-authoritative-master-seed-draft/`, and creates draft canonical/source-map/target-profile CSVs. It excludes blank/UNMAPPED, reject-code-like, sparepart/material-code-like, broad unsafe, fallback-only, and out-of-current-only source values from auto-seeded master rows. Review queue and legacy crosswalk files explain what needs business review.
+
+P0.9o future-use raw registry:
+
+```bash
+pnpm bc:future-use-raw-registry
+```
+
+`bc:future-use-raw-registry` reads latest BC report files, writes `.tmp/bc-future-use-raw-registry/`, and registers all available raw rows for P1.0 or future-module use. Unknown/source-data-gap rows are explicit backlogs, not dropped rows. Authoritative master and seed-draft outputs are used for coverage only; draft mappings do not become approved coverage.
 
 Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 

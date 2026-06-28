@@ -111,6 +111,16 @@ This command generates draft authoritative master input from Business Central OD
 
 All generated rows remain draft only. Canonical entities use `source_of_truth_status=draft`, target profiles use `approval_status=draft`, reviewer fields remain blank, and P1.0 remains blocked.
 
+P0.9o implements:
+
+```bash
+pnpm bc:future-use-raw-registry
+```
+
+This command registers every available Business Central raw report row into a current KPI scope and future-use domain. The registry is not KPI output: it makes retained sales, inventory movement, material usage, sparepart/material, purchase/receiving, scrap/waste, master-data-quality, source-data-gap, and unknown-review rows visible instead of silently ignored.
+
+Target profiles are required only for `PRODUCTION_OUTPUT_DASHBOARD` rows by default. Non-production future-use domains can carry authoritative entity coverage later without becoming P1.0 target-profile blockers. The command is registry/export/coverage only and never enables P1.0.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Entity & Target Migration Plan
@@ -448,6 +458,14 @@ pnpm bc:authoritative-master-seed-draft
 ```
 
 It reads the latest BC dry-run/report files, writes draft canonical entities, exact source-to-entity mappings, draft target profiles, a review queue, excluded source values, quality warnings, and legacy evidence crosswalks. It does not approve generated rows and does not overwrite non-empty user input files unless the explicit force flag is used.
+
+P0.9o adds the future-use raw registry:
+
+```bash
+pnpm bc:future-use-raw-registry
+```
+
+It reads the latest BC report files and writes `.tmp/bc-future-use-raw-registry/`. Every raw row gets a registry status, P1.0 inclusion status, future module candidate, authoritative entity coverage status, and target profile requirement status. Unknown/source-data-gap rows are exported as queues, not dropped rows.
 
 These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 

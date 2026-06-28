@@ -146,6 +146,18 @@ import {
   type AuthoritativeTargetProfileSeedEvidenceRow
 } from "../packages/domain/src/master-data/authoritative-master-seed-draft.js";
 import {
+  buildFutureUseRawRegistry,
+  type FutureUseDomainCoverageRow,
+  type FutureUseModuleReadinessRollupRow,
+  type FutureUseP10SplitRow,
+  type FutureUseRawEvidenceRow,
+  type FutureUseRawRegistryRow,
+  type FutureUseReviewQueueRow,
+  type FutureUseRollupRow,
+  type FutureUseSourceCoverageRow,
+  type FutureUseTargetProfileRequirementRow
+} from "../packages/domain/src/master-data/future-use-raw-registry.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -203,6 +215,7 @@ type Command =
   | "scoped-decision-approval-intake"
   | "authoritative-master-intake"
   | "authoritative-master-seed-draft"
+  | "future-use-raw-registry"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -913,6 +926,7 @@ const DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR = ".tmp/bc-scoped-decision-app
 const DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR = ".tmp/bc-authoritative-master-input";
 const DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR = ".tmp/bc-authoritative-master-intake";
 const DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR = ".tmp/bc-authoritative-master-seed-draft";
+const DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR = ".tmp/bc-future-use-raw-registry";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -1011,6 +1025,19 @@ const AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE = "seed-review-queue.csv";
 const AUTHORITATIVE_MASTER_SEED_LEGACY_CROSSWALK_FILE = "legacy-evidence-crosswalk.csv";
 const AUTHORITATIVE_MASTER_SEED_EXCLUDED_FILE = "excluded-source-values.csv";
 const AUTHORITATIVE_MASTER_SEED_WARNINGS_FILE = "seed-quality-warnings.csv";
+const FUTURE_USE_RAW_REGISTRY_SUMMARY_FILE = "summary.json";
+const FUTURE_USE_RAW_REGISTRY_README_FILE = "README.md";
+const FUTURE_USE_RAW_REGISTRY_FILE = "future-use-raw-registry.csv";
+const FUTURE_USE_DOMAIN_ROLLUP_FILE = "domain-rollup.csv";
+const FUTURE_USE_MODULE_READINESS_FILE = "module-readiness-rollup.csv";
+const FUTURE_USE_P10_SPLIT_FILE = "p10-vs-future-split.csv";
+const FUTURE_USE_SOURCE_COVERAGE_FILE = "future-use-source-coverage.csv";
+const FUTURE_USE_REVIEW_QUEUE_FILE = "future-use-review-queue.csv";
+const FUTURE_USE_SOURCE_DATA_GAP_FILE = "source-data-gap-backlog.csv";
+const FUTURE_USE_UNKNOWN_REVIEW_FILE = "unknown-review-backlog.csv";
+const FUTURE_USE_ENTITY_COVERAGE_FILE = "authoritative-entity-coverage-by-domain.csv";
+const FUTURE_USE_TARGET_PROFILE_REQUIREMENT_FILE = "target-profile-requirement-by-domain.csv";
+const FUTURE_USE_SAFETY_REPORT_FILE = "future-use-safety-report.json";
 const authoritativeMasterValidationIssueCsvHeaders = [
   "issue_id",
   "severity",
@@ -1101,6 +1128,91 @@ const authoritativeSeedWarningsCsvHeaders = [
   "warning_reason",
   "recommended_action"
 ] as const satisfies readonly (keyof AuthoritativeSeedQualityWarningRow)[];
+const futureUseRawRegistryCsvHeaders = [
+  "registry_key",
+  "registry_granularity",
+  "source_system",
+  "source_file",
+  "posting_date",
+  "document_no",
+  "item_no",
+  "item_description",
+  "entry_type",
+  "item_category_code",
+  "source_field",
+  "source_value",
+  "machine_center_no",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "registry_status",
+  "p10_inclusion_status",
+  "future_module_candidate",
+  "authoritative_entity_status",
+  "authoritative_entity_code",
+  "target_profile_required",
+  "target_profile_status",
+  "review_required",
+  "review_reason",
+  "safety_reason"
+] as const satisfies readonly (keyof FutureUseRawRegistryRow)[];
+const futureUseRollupCsvHeaders = [
+  "rollup_key",
+  "rows",
+  "registered_rows"
+] as const satisfies readonly (keyof FutureUseRollupRow)[];
+const futureUseModuleReadinessCsvHeaders = [
+  "future_module_candidate",
+  "rows",
+  "authoritative_mapped_rows",
+  "draft_entity_candidate_rows",
+  "source_data_gap_rows",
+  "conflict_review_rows",
+  "target_profile_required_rows",
+  "target_profile_missing_rows",
+  "review_required_rows",
+  "readiness_status"
+] as const satisfies readonly (keyof FutureUseModuleReadinessRollupRow)[];
+const futureUseP10SplitCsvHeaders = [
+  "split",
+  "rows"
+] as const satisfies readonly (keyof FutureUseP10SplitRow)[];
+const futureUseSourceCoverageCsvHeaders = [
+  "source_field",
+  "source_value",
+  "bc_future_use_domain",
+  "rows",
+  "authoritative_entity_status",
+  "authoritative_entity_code",
+  "review_required",
+  "review_reason"
+] as const satisfies readonly (keyof FutureUseSourceCoverageRow)[];
+const futureUseReviewQueueCsvHeaders = [
+  "review_id",
+  "review_type",
+  "source_field",
+  "source_value",
+  "bc_future_use_domain",
+  "rows",
+  "review_reason",
+  "recommended_action"
+] as const satisfies readonly (keyof FutureUseReviewQueueRow)[];
+const futureUseDomainCoverageCsvHeaders = [
+  "bc_future_use_domain",
+  "rows",
+  "authoritative_mapped_rows",
+  "draft_entity_candidate_rows",
+  "source_data_gap_rows",
+  "conflict_review_rows",
+  "unknown_rows"
+] as const satisfies readonly (keyof FutureUseDomainCoverageRow)[];
+const futureUseTargetProfileRequirementCsvHeaders = [
+  "bc_future_use_domain",
+  "rows",
+  "target_profile_required_rows",
+  "target_profile_covered_rows",
+  "target_profile_missing_rows",
+  "target_profile_not_required_rows"
+] as const satisfies readonly (keyof FutureUseTargetProfileRequirementRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -6473,6 +6585,53 @@ async function readAuthoritativeTargetProfileSeedEvidenceRows(filePath: string):
   return rows;
 }
 
+async function readFutureUseRawEvidenceRows(filePath: string): Promise<readonly FutureUseRawEvidenceRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: FutureUseRawEvidenceRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      posting_date: row.posting_date ?? "",
+      document_no: row.document_no ?? "",
+      entry_no: row.entry_no ?? "",
+      item_no: row.item_no ?? "",
+      item_description: row.item_description ?? "",
+      item_category_code: row.item_category_code ?? "",
+      entry_type: row.entry_type ?? "",
+      location_code: row.location_code ?? "",
+      g_prod_or_rot_line_description: row.g_prod_or_rot_line_description ?? "",
+      g_prod_or_rot_line_no: row.g_prod_or_rot_line_no ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      v2_source_field_used: row.v2_source_field_used ?? "",
+      v2_source_value_used: row.v2_source_value_used ?? "",
+      current_entity_code: row.current_entity_code ?? "",
+      v2_entity_code: row.v2_entity_code ?? "",
+      v2_suggested_canonical_entity_code: row.v2_suggested_canonical_entity_code ?? "",
+      v2_target_bucket_candidate: row.v2_target_bucket_candidate ?? row.target_bucket ?? "",
+      target_bucket: row.target_bucket ?? "",
+      bc_current_kpi_scope: row.bc_current_kpi_scope ?? "",
+      bc_future_use_domain: row.bc_future_use_domain ?? "",
+      blocks_p10_after_scope: row.blocks_p10_after_scope ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readFutureUseConflictRows(filePath: string): Promise<readonly { readonly source_field: string; readonly source_value: string; readonly proposed_canonical_entity_code: string; readonly review_reason: string }[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: { readonly source_field: string; readonly source_value: string; readonly proposed_canonical_entity_code: string; readonly review_reason: string }[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? row.canonical_entity_code ?? "",
+      review_reason: row.review_reason ?? row.conflict_reason ?? ""
+    });
+  });
+  return rows;
+}
+
 async function csvFileHasDataRows(filePath: string): Promise<boolean> {
   if (!(await fileExists(filePath))) return false;
   let hasData = false;
@@ -7485,6 +7644,150 @@ async function runAuthoritativeMasterSeedDraft() {
   }
 }
 
+function buildFutureUseRawRegistryReadme(summary: { readonly generatedAt: string; readonly registryStatus: string; readonly p10Gate: { readonly status: string; readonly reason: string } }): string {
+  return `# Business Central P0.9o Future Use Raw Registry
+
+Generated at: ${summary.generatedAt}
+
+Registry status: ${summary.registryStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This registry is not KPI output. It keeps every Business Central raw row visible with a current KPI scope, future-use domain, registry status, P1.0 inclusion status, authoritative entity coverage status, and target-profile requirement status.
+
+Future-use raw data is retained and classified instead of silently ignored. P1.0 uses only approved production output rows with approved entity and target-profile coverage. Future modules can later use this registry without polluting the P1.0 production output dashboard.
+
+## Files
+
+- \`${FUTURE_USE_RAW_REGISTRY_SUMMARY_FILE}\`: counts, coverage, P1.0 gate, and safety flags.
+- \`${FUTURE_USE_RAW_REGISTRY_FILE}\`: row-level raw registry when row-level report input is available.
+- \`${FUTURE_USE_DOMAIN_ROLLUP_FILE}\`: rows by future-use domain.
+- \`${FUTURE_USE_MODULE_READINESS_FILE}\`: future module readiness by module candidate.
+- \`${FUTURE_USE_P10_SPLIT_FILE}\`: P1.0 production/reject versus future-use split.
+- \`${FUTURE_USE_SOURCE_COVERAGE_FILE}\`: source-value coverage by authoritative/draft/conflict status.
+- \`${FUTURE_USE_REVIEW_QUEUE_FILE}\`: visible queue for unknown, source-data-gap, conflict, target, and quality reviews.
+- \`${FUTURE_USE_SOURCE_DATA_GAP_FILE}\`: source-data-gap backlog.
+- \`${FUTURE_USE_UNKNOWN_REVIEW_FILE}\`: unknown-review backlog.
+- \`${FUTURE_USE_ENTITY_COVERAGE_FILE}\`: authoritative entity coverage by domain.
+- \`${FUTURE_USE_TARGET_PROFILE_REQUIREMENT_FILE}\`: target-profile requirement by domain.
+- \`${FUTURE_USE_SAFETY_REPORT_FILE}\`: safety flags.
+
+## Safety
+
+- Registry/export/coverage only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No authoritative master approval.
+- No conditional rule changes.
+- No dashboard switch.
+- No P1.0 enablement.
+`;
+}
+
+async function runFutureUseRawRegistry() {
+  const outputDir = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
+  const entitySourceFile = (await fileExists(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH)))
+    ? resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH)
+    : resolveRepoPath(DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_CSV_PATH);
+  const sourceReportsAvailable = await fileExists(entitySourceFile);
+  const outputFiles = {
+    summary: path.join(outputDir, FUTURE_USE_RAW_REGISTRY_SUMMARY_FILE),
+    readme: path.join(outputDir, FUTURE_USE_RAW_REGISTRY_README_FILE),
+    registry: path.join(outputDir, FUTURE_USE_RAW_REGISTRY_FILE),
+    domainRollup: path.join(outputDir, FUTURE_USE_DOMAIN_ROLLUP_FILE),
+    moduleReadiness: path.join(outputDir, FUTURE_USE_MODULE_READINESS_FILE),
+    p10Split: path.join(outputDir, FUTURE_USE_P10_SPLIT_FILE),
+    sourceCoverage: path.join(outputDir, FUTURE_USE_SOURCE_COVERAGE_FILE),
+    reviewQueue: path.join(outputDir, FUTURE_USE_REVIEW_QUEUE_FILE),
+    sourceDataGap: path.join(outputDir, FUTURE_USE_SOURCE_DATA_GAP_FILE),
+    unknownReview: path.join(outputDir, FUTURE_USE_UNKNOWN_REVIEW_FILE),
+    entityCoverage: path.join(outputDir, FUTURE_USE_ENTITY_COVERAGE_FILE),
+    targetProfileRequirement: path.join(outputDir, FUTURE_USE_TARGET_PROFILE_REQUIREMENT_FILE),
+    safety: path.join(outputDir, FUTURE_USE_SAFETY_REPORT_FILE)
+  };
+
+  console.log("Business Central P0.9o future-use raw registry");
+  console.log("Mode: REGISTRY_EXPORT_COVERAGE_ONLY");
+  console.log(`Source report: ${displayRepoPath(entitySourceFile)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: registry/export/coverage only; database rows, production_outputs.entity_id, target_profiles, aliases, authoritative masters, conditional rules, and dashboard behavior are not changed.");
+
+  const rawRows = await readFutureUseRawEvidenceRows(entitySourceFile);
+  const approvedCanonicalEntities = await readAuthoritativeCanonicalEntityRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR), AUTHORITATIVE_MASTER_CANONICAL_NORMALIZED_FILE));
+  const approvedSourceMaps = await readAuthoritativeSourceMapRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR), AUTHORITATIVE_MASTER_SOURCE_MAP_NORMALIZED_FILE));
+  const targetProfileRows = await readAuthoritativeTargetProfileRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR), AUTHORITATIVE_MASTER_TARGET_PROFILES_NORMALIZED_FILE));
+  const seedDraftSourceMaps = await readAuthoritativeSourceMapRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR), AUTHORITATIVE_MASTER_SEED_SOURCE_MAP_FILE));
+  const seedConflictRows = await readFutureUseConflictRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR), AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE));
+  const intakeConflictRows = await readFutureUseConflictRows(path.join(resolveRepoPath(DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR), AUTHORITATIVE_MASTER_LEGACY_CONFLICT_FILE));
+  const registry = buildFutureUseRawRegistry({
+    rawRows,
+    sourceReportsAvailable,
+    sourceFile: displayRepoPath(entitySourceFile),
+    outputFolder: displayRepoPath(outputDir),
+    approvedCanonicalEntities,
+    approvedSourceMaps,
+    seedDraftSourceMaps,
+    conflictEvidenceRows: [...seedConflictRows, ...intakeConflictRows],
+    targetProfileRows
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(registry.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildFutureUseRawRegistryReadme(registry.summary), "utf8");
+  await writeFile(outputFiles.registry, resolutionPackageCsv(futureUseRawRegistryCsvHeaders, registry.registryRows), "utf8");
+  await writeFile(outputFiles.domainRollup, resolutionPackageCsv(futureUseRollupCsvHeaders, registry.domainRollupRows), "utf8");
+  await writeFile(outputFiles.moduleReadiness, resolutionPackageCsv(futureUseModuleReadinessCsvHeaders, registry.moduleReadinessRollupRows), "utf8");
+  await writeFile(outputFiles.p10Split, resolutionPackageCsv(futureUseP10SplitCsvHeaders, registry.p10VsFutureSplitRows), "utf8");
+  await writeFile(outputFiles.sourceCoverage, resolutionPackageCsv(futureUseSourceCoverageCsvHeaders, registry.futureUseSourceCoverageRows), "utf8");
+  await writeFile(outputFiles.reviewQueue, resolutionPackageCsv(futureUseReviewQueueCsvHeaders, registry.futureUseReviewQueueRows), "utf8");
+  await writeFile(outputFiles.sourceDataGap, resolutionPackageCsv(futureUseReviewQueueCsvHeaders, registry.sourceDataGapBacklogRows), "utf8");
+  await writeFile(outputFiles.unknownReview, resolutionPackageCsv(futureUseReviewQueueCsvHeaders, registry.unknownReviewBacklogRows), "utf8");
+  await writeFile(outputFiles.entityCoverage, resolutionPackageCsv(futureUseDomainCoverageCsvHeaders, registry.authoritativeEntityCoverageByDomainRows), "utf8");
+  await writeFile(outputFiles.targetProfileRequirement, resolutionPackageCsv(futureUseTargetProfileRequirementCsvHeaders, registry.targetProfileRequirementByDomainRows), "utf8");
+  await writeFile(outputFiles.safety, `${JSON.stringify(registry.safetyReport, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- registry_status=${registry.summary.registryStatus}`);
+  console.log(`- registry_granularity=${registry.summary.registryGranularity}`);
+  console.log(`- total_registered_rows=${registry.summary.totalRegisteredRows}`);
+  console.log(`- review_queue_rows=${registry.summary.reviewQueueRows}`);
+  console.log(`- source_data_gap_rows=${registry.summary.sourceDataGapRows}`);
+  console.log(`- unknown_review_rows=${registry.summary.unknownReviewRows}`);
+  console.log(`- authoritative_mapped_rows=${registry.summary.authoritativeCoverage.authoritativeMappedRows}`);
+  console.log(`- draft_entity_candidate_rows=${registry.summary.authoritativeCoverage.draftEntityCandidateRows}`);
+  console.log(`- target_profile_required_rows=${registry.summary.targetProfileCoverage.targetProfileRequiredRows}`);
+  console.log(`- target_profile_missing_rows=${registry.summary.targetProfileCoverage.targetProfileMissingRows}`);
+  console.log(`- p10_status=${registry.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Domain rollup");
+  for (const row of registry.domainRollupRows.slice(0, 10)) console.log(`- ${row.rollup_key}; rows=${row.rows}`);
+  if (registry.domainRollupRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("P1.0 vs future split");
+  for (const row of registry.p10VsFutureSplitRows) console.log(`- ${row.split}; rows=${row.rows}`);
+  if (registry.p10VsFutureSplitRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Top review queue");
+  for (const row of registry.futureUseReviewQueueRows.slice(0, 10)) console.log(`- ${row.review_type}; ${row.source_field}:${row.source_value}; rows=${row.rows}; reason=${row.review_reason}`);
+  if (registry.futureUseReviewQueueRows.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
 async function runScopedDecisionApprovalIntake() {
   const sourceApprovalWorkspace = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_WORKSPACE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR);
   const sourceValidationFolder = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
@@ -8237,8 +8540,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -8266,6 +8569,10 @@ async function main() {
   }
   if (command === "authoritative-master-seed-draft") {
     await runAuthoritativeMasterSeedDraft();
+    return;
+  }
+  if (command === "future-use-raw-registry") {
+    await runFutureUseRawRegistry();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
