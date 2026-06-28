@@ -38,6 +38,7 @@
     "bc:scoped-blocker-package": "bash scripts/bc-metrics.sh scoped-blocker-package",
     "bc:scoped-decision-review": "bash scripts/bc-metrics.sh scoped-decision-review",
     "bc:scoped-decision-validate": "bash scripts/bc-metrics.sh scoped-decision-validate",
+    "bc:scoped-decision-approval-workspace": "bash scripts/bc-metrics.sh scoped-decision-approval-workspace",
     "bc:kpi-compare-v1-v2": "bash scripts/bc-metrics.sh kpi-compare-v1-v2",
     "v1:master-profile": "bash scripts/v1-master.sh profile",
     "v1:master-import": "bash scripts/v1-master.sh import",

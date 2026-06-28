@@ -101,6 +101,15 @@ P0.9h consumes `.tmp/bc-scoped-decision-review/decision-board.csv` and writes `.
 - OMSO, VFINE, LONGSUN, POLYPRINT, THERMO HENGFENG, blank/unmapped, reject, and target-profile dependency safeguards remain manual-review gates.
 - Validation status is `INVALID`, `BLOCKED`, `PASS_WITH_WARNINGS`, or `PASS`; this command never enables P1.0.
 
+P0.9i consumes `.tmp/bc-scoped-decision-review/` and `.tmp/bc-scoped-decision-validation/`, then writes `.tmp/bc-scoped-decision-approval-workspace/`. The approval workspace contract is export/template-only:
+
+- `approval_status` defaults to `pending`.
+- `safe_to_auto_apply` defaults to `false`.
+- `safe_to_seed_target_profile` defaults to `false`.
+- `approved_action` starts blank and may only be filled with review-only actions such as `DEFER`, `SOURCE_DATA_BACKLOG`, or `APPROVE_*_REVIEW_ONLY`.
+- Blank/unmapped rows route to source-data approval, reject rows route to reject attachment approval, target profile rows route to dependency-blocked target profile approval, and alias/canonical conflicts route to manual alias/canonical approval.
+- The workspace never creates aliases, updates entities, inserts target profiles, changes conditional rules, switches dashboard behavior, or enables P1.0.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

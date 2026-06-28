@@ -220,7 +220,7 @@ These rows remain exported in every report and are excluded only from P1.0 block
 
 ---
 
-## 10. P0.9f/P0.9g/P0.9h Scoped Blocker, Decision, and Validation Review
+## 10. P0.9f/P0.9g/P0.9h/P0.9i Scoped Blocker, Decision, Validation, and Approval Workspace
 
 P0.9f narrows material/sparepart scope and packages remaining true P1.0 blockers:
 
@@ -256,7 +256,21 @@ Output folder:
 
 P0.9h writes `validation-errors.csv`, `validation-warnings.csv`, `approved-decision-summary.csv`, `pending-decision-summary.csv`, `blocked-execution-plan.csv`, `summary.json`, and `README.md`.
 
-These packages are decision review and validation only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`. P1.0 remains blocked while scoped blockers, pending blocking decisions, or invalid reviewed decisions remain.
+P0.9i prepares editable reviewer approval workbooks from the decision review and validation outputs:
+
+```bash
+pnpm bc:scoped-decision-approval-workspace
+```
+
+Output folder:
+
+```text
+.tmp/bc-scoped-decision-approval-workspace/
+```
+
+P0.9i writes the full approval workbook, P1/P2 slices, source-data, alias/canonical, reject attachment, and target-profile templates, a reviewer checklist, an import manifest, `summary.json`, and `README.md`. It keeps `approval_status=pending`, `safe_to_auto_apply=false`, and `safe_to_seed_target_profile=false`; no decision is approved automatically.
+
+These packages are decision review, validation, and approval-template preparation only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, or unapproved workspace rows remain.
 
 ---
 
