@@ -119,6 +119,7 @@ type Command =
   | "high-risk-review-plan"
   | "kpi-compare-v1-v2"
   | "unknown-scope-profile"
+  | "scoped-blocker-package"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -759,6 +760,51 @@ interface UnknownScopeProfileCsvRow {
   readonly needs_manual_review: "true" | "false";
 }
 
+interface ScopedBlockerPackageCsvRow {
+  readonly blocker_group_id: string;
+  readonly blocker_category: string;
+  readonly review_group_type: string;
+  readonly source_field: string;
+  readonly source_value: string;
+  readonly canonical_entity_code: string;
+  readonly current_entity_codes: string;
+  readonly proposed_entity_code: string;
+  readonly target_bucket: string;
+  readonly machine_center_no: string;
+  readonly rows: number;
+  readonly risk_level: BackfillRiskLevel;
+  readonly risk_reason: string;
+  readonly review_decision: HighRiskReviewDecision;
+  readonly recommended_action: string;
+  readonly p10_blocker_before_scope: "true" | "false";
+  readonly blocks_p10_after_scope: "true" | "false";
+  readonly bc_current_kpi_scope: BusinessCentralCurrentKpiScope;
+  readonly bc_future_use_domain: BusinessCentralFutureUseDomain;
+  readonly bc_scope_reason: string;
+  readonly bc_scope_evidence_fields: string;
+  readonly bc_entity_source_status: BusinessCentralEntitySourceStatus;
+  readonly sample_documents: string;
+  readonly sample_items: string;
+}
+
+interface ScopedAliasCleanupDecisionTemplateCsvRow extends AliasCleanupReviewPlanCsvRow {
+  readonly decision: "";
+  readonly approved_by: "";
+  readonly notes: "";
+}
+
+interface ScopedCanonicalEntityDecisionTemplateCsvRow extends CanonicalEntityCreationPlanCsvRow {
+  readonly decision: "";
+  readonly approved_by: "";
+  readonly notes: "";
+}
+
+interface ScopedTargetProfileDecisionTemplateCsvRow extends TargetProfileSeedDraftPlanCsvRow {
+  readonly decision: "";
+  readonly approved_by: "";
+  readonly notes: "";
+}
+
 const DEFAULT_ENTITY_V2_CSV_PATH = ".tmp/bc-entity-v2-dry-run.csv";
 const DEFAULT_ENTITY_V2_JSON_PATH = ".tmp/bc-entity-v2-dry-run.json";
 const DEFAULT_TARGET_PROFILE_DRY_RUN_CSV_PATH = ".tmp/bc-target-profile-dry-run.csv";
@@ -774,6 +820,7 @@ const DEFAULT_KPI_COMPARE_V1_V2_JSON_PATH = ".tmp/bc-kpi-compare-v1-v2.json";
 const DEFAULT_UNKNOWN_SCOPE_PROFILE_CSV_PATH = ".tmp/bc-unknown-scope-profile.csv";
 const DEFAULT_UNKNOWN_SCOPE_PROFILE_JSON_PATH = ".tmp/bc-unknown-scope-profile.json";
 const DEFAULT_RESOLUTION_PACKAGE_DIR = ".tmp/bc-resolution-package";
+const DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR = ".tmp/bc-scoped-blocker-package";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -781,6 +828,16 @@ const RESOLUTION_PACKAGE_TARGET_PROFILE_FILE = "target-profile-seed-draft-plan.c
 const RESOLUTION_PACKAGE_MANUAL_QUEUE_FILE = "manual-approval-queue.csv";
 const RESOLUTION_PACKAGE_BLOCKED_CHECKLIST_FILE = "blocked-groups-checklist.csv";
 const RESOLUTION_PACKAGE_README_FILE = "README.md";
+const SCOPED_BLOCKER_PACKAGE_SUMMARY_FILE = "summary.json";
+const SCOPED_BLOCKER_PACKAGE_README_FILE = "README.md";
+const SCOPED_BLOCKER_TRUE_P10_FILE = "true-p10-blockers.csv";
+const SCOPED_BLOCKER_UNKNOWN_SCOPE_FILE = "unknown-scope-blockers.csv";
+const SCOPED_BLOCKER_OK_OUTPUT_ENTITY_FILE = "ok-output-entity-blockers.csv";
+const SCOPED_BLOCKER_REJECT_SCOPE_FILE = "reject-scope-blockers.csv";
+const SCOPED_BLOCKER_TARGET_PROFILE_FILE = "target-profile-blockers.csv";
+const SCOPED_BLOCKER_ALIAS_TEMPLATE_FILE = "alias-cleanup-decision-template.csv";
+const SCOPED_BLOCKER_CANONICAL_TEMPLATE_FILE = "canonical-entity-decision-template.csv";
+const SCOPED_BLOCKER_TARGET_PROFILE_TEMPLATE_FILE = "target-profile-decision-template.csv";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -971,6 +1028,33 @@ const unknownScopeProfileCsvHeaders = [
   "needs_manual_review"
 ] as const satisfies readonly (keyof UnknownScopeProfileCsvRow)[];
 
+const scopedBlockerPackageCsvHeaders = [
+  "blocker_group_id",
+  "blocker_category",
+  "review_group_type",
+  "source_field",
+  "source_value",
+  "canonical_entity_code",
+  "current_entity_codes",
+  "proposed_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "rows",
+  "risk_level",
+  "risk_reason",
+  "review_decision",
+  "recommended_action",
+  "p10_blocker_before_scope",
+  "blocks_p10_after_scope",
+  "bc_current_kpi_scope",
+  "bc_future_use_domain",
+  "bc_scope_reason",
+  "bc_scope_evidence_fields",
+  "bc_entity_source_status",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof ScopedBlockerPackageCsvRow)[];
+
 const canonicalEntityCreationPlanCsvHeaders = [
   "canonical_entity_code",
   "canonical_entity_display_name",
@@ -1021,6 +1105,27 @@ const targetProfileSeedDraftPlanCsvHeaders = [
   "sample_documents",
   "sample_items"
 ] as const satisfies readonly (keyof TargetProfileSeedDraftPlanCsvRow)[];
+
+const scopedAliasCleanupDecisionTemplateCsvHeaders = [
+  ...aliasCleanupReviewPlanCsvHeaders,
+  "decision",
+  "approved_by",
+  "notes"
+] as const satisfies readonly (keyof ScopedAliasCleanupDecisionTemplateCsvRow)[];
+
+const scopedCanonicalEntityDecisionTemplateCsvHeaders = [
+  ...canonicalEntityCreationPlanCsvHeaders,
+  "decision",
+  "approved_by",
+  "notes"
+] as const satisfies readonly (keyof ScopedCanonicalEntityDecisionTemplateCsvRow)[];
+
+const scopedTargetProfileDecisionTemplateCsvHeaders = [
+  ...targetProfileSeedDraftPlanCsvHeaders,
+  "decision",
+  "approved_by",
+  "notes"
+] as const satisfies readonly (keyof ScopedTargetProfileDecisionTemplateCsvRow)[];
 
 const manualApprovalQueueCsvHeaders = [
   "priority",
@@ -4861,6 +4966,288 @@ ${summary.p10Readiness.requiredBeforeP10.map((item) => `- ${item}`).join("\n")}
 `;
 }
 
+function dedupeHighRiskReviewGroups(
+  groups: readonly HighRiskReviewPlanGroup[]
+): readonly HighRiskReviewPlanGroup[] {
+  const deduped = new Map<string, HighRiskReviewPlanGroup>();
+  for (const group of groups) {
+    const key = [
+      group.reviewGroupType,
+      group.sourceField,
+      normalizeAliasKey(group.sourceValue),
+      group.canonicalEntityCode,
+      group.proposedEntityCode,
+      group.targetBucket,
+      normalizeAliasKey(group.machineCenterNo),
+      group.riskLevel,
+      group.reviewDecision,
+      group.bcCurrentKpiScope,
+      group.bcFutureUseDomain,
+      group.blocksP10AfterScope ? "block" : "nonblock"
+    ].join(":");
+    if (!deduped.has(key)) deduped.set(key, group);
+  }
+  return [...deduped.values()].sort(reviewGroupSort);
+}
+
+function scopedBlockerCategory(group: HighRiskReviewPlanGroup): string {
+  if (group.bcCurrentKpiScope === "UNKNOWN_SCOPE_REVIEW") return "UNKNOWN_SCOPE_BLOCKER";
+  if (group.reviewGroupType.startsWith("TARGET_PROFILE")) return "TARGET_PROFILE_BLOCKER";
+  if (group.bcCurrentKpiScope === "OUTPUT_KPI_REJECT_SCOPE") return "REJECT_SCOPE_BLOCKER";
+  if (group.reviewGroupType.startsWith("ENTITY") && group.bcCurrentKpiScope === "OUTPUT_KPI_OK_SCOPE") return "OK_OUTPUT_ENTITY_BLOCKER";
+  return "TRUE_P10_BLOCKER";
+}
+
+function scopedBlockerRows(groups: readonly HighRiskReviewPlanGroup[]): readonly ScopedBlockerPackageCsvRow[] {
+  return groups.map((group, index) => ({
+    blocker_group_id: `SB${String(index + 1).padStart(5, "0")}`,
+    blocker_category: scopedBlockerCategory(group),
+    review_group_type: group.reviewGroupType,
+    source_field: group.sourceField,
+    source_value: group.sourceValue,
+    canonical_entity_code: group.canonicalEntityCode,
+    current_entity_codes: group.currentEntityCodes.join("|"),
+    proposed_entity_code: group.proposedEntityCode,
+    target_bucket: group.targetBucket,
+    machine_center_no: group.machineCenterNo,
+    rows: group.rows,
+    risk_level: group.riskLevel,
+    risk_reason: group.riskReason,
+    review_decision: group.reviewDecision,
+    recommended_action: group.recommendedAction,
+    p10_blocker_before_scope: group.p10Blocker ? "true" : "false",
+    blocks_p10_after_scope: group.blocksP10AfterScope ? "true" : "false",
+    bc_current_kpi_scope: group.bcCurrentKpiScope,
+    bc_future_use_domain: group.bcFutureUseDomain,
+    bc_scope_reason: group.bcScopeReason,
+    bc_scope_evidence_fields: group.bcScopeEvidenceFields.join("|"),
+    bc_entity_source_status: group.bcEntitySourceStatus,
+    sample_documents: group.sampleDocuments.join("|"),
+    sample_items: group.sampleItems.join("|")
+  }));
+}
+
+function scopedBlockerCsv(rows: readonly ScopedBlockerPackageCsvRow[]): string {
+  return resolutionPackageCsv(scopedBlockerPackageCsvHeaders, rows);
+}
+
+function scopedDecisionTemplateRows<T extends Record<string, unknown>>(rows: readonly T[]): readonly (T & {
+  readonly decision: "";
+  readonly approved_by: "";
+  readonly notes: "";
+})[] {
+  return rows.map((row) => ({
+    ...row,
+    decision: "",
+    approved_by: "",
+    notes: ""
+  }));
+}
+
+function summarizeEntityRowsForScopedPackage(rows: readonly EntityV2BackfillDryRunReportRow[]) {
+  return {
+    totalRows: rows.length,
+    outputKpiOkScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUTPUT_KPI_OK_SCOPE").length,
+    outputKpiRejectScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUTPUT_KPI_REJECT_SCOPE").length,
+    outOfCurrentKpiScopeRows: rows.filter((row) => row.bc_current_kpi_scope === "OUT_OF_CURRENT_KPI_SCOPE").length,
+    unknownScopeReviewRows: rows.filter((row) => row.bc_current_kpi_scope === "UNKNOWN_SCOPE_REVIEW").length,
+    futureUseDomainCounts: topCounts(rows.map((row) => row.bc_future_use_domain), 20),
+    p10BlockingRowsBeforeScope: rows.filter((row) => row.risk_level === "HIGH").length,
+    p10BlockingRowsAfterScope: rows.filter((row) => row.risk_level === "HIGH" && row.blocks_p10_after_scope === "true").length,
+    excludedFromP10ButRetainedRows: rows.filter((row) => row.risk_level === "HIGH" && row.blocks_p10_after_scope === "false").length
+  };
+}
+
+function groupedRows(groups: readonly HighRiskReviewPlanGroup[]): number {
+  return groups.reduce((sum, group) => sum + group.rows, 0);
+}
+
+function buildScopedBlockerPackageReadme(summary: {
+  readonly generatedAt: string;
+  readonly p10Readiness: { readonly status: string; readonly reason: string };
+  readonly counts: {
+    readonly trueP10BlockerGroups: number;
+    readonly unknownScopeBlockerGroups: number;
+    readonly okOutputEntityBlockerGroups: number;
+    readonly rejectScopeBlockerGroups: number;
+    readonly targetProfileBlockerGroups: number;
+  };
+}): string {
+  return `# Business Central P0.9f Scoped Blocker Package
+
+Generated at: ${summary.generatedAt}
+
+P1.0 status: ${summary.p10Readiness.status}
+
+Reason:
+
+${summary.p10Readiness.reason}
+
+## Files
+
+- \`${SCOPED_BLOCKER_PACKAGE_SUMMARY_FILE}\`: row-level source scope counts, deduped blocker group counts, P1.0 readiness, and safety flags.
+- \`${SCOPED_BLOCKER_TRUE_P10_FILE}\`: deduped blocker groups that still block P1.0 after scope filtering.
+- \`${SCOPED_BLOCKER_UNKNOWN_SCOPE_FILE}\`: remaining unknown-scope blocker groups.
+- \`${SCOPED_BLOCKER_OK_OUTPUT_ENTITY_FILE}\`: current OK output entity blocker groups.
+- \`${SCOPED_BLOCKER_REJECT_SCOPE_FILE}\`: reject-scope blocker groups retained for reject review.
+- \`${SCOPED_BLOCKER_TARGET_PROFILE_FILE}\`: target profile blocker groups.
+- \`${SCOPED_BLOCKER_ALIAS_TEMPLATE_FILE}\`: alias cleanup decision template.
+- \`${SCOPED_BLOCKER_CANONICAL_TEMPLATE_FILE}\`: canonical entity decision template.
+- \`${SCOPED_BLOCKER_TARGET_PROFILE_TEMPLATE_FILE}\`: target profile decision template.
+
+## Counting Rules
+
+- Source row counts are computed once from the entity backfill dry-run rows.
+- Blocker CSV files are grouped review queues and can overlap by source evidence.
+- Summary group counts are deduped by review group identity.
+- \`excludedFromP10ButRetainedRows\` is a source row count, not a sum of CSV files.
+
+## Current Blocker Groups
+
+- True P1.0 blocker groups: ${summary.counts.trueP10BlockerGroups}
+- Unknown scope blocker groups: ${summary.counts.unknownScopeBlockerGroups}
+- OK output entity blocker groups: ${summary.counts.okOutputEntityBlockerGroups}
+- Reject scope blocker groups: ${summary.counts.rejectScopeBlockerGroups}
+- Target profile blocker groups: ${summary.counts.targetProfileBlockerGroups}
+
+## Safety
+
+- Reporting/classification only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` mutation.
+- No alias change.
+- No conditional rule change.
+- No dashboard switch.
+`;
+}
+
+async function runScopedBlockerPackage(pool: DatabasePool) {
+  const outputDir = resolveRepoPath(process.env.SCOPED_BLOCKER_PACKAGE_DIR?.trim() || DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR);
+  const outputFiles = {
+    summary: path.join(outputDir, SCOPED_BLOCKER_PACKAGE_SUMMARY_FILE),
+    readme: path.join(outputDir, SCOPED_BLOCKER_PACKAGE_README_FILE),
+    trueP10: path.join(outputDir, SCOPED_BLOCKER_TRUE_P10_FILE),
+    unknownScope: path.join(outputDir, SCOPED_BLOCKER_UNKNOWN_SCOPE_FILE),
+    okOutputEntity: path.join(outputDir, SCOPED_BLOCKER_OK_OUTPUT_ENTITY_FILE),
+    rejectScope: path.join(outputDir, SCOPED_BLOCKER_REJECT_SCOPE_FILE),
+    targetProfile: path.join(outputDir, SCOPED_BLOCKER_TARGET_PROFILE_FILE),
+    aliasTemplate: path.join(outputDir, SCOPED_BLOCKER_ALIAS_TEMPLATE_FILE),
+    canonicalTemplate: path.join(outputDir, SCOPED_BLOCKER_CANONICAL_TEMPLATE_FILE),
+    targetProfileTemplate: path.join(outputDir, SCOPED_BLOCKER_TARGET_PROFILE_TEMPLATE_FILE)
+  };
+
+  console.log("Business Central P0.9f scoped blocker package");
+  console.log("Mode: DRY_RUN");
+  console.log(`Source system: ${SOURCE_SYSTEM}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: export-only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  const { summary: highRiskSummary, groups, entityRows, targetProfileRows } = await buildHighRiskReviewPlan(pool);
+  const dedupedGroups = dedupeHighRiskReviewGroups(groups);
+  const trueP10Groups = dedupedGroups.filter((group) => group.blocksP10AfterScope);
+  const trueP10Rows = scopedBlockerRows(trueP10Groups);
+  const unknownScopeRows = trueP10Rows.filter((row) => row.bc_current_kpi_scope === "UNKNOWN_SCOPE_REVIEW");
+  const okOutputEntityRows = trueP10Rows.filter((row) => row.blocker_category === "OK_OUTPUT_ENTITY_BLOCKER");
+  const rejectScopeRows = trueP10Rows.filter((row) => row.bc_current_kpi_scope === "OUTPUT_KPI_REJECT_SCOPE");
+  const targetProfileRowsForCsv = trueP10Rows.filter((row) => row.review_group_type.startsWith("TARGET_PROFILE"));
+  const canonicalRows = buildCanonicalEntityCreationPlanRows(entityRows);
+  const aliasRows = buildAliasCleanupReviewPlanRows(entityRows);
+  const targetProfileSeedRows = buildTargetProfileSeedDraftPlanRows(targetProfileRows);
+  const rowScopeSummary = summarizeEntityRowsForScopedPackage(entityRows);
+  const summary = {
+    generatedAt: new Date().toISOString(),
+    sourceReports: {
+      entityBackfillDryRun: DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_JSON_PATH,
+      targetProfileBackfillDryRun: DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_JSON_PATH,
+      highRiskReviewPlan: DEFAULT_HIGH_RISK_REVIEW_PLAN_JSON_PATH
+    },
+    outputFiles: Object.fromEntries(Object.entries(outputFiles).map(([key, value]) => [key, displayRepoPath(value)])),
+    rowCounts: rowScopeSummary,
+    groupCounts: {
+      dedupedReviewGroups: dedupedGroups.length,
+      p10BlockerGroupsBeforeScope: dedupedGroups.filter((group) => group.p10Blocker).length,
+      trueP10BlockerGroups: trueP10Groups.length,
+      trueP10BlockerGroupedRows: groupedRows(trueP10Groups),
+      unknownScopeBlockerGroups: unknownScopeRows.length,
+      unknownScopeBlockerGroupedRows: unknownScopeRows.reduce((sum, row) => sum + row.rows, 0),
+      okOutputEntityBlockerGroups: okOutputEntityRows.length,
+      okOutputEntityBlockerGroupedRows: okOutputEntityRows.reduce((sum, row) => sum + row.rows, 0),
+      rejectScopeBlockerGroups: rejectScopeRows.length,
+      rejectScopeBlockerGroupedRows: rejectScopeRows.reduce((sum, row) => sum + row.rows, 0),
+      targetProfileBlockerGroups: targetProfileRowsForCsv.length,
+      targetProfileBlockerGroupedRows: targetProfileRowsForCsv.reduce((sum, row) => sum + row.rows, 0),
+      excludedFromP10ButRetainedGroups: dedupedGroups.filter((group) => group.p10Blocker && !group.blocksP10AfterScope).length,
+      excludedFromP10ButRetainedGroupedRows: groupedRows(dedupedGroups.filter((group) => group.p10Blocker && !group.blocksP10AfterScope))
+    },
+    decisionTemplateCounts: {
+      aliasCleanupRows: aliasRows.length,
+      canonicalEntityRows: canonicalRows.length,
+      targetProfileRows: targetProfileSeedRows.length
+    },
+    p10Readiness: {
+      status: highRiskSummary.p10Gate.status,
+      reason: highRiskSummary.p10Gate.reason,
+      blockers: highRiskSummary.p10Gate.blockers
+    },
+    topRemainingTrueBlockers: trueP10Rows.slice(0, 10).map((row) => ({
+      blockerGroupId: row.blocker_group_id,
+      category: row.blocker_category,
+      reviewGroupType: row.review_group_type,
+      sourceValue: row.source_value,
+      rows: row.rows,
+      riskLevel: row.risk_level,
+      currentKpiScope: row.bc_current_kpi_scope,
+      futureUseDomain: row.bc_future_use_domain,
+      recommendedAction: row.recommended_action
+    })),
+    safety: {
+      databaseUpdated: false,
+      productionOutputsUpdated: false,
+      targetProfilesUpdated: false,
+      dashboardChanged: false,
+      aliasesChanged: false,
+      conditionalRulesChanged: false
+    }
+  };
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildScopedBlockerPackageReadme({
+    generatedAt: summary.generatedAt,
+    p10Readiness: summary.p10Readiness,
+    counts: summary.groupCounts
+  }), "utf8");
+  await writeFile(outputFiles.trueP10, scopedBlockerCsv(trueP10Rows), "utf8");
+  await writeFile(outputFiles.unknownScope, scopedBlockerCsv(unknownScopeRows), "utf8");
+  await writeFile(outputFiles.okOutputEntity, scopedBlockerCsv(okOutputEntityRows), "utf8");
+  await writeFile(outputFiles.rejectScope, scopedBlockerCsv(rejectScopeRows), "utf8");
+  await writeFile(outputFiles.targetProfile, scopedBlockerCsv(targetProfileRowsForCsv), "utf8");
+  await writeFile(outputFiles.aliasTemplate, resolutionPackageCsv(scopedAliasCleanupDecisionTemplateCsvHeaders, scopedDecisionTemplateRows(aliasRows)), "utf8");
+  await writeFile(outputFiles.canonicalTemplate, resolutionPackageCsv(scopedCanonicalEntityDecisionTemplateCsvHeaders, scopedDecisionTemplateRows(canonicalRows)), "utf8");
+  await writeFile(outputFiles.targetProfileTemplate, resolutionPackageCsv(scopedTargetProfileDecisionTemplateCsvHeaders, scopedDecisionTemplateRows(targetProfileSeedRows)), "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- total_source_rows=${summary.rowCounts.totalRows}`);
+  console.log(`- unknown_scope_review_rows=${summary.rowCounts.unknownScopeReviewRows}`);
+  console.log(`- p10_blocking_rows_before_scope=${summary.rowCounts.p10BlockingRowsBeforeScope}`);
+  console.log(`- p10_blocking_rows_after_scope=${summary.rowCounts.p10BlockingRowsAfterScope}`);
+  console.log(`- excluded_from_p10_but_retained_rows=${summary.rowCounts.excludedFromP10ButRetainedRows}`);
+  console.log(`- true_p10_blocker_groups=${summary.groupCounts.trueP10BlockerGroups}`);
+  console.log(`- p10_status=${summary.p10Readiness.status}`);
+
+  console.log("");
+  console.log("Top remaining true blockers");
+  for (const blocker of summary.topRemainingTrueBlockers) {
+    console.log(`- ${blocker.blockerGroupId}; ${blocker.category}; source=${blocker.sourceValue}; rows=${blocker.rows}; scope=${blocker.currentKpiScope}; action=${blocker.recommendedAction}`);
+  }
+
+  console.log("");
+  console.log("Package files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
 function higherRiskLevel(current: BackfillRiskLevel, next: BackfillRiskLevel): BackfillRiskLevel {
   return riskSort(next) > riskSort(current) ? next : current;
 }
@@ -5526,8 +5913,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|kpi-compare-v1-v2>");
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });
   try {
@@ -5545,6 +5932,7 @@ async function main() {
     else if (command === "high-risk-review-plan") await runHighRiskReviewPlan(database.pool);
     else if (command === "resolution-package") await runResolutionPackage(database.pool);
     else if (command === "unknown-scope-profile") await runUnknownScopeProfile(database.pool);
+    else if (command === "scoped-blocker-package") await runScopedBlockerPackage(database.pool);
     else if (command === "kpi-compare-v1-v2") await runKpiCompareV1V2(database.pool);
     else await runMappingApply(database.pool);
   } finally {

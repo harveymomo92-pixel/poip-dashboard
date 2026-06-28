@@ -145,6 +145,78 @@ export function classifyBusinessCentralDataScope(
     });
   }
 
+  if (entryType && entryType !== "OUTPUT" && isSparepartItemPrefix(itemNo)) {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "DOWNTIME_SPAREPART_OR_MATERIAL",
+      reason: "Non-output row with reviewed SP sparepart item prefix is outside the current output KPI dashboard.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        itemNo ? "itemNo" : "",
+        documentNo ? "documentNo" : "",
+        locationCode ? "locationCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType && entryType !== "OUTPUT" && itemNo.startsWith("TINTA-")) {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "CONSUMPTION_OR_MATERIAL_USAGE",
+      reason: "Non-output row with reviewed TINTA material item prefix is outside the current output KPI dashboard.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        itemNo ? "itemNo" : "",
+        documentNo ? "documentNo" : "",
+        locationCode ? "locationCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType && entryType !== "OUTPUT" && documentNo.startsWith("KONS")) {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "CONSUMPTION_OR_MATERIAL_USAGE",
+      reason: "Non-output row with reviewed KONS document prefix is outside the current output KPI dashboard.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        locationCode ? "locationCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
+  if (entryType && entryType !== "OUTPUT" && documentNo.startsWith("PB")) {
+    return finalizeScope({
+      scope: "OUT_OF_CURRENT_KPI_SCOPE",
+      futureUseDomain: "PURCHASE_OR_RECEIVING",
+      reason: "Non-output row with reviewed PB document prefix is outside the current output KPI dashboard.",
+      evidenceFields: uniqueFields([
+        "entryType",
+        documentNo ? "documentNo" : "",
+        itemNo ? "itemNo" : "",
+        locationCode ? "locationCode" : "",
+        unitOfMeasureCode ? "unitOfMeasureCode" : ""
+      ]),
+      hasPrimaryEntitySource,
+      hasFallbackEntitySource,
+      blocksP10BeforeScope: beforeScope
+    });
+  }
+
   if (entryType && entryType !== "OUTPUT") {
     return finalizeScope({
       scope: "UNKNOWN_SCOPE_REVIEW",
@@ -431,6 +503,10 @@ function isConsumptionLike(documentNo: string, itemDescription: string, itemCate
   return containsAny(documentNo, consumptionKeywords)
     || containsAny(itemDescription, consumptionKeywords)
     || containsAny(itemCategoryCode, consumptionKeywords);
+}
+
+function isSparepartItemPrefix(itemNo: string): boolean {
+  return itemNo.startsWith("SP") && !itemNo.startsWith("SPK");
 }
 
 function hasAnyEntitySource(hasPrimaryEntitySource: boolean, hasFallbackEntitySource: boolean): boolean {

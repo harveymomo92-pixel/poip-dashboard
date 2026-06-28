@@ -150,13 +150,73 @@ test("Purchase entry type is retained for future purchase receiving and does not
   assert.equal(result.blocksP10AfterScope, false);
 });
 
-test("positive and negative adjustment entry types remain unknown review for now", () => {
-  for (const entryType of ["Positive Adjmt.", "Negative Adjmt."]) {
+test("non-output SP item prefix is retained as sparepart/material and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Negative Adjmt.",
+    locationCode: "SPAREPART",
+    itemNo: "SP9000000124",
+    documentNo: "M2301/1015",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "DOWNTIME_SPAREPART_OR_MATERIAL");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("non-output TINTA item prefix is retained as material usage and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Negative Adjmt.",
+    locationCode: "PRODUKSI",
+    itemNo: "TINTA-UV-001",
+    documentNo: "M2301/1014",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "CONSUMPTION_OR_MATERIAL_USAGE");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("non-output KONS document prefix is retained as material usage and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Positive Adjmt.",
+    locationCode: "",
+    itemNo: "RM-001",
+    documentNo: "KONS2301/0001",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "CONSUMPTION_OR_MATERIAL_USAGE");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("non-output PB document prefix is retained as purchase receiving and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Positive Adjmt.",
+    locationCode: "",
+    itemNo: "RM-001",
+    documentNo: "PB2301/0001",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "PURCHASE_OR_RECEIVING");
+  assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("SPK and unreviewed SP/MOCK document prefixes are not broadly classified by material rules", () => {
+  for (const documentNo of ["SPK2301/P0001", "SP2301/0001", "MOCK2301/0001"]) {
     const result = classifyBusinessCentralDataScope({
-      entryType,
-      locationCode: "SPAREPART",
-      itemNo: "SP9000000124",
-      documentNo: "M2301/1015",
+      entryType: "Positive Adjmt.",
+      locationCode: "",
+      itemNo: documentNo.startsWith("SPK") ? "SPK-ITEM-001" : "RM-001",
+      documentNo,
       unitOfMeasureCode: "PCS",
       blocksP10BeforeScope: true
     });
@@ -165,4 +225,20 @@ test("positive and negative adjustment entry types remain unknown review for now
     assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
     assert.equal(result.blocksP10AfterScope, true);
   }
+});
+
+test("output rows are not reclassified by the non-output SP item prefix rule", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "",
+    itemNo: "SP9000000124",
+    itemDescription: "",
+    documentNo: "M2301/1015",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "UNKNOWN_SCOPE_REVIEW");
+  assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
+  assert.equal(result.blocksP10AfterScope, true);
 });
