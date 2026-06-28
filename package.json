@@ -44,6 +44,7 @@
     "bc:authoritative-master-intake": "bash scripts/bc-metrics.sh authoritative-master-intake",
     "bc:authoritative-master-seed-draft": "bash scripts/bc-metrics.sh authoritative-master-seed-draft",
     "bc:future-use-raw-registry": "bash scripts/bc-metrics.sh future-use-raw-registry",
+    "bc:authoritative-master-review-workspace": "bash scripts/bc-metrics.sh authoritative-master-review-workspace",
     "bc:kpi-compare-v1-v2": "bash scripts/bc-metrics.sh kpi-compare-v1-v2",
     "v1:master-profile": "bash scripts/v1-master.sh profile",
     "v1:master-import": "bash scripts/v1-master.sh import",

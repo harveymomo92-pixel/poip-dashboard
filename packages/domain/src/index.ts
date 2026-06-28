@@ -13,6 +13,7 @@ export * from "./kpi/target-bucket.js";
 export * from "./master-data/alias.js";
 export * from "./master-data/authoritative-master-intake.js";
 export * from "./master-data/authoritative-master-seed-draft.js";
+export * from "./master-data/authoritative-master-review-workspace.js";
 export * from "./master-data/future-use-raw-registry.js";
 export * from "./master-data/bc-data-scope.js";
 export * from "./master-data/conditional-mapping.js";
