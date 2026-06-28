@@ -1,3 +1,60 @@
+<!-- P0.9M_AUTHORITATIVE_MASTER_START -->
+
+# P0.9m OData Mapping Direction
+
+## Purpose
+
+Business Central OData fields now become the primary evidence source for the new authoritative entity and target mapping workflow.
+
+## Identity Precedence
+
+Entity identity should be inferred from reviewed OData evidence in this order:
+
+1. `gProdOrRotLine_Description`
+2. `gProdOrRotLine_No`
+3. `Machine_Center_No` as fallback only
+
+## Important Rule
+
+`Machine_Center_No` is routing/fallback evidence. It must not become the default primary entity identity unless explicitly reviewed and approved.
+
+## New Mapping Inputs
+
+The authoritative mapping layer should use:
+
+```text
+source_system
+source_field
+source_value
+canonical_entity_code
+mapping_type
+confidence
+is_active
+reviewer
+reviewer_notes
+effective_from
+effective_to
+```
+
+Allowed `source_field` values:
+
+- `gProdOrRotLineDescription`
+- `gProdOrRotLineNo`
+- `machineCenterNo`
+
+## Legacy Evidence
+
+Old/current entity mapping remains useful only to explain conflicts, for example:
+
+- current entity differs from OData source value,
+- old entity contains target variant text,
+- old entity collapses wrong size/variant,
+- source value points to multiple current entities.
+
+These cases should be exported as conflict evidence, not automatically fixed through broad aliases.
+
+<!-- P0.9M_AUTHORITATIVE_MASTER_END -->
+
 # Business Central OData Output Column Map
 
 Status: reference guide  

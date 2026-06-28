@@ -1,3 +1,95 @@
+<!-- P0.9M_AUTHORITATIVE_MASTER_START -->
+
+# P0.9m Contract Update — Source of Truth for KPI Mapping
+
+## Contract Change
+
+From P0.9m onward, KPI mapping must not treat old/current entity mapping as authoritative.
+
+The KPI contract now separates:
+
+1. scope classification,
+2. canonical entity identity,
+3. target profile,
+4. future-use domain.
+
+## Authoritative Sources
+
+The authoritative inputs for future KPI calculation are:
+
+| Layer | Source of Truth |
+|---|---|
+| Entity identity | Authoritative canonical entity master |
+| Source-to-entity mapping | Reviewed Business Central OData source mapping |
+| Target profile | Authoritative target profile master |
+| Scope | BC scope classifier |
+| Legacy current entity | Audit evidence only |
+| Old target-like entity names | Audit evidence only |
+
+## Scope Contract
+
+The classifier continues to separate BC rows into:
+
+- `OUTPUT_KPI_OK_SCOPE`
+- `OUTPUT_KPI_REJECT_SCOPE`
+- `OUT_OF_CURRENT_KPI_SCOPE`
+- `UNKNOWN_SCOPE_REVIEW`
+
+Future-use domains remain important:
+
+- `PRODUCTION_OUTPUT_DASHBOARD`
+- `REJECT_ATTACHMENT`
+- `DOWNTIME_SPAREPART_OR_MATERIAL`
+- `SALES_REPORT`
+- `PURCHASE_OR_RECEIVING`
+- `TRANSFER_OR_INVENTORY_MOVEMENT`
+- `CONSUMPTION_OR_MATERIAL_USAGE`
+- `SCRAP_WASTE_OR_AVALAN`
+- `MASTER_DATA_QUALITY_REVIEW`
+- `UNKNOWN_REVIEW`
+
+## KPI Mapping Direction
+
+The new KPI identity flow is:
+
+```text
+BC OData evidence
+-> current KPI scope
+-> authoritative source-to-entity map
+-> canonical entity
+-> target profile
+-> KPI calculation
+```
+
+Legacy current entity must not override authoritative source-to-entity mapping.
+
+## Target Profile Contract
+
+Target profile must be separate from entity.
+
+Examples of target-like variants that should not be treated as canonical entity by default:
+
+- `22 OZ`
+- `OZ < 20`
+- `600 ML`
+- `1500 ML`
+- preform weight buckets
+
+These values belong in target profile dimensions when approved.
+
+## Guardrail
+
+P1.0 must remain blocked if any of the following are true:
+
+- authoritative master input is missing,
+- authoritative master validation has errors,
+- target profile master is missing or invalid,
+- source-to-entity coverage is insufficient,
+- KPI compare is not reviewed,
+- unresolved high-risk rows remain.
+
+<!-- P0.9M_AUTHORITATIVE_MASTER_END -->
+
 # Business Central Metric Contract
 
 Status: P0.1 contract for Business Central Calculation Accuracy and v1 Sync Strategy Adaptation.

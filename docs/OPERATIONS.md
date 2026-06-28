@@ -1,3 +1,111 @@
+<!-- P0.9M_AUTHORITATIVE_MASTER_START -->
+
+# Operations Update — Authoritative Master Workflow
+
+## Current Operating Position
+
+P0.9f–P0.9l created a safe reporting, review, validation, intake, and dry-run pipeline.
+
+Starting P0.9m, the operational direction changes:
+
+```text
+Do not repair legacy entity/target mapping as the source of truth.
+Use legacy mapping only as evidence.
+Build authoritative entity and target master as the future source of truth.
+```
+
+## Why
+
+The legacy mapping mixes:
+
+- production entity,
+- target variant,
+- reject evidence,
+- sparepart/material movement,
+- non-production movement,
+- wrong size/variant product mapping,
+- source data gaps.
+
+Because of this, applying aliases or target profiles directly from legacy mapping is unsafe.
+
+## Required Operator Workflow
+
+### 1. Generate latest BC reports
+
+```bash
+pnpm bc:entity-v2-dry-run
+pnpm bc:target-profile-dry-run
+pnpm bc:entity-v2-backfill-dry-run
+pnpm bc:target-profile-backfill-dry-run
+pnpm bc:high-risk-review-plan
+pnpm bc:resolution-package
+pnpm bc:unknown-scope-profile
+pnpm bc:scoped-blocker-package
+pnpm bc:scoped-decision-review
+pnpm bc:scoped-decision-validate
+pnpm bc:scoped-decision-approval-workspace
+pnpm bc:scoped-decision-approval-intake
+pnpm bc:scoped-decision-apply-dry-run
+pnpm bc:kpi-compare-v1-v2
+```
+
+### 2. Prepare authoritative master input
+
+Expected input folder:
+
+```text
+.tmp/bc-authoritative-master-input/
+```
+
+Expected files:
+
+```text
+canonical-entities.csv
+source-to-entity-map.csv
+target-profiles.csv
+```
+
+### 3. Run authoritative master intake
+
+```bash
+pnpm bc:authoritative-master-intake
+```
+
+If files are missing, the command should generate templates and return:
+
+```text
+AWAITING_MASTER_INPUT
+```
+
+### 4. Validate but do not apply
+
+P0.9m must only validate and preview coverage.
+
+It must not mutate:
+
+- database rows,
+- `production_outputs.entity_id`,
+- `target_profiles`,
+- aliases,
+- conditional rules,
+- dashboard behavior.
+
+## Operational Meaning of Legacy Data
+
+| Legacy Data | Use |
+|---|---|
+| current entity | comparison evidence |
+| old target-like entity names | target-profile clue |
+| old aliases | conflict evidence |
+| old target values | reference only |
+| new authoritative master | source of truth |
+
+## P1.0 Status
+
+P1.0 remains blocked until authoritative master validation and mapping dry-run prove readiness.
+
+<!-- P0.9M_AUTHORITATIVE_MASTER_END -->
+
 # Operations Guide
 
 <!-- LEGACY_BC_ROADMAP_ID_WARNING_START -->

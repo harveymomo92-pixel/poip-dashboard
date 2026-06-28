@@ -1,3 +1,106 @@
+<!-- P0.9M_AUTHORITATIVE_MASTER_START -->
+
+# P0.9m Strategic Pivot — Authoritative Entity & Target Master
+
+## Decision
+
+Starting from P0.9m, the project will no longer treat the old/current entity mapping and old target naming as the source of truth.
+
+The new source of truth will be:
+
+1. Authoritative canonical entity master.
+2. Authoritative source-to-entity mapping based on reviewed Business Central OData fields.
+3. Authoritative target profile master.
+
+The old/current entity and old target-like entity names will remain available only as legacy evidence for audit, comparison, and conflict detection.
+
+## Why This Change Is Needed
+
+During P0.9f–P0.9l, the review pipeline showed that legacy entity and target data mixed several concepts into one layer:
+
+- production entity,
+- target variant,
+- reject attachment,
+- sparepart/material movement,
+- non-production movement,
+- wrong size or product variant mapping,
+- source data gaps.
+
+Because of this, continuing to repair the old mapping directly would be inefficient and risky. The better approach is to keep the existing safety/reporting pipeline, but pivot the source of truth to a reviewed authoritative master.
+
+## New Rule
+
+Current/legacy entity values are not deleted, but they are demoted to evidence only.
+
+| Data Source | New Role |
+|---|---|
+| current_entity_code | Legacy evidence / comparison only |
+| old target variant in entity name | Legacy evidence / target-profile clue only |
+| old aliases | Legacy evidence / conflict clue only |
+| old target naming | Legacy evidence only |
+| authoritative canonical entity master | Source of truth |
+| authoritative source-to-entity map | Source of truth |
+| authoritative target profile master | Source of truth |
+
+## Migration Direction
+
+The new migration direction is:
+
+```text
+Business Central OData row
+-> scope classifier
+-> reviewed OData source field
+-> authoritative source-to-entity map
+-> authoritative canonical entity
+-> authoritative target profile
+-> KPI / future module calculation
+```
+
+The preferred identity source remains:
+
+1. `gProdOrRotLine_Description`
+2. fallback: `gProdOrRotLine_No`
+3. fallback only: `Machine_Center_No`
+
+`Machine_Center_No` must not become the primary identity source unless explicitly approved as fallback mapping.
+
+## P1.0 Gate
+
+P1.0 remains blocked until:
+
+1. authoritative entity master is provided and validated,
+2. authoritative source-to-entity mapping is provided and validated,
+3. authoritative target profile master is provided and validated,
+4. coverage dry-run proves which rows are safely mapped,
+5. KPI comparison is reviewed,
+6. no unsafe alias/target/profile mutation is required.
+
+## Safety
+
+P0.9m is intake/validation/export only.
+
+It must not:
+
+- update database rows,
+- update `production_outputs.entity_id`,
+- insert/update/delete `target_profiles`,
+- create/update/delete aliases,
+- change conditional rules,
+- switch dashboard logic,
+- enable P1.0.
+
+## Next Milestone
+
+P0.9m should implement:
+
+```bash
+pnpm bc:authoritative-master-intake
+```
+
+This command prepares and validates authoritative master input templates without applying anything.
+
+<!-- P0.9M_AUTHORITATIVE_MASTER_END -->
+
 # Business Central Entity & Target Migration Plan
 
 Status: P0.9 dry-run and P0.9a review gate implemented
