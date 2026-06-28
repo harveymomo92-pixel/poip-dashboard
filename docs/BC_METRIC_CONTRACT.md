@@ -111,6 +111,21 @@ Validation is authoritative-master-only:
 
 Coverage preview must count success only from the authoritative source-to-entity map and authoritative target profile master. Legacy current entity, old aliases, and old target-like names may be included only as audit/conflict evidence.
 
+## P0.9n Seed Draft Contract
+
+`pnpm bc:authoritative-master-seed-draft` generates draft authoritative master input from latest BC reports.
+
+The seed draft contract is draft/export-only:
+
+- generated canonical entities use `source_of_truth_status=draft`,
+- generated source mappings are exact source-value drafts and keep reviewer fields empty,
+- generated target profiles use `approval_status=draft`,
+- blank/UNMAPPED, reject-code-like, sparepart/material-code-like, broad unsafe, fallback-only, and out-of-current-only sources are excluded or routed to review,
+- legacy current entity and old target-like names are crosswalk evidence only,
+- non-empty human-edited input files are not overwritten; `.draft.csv` files are written instead.
+
+Seed drafts never become executable by themselves. They must be reviewed, edited, and revalidated through `pnpm bc:authoritative-master-intake` before any future migration dry-run can consider them.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Metric Contract
@@ -253,6 +268,8 @@ P0.9l extends `bc:scoped-decision-apply-dry-run` to read `.tmp/bc-scoped-decisio
 - The command never mutates data and never enables P1.0.
 
 P0.9m adds `bc:authoritative-master-intake`. The command creates/validates authoritative master templates, writes normalized master CSVs, validation issue CSVs, source/target coverage previews, unmapped source values, legacy conflict evidence, `summary.json`, `README.md`, and `authoritative-master-templates-manifest.json`. It never applies master data and never enables P1.0.
+
+P0.9n adds `bc:authoritative-master-seed-draft`. The command writes seed draft CSVs, review queue, excluded source values, warnings, legacy crosswalk, `summary.json`, and `README.md`. It may fill empty authoritative master input CSVs, but does not overwrite non-empty human input files unless explicitly forced. It never approves generated rows, applies master data, or enables P1.0.
 
 ## Target Rule
 

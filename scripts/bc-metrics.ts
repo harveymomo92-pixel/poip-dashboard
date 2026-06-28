@@ -135,6 +135,17 @@ import {
   type AuthoritativeUnmappedSourceValueRow
 } from "../packages/domain/src/master-data/authoritative-master-intake.js";
 import {
+  buildAuthoritativeMasterSeedDraft,
+  decideAuthoritativeSeedWriteTarget,
+  type AuthoritativeExcludedSourceValueRow,
+  type AuthoritativeLegacyEvidenceCrosswalkRow,
+  type AuthoritativeMasterSeedDraftSummary,
+  type AuthoritativeSeedEvidenceRow,
+  type AuthoritativeSeedQualityWarningRow,
+  type AuthoritativeSeedReviewQueueRow,
+  type AuthoritativeTargetProfileSeedEvidenceRow
+} from "../packages/domain/src/master-data/authoritative-master-seed-draft.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -191,6 +202,7 @@ type Command =
   | "scoped-decision-apply-dry-run"
   | "scoped-decision-approval-intake"
   | "authoritative-master-intake"
+  | "authoritative-master-seed-draft"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -900,6 +912,7 @@ const DEFAULT_SCOPED_DECISION_MANUAL_APPROVAL_INPUT_DIR = ".tmp/bc-scoped-decisi
 const DEFAULT_SCOPED_DECISION_APPROVAL_INTAKE_DIR = ".tmp/bc-scoped-decision-approval-intake";
 const DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR = ".tmp/bc-authoritative-master-input";
 const DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR = ".tmp/bc-authoritative-master-intake";
+const DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR = ".tmp/bc-authoritative-master-seed-draft";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -971,6 +984,9 @@ const SCOPED_DECISION_INTAKE_SAFETY_FILE = "safety-report.json";
 const AUTHORITATIVE_MASTER_CANONICAL_FILE = "canonical-entities.csv";
 const AUTHORITATIVE_MASTER_SOURCE_MAP_FILE = "source-to-entity-map.csv";
 const AUTHORITATIVE_MASTER_TARGET_PROFILES_FILE = "target-profiles.csv";
+const AUTHORITATIVE_MASTER_CANONICAL_DRAFT_FILE = "canonical-entities.draft.csv";
+const AUTHORITATIVE_MASTER_SOURCE_MAP_DRAFT_FILE = "source-to-entity-map.draft.csv";
+const AUTHORITATIVE_MASTER_TARGET_PROFILES_DRAFT_FILE = "target-profiles.draft.csv";
 const AUTHORITATIVE_MASTER_CANONICAL_TEMPLATE_FILE = "canonical-entities.template.csv";
 const AUTHORITATIVE_MASTER_SOURCE_MAP_TEMPLATE_FILE = "source-to-entity-map.template.csv";
 const AUTHORITATIVE_MASTER_TARGET_PROFILES_TEMPLATE_FILE = "target-profiles.template.csv";
@@ -986,6 +1002,15 @@ const AUTHORITATIVE_MASTER_TARGET_COVERAGE_FILE = "target-profile-coverage-previ
 const AUTHORITATIVE_MASTER_LEGACY_CONFLICT_FILE = "legacy-conflict-evidence.csv";
 const AUTHORITATIVE_MASTER_UNMAPPED_SOURCE_FILE = "unmapped-source-values.csv";
 const AUTHORITATIVE_MASTER_TEMPLATES_MANIFEST_FILE = "authoritative-master-templates-manifest.json";
+const AUTHORITATIVE_MASTER_SEED_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_MASTER_SEED_README_FILE = "README.md";
+const AUTHORITATIVE_MASTER_SEED_CANONICAL_FILE = "canonical-entities.seed-draft.csv";
+const AUTHORITATIVE_MASTER_SEED_SOURCE_MAP_FILE = "source-to-entity-map.seed-draft.csv";
+const AUTHORITATIVE_MASTER_SEED_TARGET_PROFILES_FILE = "target-profiles.seed-draft.csv";
+const AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE = "seed-review-queue.csv";
+const AUTHORITATIVE_MASTER_SEED_LEGACY_CROSSWALK_FILE = "legacy-evidence-crosswalk.csv";
+const AUTHORITATIVE_MASTER_SEED_EXCLUDED_FILE = "excluded-source-values.csv";
+const AUTHORITATIVE_MASTER_SEED_WARNINGS_FILE = "seed-quality-warnings.csv";
 const authoritativeMasterValidationIssueCsvHeaders = [
   "issue_id",
   "severity",
@@ -1036,6 +1061,46 @@ const authoritativeMasterUnmappedSourceCsvHeaders = [
   "sample_documents",
   "sample_items"
 ] as const satisfies readonly (keyof AuthoritativeUnmappedSourceValueRow)[];
+const authoritativeSeedReviewQueueCsvHeaders = [
+  "review_id",
+  "review_category",
+  "source_field",
+  "source_value",
+  "proposed_canonical_entity_code",
+  "rows",
+  "review_reason",
+  "recommended_action",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeSeedReviewQueueRow)[];
+const authoritativeSeedLegacyCrosswalkCsvHeaders = [
+  "source_value",
+  "proposed_canonical_entity_code",
+  "legacy_current_entity_codes",
+  "v2_entity_codes",
+  "target_bucket_candidates",
+  "machine_center_nos",
+  "sample_documents",
+  "sample_items",
+  "evidence_reason",
+  "review_required"
+] as const satisfies readonly (keyof AuthoritativeLegacyEvidenceCrosswalkRow)[];
+const authoritativeSeedExcludedCsvHeaders = [
+  "source_field",
+  "source_value",
+  "rows",
+  "exclusion_reason",
+  "sample_documents",
+  "sample_items"
+] as const satisfies readonly (keyof AuthoritativeExcludedSourceValueRow)[];
+const authoritativeSeedWarningsCsvHeaders = [
+  "warning_id",
+  "warning_category",
+  "source_value",
+  "canonical_entity_code",
+  "warning_reason",
+  "recommended_action"
+] as const satisfies readonly (keyof AuthoritativeSeedQualityWarningRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -6365,6 +6430,58 @@ async function readAuthoritativeTargetCoverageRows(filePath: string): Promise<re
   return rows;
 }
 
+async function readAuthoritativeSeedEntityEvidenceRows(filePath: string): Promise<readonly AuthoritativeSeedEvidenceRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeSeedEvidenceRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    const gProdDescription = row.g_prod_or_rot_line_description ?? "";
+    rows.push({
+      source_field: gProdDescription ? "gProdOrRotLineDescription" : row.v2_source_field_used || row.source_field || "",
+      source_value: gProdDescription || row.v2_source_value_used || row.source_value || "",
+      current_entity_code: row.current_entity_code ?? "",
+      v2_entity_code: row.v2_entity_code ?? row.proposed_canonical_entity_code ?? "",
+      suggested_canonical_entity_code: row.v2_suggested_canonical_entity_code ?? row.proposed_canonical_entity_code ?? "",
+      suggested_canonical_entity_display_name: row.v2_suggested_canonical_entity_display_name ?? row.proposed_canonical_entity_display_name ?? "",
+      target_bucket_candidate: row.v2_target_bucket_candidate ?? row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      document_no: row.document_no ?? "",
+      item_no: row.item_no ?? "",
+      bc_current_kpi_scope: row.bc_current_kpi_scope ?? "",
+      review_classification: row.v2_review_classification ?? row.backfill_action ?? "",
+      risk_level: row.risk_level ?? ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeTargetProfileSeedEvidenceRows(filePath: string): Promise<readonly AuthoritativeTargetProfileSeedEvidenceRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeTargetProfileSeedEvidenceRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      target_qty: row.proposed_target_qty ?? "",
+      unit: row.unit ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? "",
+      rows: row.sample_rows ?? "0",
+      risk_level: row.risk_level ?? ""
+    });
+  });
+  return rows;
+}
+
+async function csvFileHasDataRows(filePath: string): Promise<boolean> {
+  if (!(await fileExists(filePath))) return false;
+  let hasData = false;
+  await readCsvRows(filePath, (row) => {
+    if (Object.values(row).some((value) => value.trim())) hasData = true;
+  });
+  return hasData;
+}
+
 async function readScopedDecisionValidationIssues(filePath: string): Promise<readonly ScopedDecisionValidationIssueRow[]> {
   if (!(await fileExists(filePath))) return [];
   const rows: ScopedDecisionValidationIssueRow[] = [];
@@ -7206,6 +7323,168 @@ async function runAuthoritativeMasterIntake() {
   console.log(`- ${displayRepoPath(targetProfilesFile)}`);
 }
 
+function buildAuthoritativeMasterSeedDraftReadme(summary: AuthoritativeMasterSeedDraftSummary): string {
+  return `# Business Central P0.9n Authoritative Master Seed Draft
+
+Generated at: ${summary.generatedAt}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This package generates draft authoritative master input from Business Central OData/report evidence to reduce manual typing.
+
+Generated rows are drafts only:
+
+- canonical entities use \`source_of_truth_status=draft\`
+- source mappings have empty reviewer fields and require business review
+- target profiles use \`approval_status=draft\`
+
+## Files
+
+- \`${AUTHORITATIVE_MASTER_SEED_SUMMARY_FILE}\`: seed counts, write mode, P1.0 gate, and safety flags.
+- \`${AUTHORITATIVE_MASTER_SEED_CANONICAL_FILE}\`: draft canonical entity candidates.
+- \`${AUTHORITATIVE_MASTER_SEED_SOURCE_MAP_FILE}\`: exact source-to-entity draft mappings.
+- \`${AUTHORITATIVE_MASTER_SEED_TARGET_PROFILES_FILE}\`: draft target profile rows.
+- \`${AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE}\`: source, mapping, and target rows that need manual review.
+- \`${AUTHORITATIVE_MASTER_SEED_LEGACY_CROSSWALK_FILE}\`: legacy/current entity and v2 evidence crosswalk.
+- \`${AUTHORITATIVE_MASTER_SEED_EXCLUDED_FILE}\`: source values excluded from generated master drafts.
+- \`${AUTHORITATIVE_MASTER_SEED_WARNINGS_FILE}\`: quality warnings for draft rows.
+
+## Write Mode
+
+- wroteWorkingInputFiles: \`${summary.wroteWorkingInputFiles}\`
+- wroteDraftFilesOnly: \`${summary.wroteDraftFilesOnly}\`
+
+If existing authoritative master input files contain data, this command writes \`.draft.csv\` files instead of overwriting user-edited input.
+
+## Safety
+
+- Draft/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No conditional rule changes.
+- No dashboard switch.
+- No P1.0 enablement.
+`;
+}
+
+async function runAuthoritativeMasterSeedDraft() {
+  const inputFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_SEED_DRAFT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_SEED_DRAFT_DIR);
+  const forceWrite = process.env.AUTHORITATIVE_MASTER_SEED_FORCE_WRITE === "true";
+  const canonicalFile = path.join(inputFolder, AUTHORITATIVE_MASTER_CANONICAL_FILE);
+  const sourceMapFile = path.join(inputFolder, AUTHORITATIVE_MASTER_SOURCE_MAP_FILE);
+  const targetProfilesFile = path.join(inputFolder, AUTHORITATIVE_MASTER_TARGET_PROFILES_FILE);
+  const canonicalDraftFile = path.join(inputFolder, AUTHORITATIVE_MASTER_CANONICAL_DRAFT_FILE);
+  const sourceMapDraftFile = path.join(inputFolder, AUTHORITATIVE_MASTER_SOURCE_MAP_DRAFT_FILE);
+  const targetProfilesDraftFile = path.join(inputFolder, AUTHORITATIVE_MASTER_TARGET_PROFILES_DRAFT_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_README_FILE),
+    canonical: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_CANONICAL_FILE),
+    sourceMap: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_SOURCE_MAP_FILE),
+    targetProfiles: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_TARGET_PROFILES_FILE),
+    reviewQueue: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_REVIEW_QUEUE_FILE),
+    legacyCrosswalk: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_LEGACY_CROSSWALK_FILE),
+    excluded: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_EXCLUDED_FILE),
+    warnings: path.join(outputDir, AUTHORITATIVE_MASTER_SEED_WARNINGS_FILE)
+  };
+
+  console.log("Business Central P0.9n authoritative master seed draft");
+  console.log("Mode: DRAFT_EXPORT_ONLY");
+  console.log(`Input folder: ${displayRepoPath(inputFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: draft/export only; database rows, production_outputs.entity_id, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  await mkdir(inputFolder, { recursive: true });
+  await mkdir(outputDir, { recursive: true });
+
+  const writeDecision = decideAuthoritativeSeedWriteTarget({
+    canonicalInputHasData: await csvFileHasDataRows(canonicalFile),
+    sourceMapInputHasData: await csvFileHasDataRows(sourceMapFile),
+    targetProfilesInputHasData: await csvFileHasDataRows(targetProfilesFile),
+    forceWrite
+  });
+  const entityRows = await readAuthoritativeSeedEntityEvidenceRows(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH));
+  const fallbackEntityRows = entityRows.length > 0
+    ? entityRows
+    : await readAuthoritativeSeedEntityEvidenceRows(resolveRepoPath(DEFAULT_ENTITY_V2_BACKFILL_DRY_RUN_CSV_PATH));
+  const targetRows = await readAuthoritativeTargetProfileSeedEvidenceRows(resolveRepoPath(DEFAULT_TARGET_PROFILE_BACKFILL_DRY_RUN_CSV_PATH));
+  const seed = buildAuthoritativeMasterSeedDraft({
+    entityEvidenceRows: fallbackEntityRows,
+    targetProfileEvidenceRows: targetRows,
+    outputFolder: displayRepoPath(outputDir),
+    inputFolder: displayRepoPath(inputFolder),
+    writeDecision
+  });
+
+  const canonicalCsv = resolutionPackageCsv(authoritativeMasterInputCsvHeaders.canonicalEntities, seed.canonicalSeedRows);
+  const sourceMapCsv = resolutionPackageCsv(authoritativeMasterInputCsvHeaders.sourceToEntityMap, seed.sourceMapSeedRows);
+  const targetProfilesCsv = resolutionPackageCsv(authoritativeMasterInputCsvHeaders.targetProfiles, seed.targetProfileSeedRows);
+
+  await writeFile(outputFiles.summary, `${JSON.stringify(seed.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeMasterSeedDraftReadme(seed.summary), "utf8");
+  await writeFile(outputFiles.canonical, canonicalCsv, "utf8");
+  await writeFile(outputFiles.sourceMap, sourceMapCsv, "utf8");
+  await writeFile(outputFiles.targetProfiles, targetProfilesCsv, "utf8");
+  await writeFile(outputFiles.reviewQueue, resolutionPackageCsv(authoritativeSeedReviewQueueCsvHeaders, seed.seedReviewQueueRows), "utf8");
+  await writeFile(outputFiles.legacyCrosswalk, resolutionPackageCsv(authoritativeSeedLegacyCrosswalkCsvHeaders, seed.legacyEvidenceCrosswalkRows), "utf8");
+  await writeFile(outputFiles.excluded, resolutionPackageCsv(authoritativeSeedExcludedCsvHeaders, seed.excludedSourceValueRows), "utf8");
+  await writeFile(outputFiles.warnings, resolutionPackageCsv(authoritativeSeedWarningsCsvHeaders, seed.seedQualityWarningRows), "utf8");
+
+  if (writeDecision.writeWorkingInputFiles) {
+    await writeFile(canonicalFile, canonicalCsv, "utf8");
+    await writeFile(sourceMapFile, sourceMapCsv, "utf8");
+    await writeFile(targetProfilesFile, targetProfilesCsv, "utf8");
+  } else {
+    await writeFile(canonicalDraftFile, canonicalCsv, "utf8");
+    await writeFile(sourceMapDraftFile, sourceMapCsv, "utf8");
+    await writeFile(targetProfilesDraftFile, targetProfilesCsv, "utf8");
+  }
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- canonical_seed_rows=${seed.summary.canonicalSeedRows}`);
+  console.log(`- source_map_seed_rows=${seed.summary.sourceMapSeedRows}`);
+  console.log(`- target_profile_seed_rows=${seed.summary.targetProfileSeedRows}`);
+  console.log(`- review_queue_rows=${seed.summary.reviewQueueRows}`);
+  console.log(`- excluded_source_value_rows=${seed.summary.excludedSourceValueRows}`);
+  console.log(`- warning_rows=${seed.summary.warningRows}`);
+  console.log(`- wrote_working_input_files=${seed.summary.wroteWorkingInputFiles}`);
+  console.log(`- wrote_draft_files_only=${seed.summary.wroteDraftFilesOnly}`);
+  console.log(`- p10_status=${seed.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top generated families");
+  for (const row of seed.summary.topGeneratedFamilies) console.log(`- ${row.family}; rows=${row.rows}`);
+  if (seed.summary.topGeneratedFamilies.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Top review reasons");
+  for (const row of seed.summary.topReviewReasons) console.log(`- ${row.reason}; rows=${row.rows}`);
+  if (seed.summary.topReviewReasons.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  if (writeDecision.writeWorkingInputFiles) {
+    console.log(`- ${displayRepoPath(canonicalFile)}`);
+    console.log(`- ${displayRepoPath(sourceMapFile)}`);
+    console.log(`- ${displayRepoPath(targetProfilesFile)}`);
+  } else {
+    console.log(`- ${displayRepoPath(canonicalDraftFile)}`);
+    console.log(`- ${displayRepoPath(sourceMapDraftFile)}`);
+    console.log(`- ${displayRepoPath(targetProfilesDraftFile)}`);
+  }
+}
+
 async function runScopedDecisionApprovalIntake() {
   const sourceApprovalWorkspace = resolveRepoPath(process.env.SCOPED_DECISION_APPROVAL_WORKSPACE_DIR?.trim() || DEFAULT_SCOPED_DECISION_APPROVAL_WORKSPACE_DIR);
   const sourceValidationFolder = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
@@ -7958,8 +8237,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -7983,6 +8262,10 @@ async function main() {
   }
   if (command === "authoritative-master-intake") {
     await runAuthoritativeMasterIntake();
+    return;
+  }
+  if (command === "authoritative-master-seed-draft") {
+    await runAuthoritativeMasterSeedDraft();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });

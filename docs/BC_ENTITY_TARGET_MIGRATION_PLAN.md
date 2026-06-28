@@ -101,6 +101,16 @@ This command prepares and validates authoritative master input templates without
 
 P0.9m output includes normalized master CSVs, validation errors/warnings, source coverage preview, target profile coverage preview, unmapped source values, legacy conflict evidence, and a template manifest. Coverage uses only the authoritative source-to-entity map as success mapping; current/legacy entity values appear only as evidence.
 
+P0.9n implements:
+
+```bash
+pnpm bc:authoritative-master-seed-draft
+```
+
+This command generates draft authoritative master input from Business Central OData/report evidence. It writes `.tmp/bc-authoritative-master-seed-draft/` and either fills empty `.tmp/bc-authoritative-master-input/*.csv` working files or writes `.draft.csv` files when user-edited input already exists.
+
+All generated rows remain draft only. Canonical entities use `source_of_truth_status=draft`, target profiles use `approval_status=draft`, reviewer fields remain blank, and P1.0 remains blocked.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Entity & Target Migration Plan
@@ -430,6 +440,14 @@ Output folder:
 ```
 
 The command validates `canonical-entities.csv`, `source-to-entity-map.csv`, and `target-profiles.csv`, creates blank templates when needed, previews coverage from existing BC reports, and keeps legacy current entity/old target names as conflict evidence only.
+
+P0.9n adds authoritative master seed drafts:
+
+```bash
+pnpm bc:authoritative-master-seed-draft
+```
+
+It reads the latest BC dry-run/report files, writes draft canonical entities, exact source-to-entity mappings, draft target profiles, a review queue, excluded source values, quality warnings, and legacy evidence crosswalks. It does not approve generated rows and does not overwrite non-empty user input files unless the explicit force flag is used.
 
 These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 
