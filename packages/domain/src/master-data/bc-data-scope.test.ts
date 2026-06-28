@@ -104,6 +104,85 @@ test("Transfer entry type is retained for future inventory movement and does not
   assert.equal(result.blocksP10AfterScope, false);
 });
 
+test("non-output SP item prefix is retained for future sparepart/material scope and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Transfer",
+    locationCode: "GUDANG",
+    itemNo: "SP5000000012",
+    documentNo: "M2301/1013",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "DOWNTIME_SPAREPART_OR_MATERIAL");
+  assert.equal(result.blocksP10AfterScope, false);
+  assert.match(result.bcScopeReason, /sparepart\/material item prefix/i);
+});
+
+test("non-output TINTA item prefix is retained for future material usage and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Consumption",
+    locationCode: "PRODUKSI",
+    itemNo: "TINTA-DA10",
+    documentNo: "KONS2602/0001",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "CONSUMPTION_OR_MATERIAL_USAGE");
+  assert.equal(result.blocksP10AfterScope, false);
+  assert.match(result.bcScopeReason, /ink\/material consumption/i);
+});
+
+test("non-output KONS document prefix is retained for future material usage and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Purchase",
+    locationCode: "BAHAN",
+    itemNo: "RM-001",
+    documentNo: "KONS2603/0007",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "CONSUMPTION_OR_MATERIAL_USAGE");
+  assert.equal(result.blocksP10AfterScope, false);
+  assert.match(result.bcScopeReason, /consumption evidence/i);
+});
+
+test("non-output PB document prefix is retained for purchase receiving and does not block P1.0", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Sale",
+    locationCode: "BAHAN",
+    itemNo: "RM-002",
+    documentNo: "PB2601/0042",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "PURCHASE_OR_RECEIVING");
+  assert.equal(result.blocksP10AfterScope, false);
+  assert.match(result.bcScopeReason, /purchase\/receiving/i);
+});
+
+test("non-output BLT document prefix stays unknown review", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Transfer",
+    locationCode: "TRANSIT",
+    itemNo: "MAT-001",
+    documentNo: "BLT2604/0009",
+    unitOfMeasureCode: "PCS",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "UNKNOWN_SCOPE_REVIEW");
+  assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
+  assert.equal(result.blocksP10AfterScope, true);
+});
+
 test("Consumption entry type is retained for future material usage and does not block P1.0", () => {
   const result = classifyBusinessCentralDataScope({
     entryType: "Consumption",
@@ -148,6 +227,57 @@ test("Purchase entry type is retained for future purchase receiving and does not
   assert.equal(result.bcCurrentKpiScope, "OUT_OF_CURRENT_KPI_SCOPE");
   assert.equal(result.bcFutureUseDomain, "PURCHASE_OR_RECEIVING");
   assert.equal(result.blocksP10AfterScope, false);
+});
+
+test("Output rows with SPK documents stay in output KPI scope when output evidence is present", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "JADI",
+    itemNo: "PF192CL12",
+    itemDescription: "CUP 12 OZ PRINTING",
+    itemCategoryCode: "FG",
+    documentNo: "SPK2601/P0001",
+    unitOfMeasureCode: "PCS",
+    gProdOrRotLineDescription: "OMSO 1-OZ",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUTPUT_KPI_OK_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "PRODUCTION_OUTPUT_DASHBOARD");
+  assert.equal(result.blocksP10AfterScope, true);
+});
+
+test("RJ item evidence remains reject related", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "REJECT",
+    itemNo: "RJ015",
+    itemDescription: "REJECT CUP 12 OZ",
+    itemCategoryCode: "REJECT",
+    unitOfMeasureCode: "KG",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "OUTPUT_KPI_REJECT_SCOPE");
+  assert.equal(result.bcFutureUseDomain, "REJECT_ATTACHMENT");
+  assert.equal(result.blocksP10AfterScope, true);
+});
+
+test("MOCK document prefix stays unknown review when no other deterministic evidence exists", () => {
+  const result = classifyBusinessCentralDataScope({
+    entryType: "Output",
+    locationCode: "",
+    itemNo: "",
+    itemDescription: "",
+    itemCategoryCode: "",
+    documentNo: "MOCK-2601",
+    unitOfMeasureCode: "",
+    blocksP10BeforeScope: true
+  });
+
+  assert.equal(result.bcCurrentKpiScope, "UNKNOWN_SCOPE_REVIEW");
+  assert.equal(result.bcFutureUseDomain, "UNKNOWN_REVIEW");
+  assert.equal(result.blocksP10AfterScope, true);
 });
 
 test("positive and negative adjustment entry types remain unknown review for now", () => {

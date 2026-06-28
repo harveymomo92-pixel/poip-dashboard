@@ -146,6 +146,96 @@ export function classifyBusinessCentralDataScope(
   }
 
   if (entryType && entryType !== "OUTPUT") {
+    if (itemNo.startsWith("SP")) {
+      return finalizeScope({
+        scope: "OUT_OF_CURRENT_KPI_SCOPE",
+        futureUseDomain: "DOWNTIME_SPAREPART_OR_MATERIAL",
+        reason: "Non-output row with sparepart/material item prefix SP is retained for future downtime material scope and does not block P1.0.",
+        evidenceFields: uniqueFields([
+          "entryType",
+          itemNo ? "itemNo" : "",
+          documentNo ? "documentNo" : "",
+          itemDescription ? "itemDescription" : "",
+          itemCategoryCode ? "itemCategoryCode" : ""
+        ]),
+        hasPrimaryEntitySource,
+        hasFallbackEntitySource,
+        blocksP10BeforeScope: beforeScope
+      });
+    }
+
+    if (itemNo.startsWith("TINTA-")) {
+      return finalizeScope({
+        scope: "OUT_OF_CURRENT_KPI_SCOPE",
+        futureUseDomain: "CONSUMPTION_OR_MATERIAL_USAGE",
+        reason: "Non-output row with TINTA- item prefix is ink/material consumption evidence for future material usage scope and does not block P1.0.",
+        evidenceFields: uniqueFields([
+          "entryType",
+          itemNo ? "itemNo" : "",
+          documentNo ? "documentNo" : "",
+          itemDescription ? "itemDescription" : "",
+          itemCategoryCode ? "itemCategoryCode" : ""
+        ]),
+        hasPrimaryEntitySource,
+        hasFallbackEntitySource,
+        blocksP10BeforeScope: beforeScope
+      });
+    }
+
+    if (documentNo.startsWith("KONS")) {
+      return finalizeScope({
+        scope: "OUT_OF_CURRENT_KPI_SCOPE",
+        futureUseDomain: "CONSUMPTION_OR_MATERIAL_USAGE",
+        reason: "Non-output row with KONS document prefix is consumption evidence for future material usage scope and does not block P1.0.",
+        evidenceFields: uniqueFields([
+          "entryType",
+          documentNo ? "documentNo" : "",
+          itemNo ? "itemNo" : "",
+          itemDescription ? "itemDescription" : "",
+          itemCategoryCode ? "itemCategoryCode" : ""
+        ]),
+        hasPrimaryEntitySource,
+        hasFallbackEntitySource,
+        blocksP10BeforeScope: beforeScope
+      });
+    }
+
+    if (documentNo.startsWith("PB")) {
+      return finalizeScope({
+        scope: "OUT_OF_CURRENT_KPI_SCOPE",
+        futureUseDomain: "PURCHASE_OR_RECEIVING",
+        reason: "Non-output row with PB document prefix is purchase/receiving evidence and does not block P1.0.",
+        evidenceFields: uniqueFields([
+          "entryType",
+          documentNo ? "documentNo" : "",
+          itemNo ? "itemNo" : "",
+          itemDescription ? "itemDescription" : "",
+          itemCategoryCode ? "itemCategoryCode" : ""
+        ]),
+        hasPrimaryEntitySource,
+        hasFallbackEntitySource,
+        blocksP10BeforeScope: beforeScope
+      });
+    }
+
+    if (documentNo.startsWith("BLT")) {
+      return finalizeScope({
+        scope: "UNKNOWN_SCOPE_REVIEW",
+        futureUseDomain: "UNKNOWN_REVIEW",
+        reason: "Non-output row with BLT document prefix is not yet deterministic enough for a safe scope rule.",
+        evidenceFields: uniqueFields([
+          "entryType",
+          documentNo ? "documentNo" : "",
+          itemNo ? "itemNo" : "",
+          itemDescription ? "itemDescription" : "",
+          itemCategoryCode ? "itemCategoryCode" : ""
+        ]),
+        hasPrimaryEntitySource,
+        hasFallbackEntitySource,
+        blocksP10BeforeScope: beforeScope
+      });
+    }
+
     return finalizeScope({
       scope: "UNKNOWN_SCOPE_REVIEW",
       futureUseDomain: "UNKNOWN_REVIEW",

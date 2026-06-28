@@ -218,6 +218,22 @@ PURCHASE    -> OUT_OF_CURRENT_KPI_SCOPE / PURCHASE_OR_RECEIVING
 
 These rows remain exported in every report and are excluded only from P1.0 blocker calculation via `blocks_p10_after_scope=false`. P0.9e does not implement medium/low candidates, including `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern rules.
 
+P0.9f adds a small set of deterministic non-output scope rules:
+
+```text
+non-output item prefix SP      -> OUT_OF_CURRENT_KPI_SCOPE / DOWNTIME_SPAREPART_OR_MATERIAL
+non-output item prefix TINTA-  -> OUT_OF_CURRENT_KPI_SCOPE / CONSUMPTION_OR_MATERIAL_USAGE
+non-output document prefix KONS -> OUT_OF_CURRENT_KPI_SCOPE / CONSUMPTION_OR_MATERIAL_USAGE
+non-output document prefix PB   -> OUT_OF_CURRENT_KPI_SCOPE / PURCHASE_OR_RECEIVING
+non-output document prefix BLT  -> UNKNOWN_SCOPE_REVIEW / UNKNOWN_REVIEW
+```
+
+These rules are safe, read-only, and do not change Output scope handling, aliases, or target profiles. The official blocker package for the current gate state is:
+
+```bash
+pnpm bc:scoped-blocker-package
+```
+
 ---
 
 ## 10. Rollback

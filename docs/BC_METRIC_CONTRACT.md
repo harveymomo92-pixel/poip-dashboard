@@ -83,6 +83,24 @@ P0.9e classifies only deterministic high-confidence Business Central entry types
 
 These classifications do not change stored rows or dashboard behavior. `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, and weak sparepart/material text-pattern candidates remain `UNKNOWN_SCOPE_REVIEW` for later review.
 
+P0.9f adds more deterministic non-output scope rules for retained future-use rows:
+
+- Non-output `Item_No` starting with `SP` -> `OUT_OF_CURRENT_KPI_SCOPE` / `DOWNTIME_SPAREPART_OR_MATERIAL`
+- Non-output `Item_No` starting with `TINTA-` -> `OUT_OF_CURRENT_KPI_SCOPE` / `CONSUMPTION_OR_MATERIAL_USAGE`
+- Non-output `Document_No` starting with `KONS` -> `OUT_OF_CURRENT_KPI_SCOPE` / `CONSUMPTION_OR_MATERIAL_USAGE`
+- Non-output `Document_No` starting with `PB` -> `OUT_OF_CURRENT_KPI_SCOPE` / `PURCHASE_OR_RECEIVING`
+- Non-output `Document_No` starting with `BLT` remains `UNKNOWN_SCOPE_REVIEW` until a reviewed convention is confirmed
+
+These rules stay read-only, do not mutate aliases or target profiles, and do not broaden `SPK*` document handling.
+
+The official scoped blocker package is generated with:
+
+```bash
+pnpm bc:scoped-blocker-package
+```
+
+It writes `.tmp/bc-scoped-blocker-package/` and uses the existing resolution-package artifacts as source of truth for deduped blocker review rows and retained counts.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

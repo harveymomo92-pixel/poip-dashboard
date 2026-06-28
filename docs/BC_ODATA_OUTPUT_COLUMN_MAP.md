@@ -186,6 +186,16 @@ P0.9e implements only the deterministic high-confidence entry-type rules from th
 
 These rows are still exported and retained, but `blocks_p10_after_scope=false`. Medium/low candidates such as `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, and sparepart/material text patterns remain `UNKNOWN_SCOPE_REVIEW` until a later reviewed rule.
 
+P0.9f adds a few safer non-output rules while keeping Output rows untouched:
+
+- Non-output `SP*` item numbers are treated as sparepart/material evidence.
+- Non-output `TINTA-*` item numbers are treated as ink/material consumption evidence.
+- Non-output `KONS*` document numbers are treated as consumption evidence.
+- Non-output `PB*` document numbers are treated as purchase/receiving evidence.
+- Non-output `BLT*` documents stay in `UNKNOWN_SCOPE_REVIEW` until a convention is confirmed.
+
+Do not extend these rules to broad `SPK*` document classification. Output rows with `SPK*` documents still rely on the existing Output KPI evidence rules.
+
 ## Practical Warnings
 
 `Entry_Type = Output` rows still need classification. Finished output and reject/scrap rows can both appear in this scope.

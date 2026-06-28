@@ -843,6 +843,26 @@ PURCHASE -> PURCHASE_OR_RECEIVING
 
 They are all `OUT_OF_CURRENT_KPI_SCOPE`, remain visible in reports, and no longer block P1.0 after scope. Do not treat `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern candidates as implemented rules yet.
 
+P0.9f adds a small deterministic cleanup layer for non-output scope evidence:
+
+```text
+non-output SP* item number     -> DOWNTIME_SPAREPART_OR_MATERIAL
+non-output TINTA-* item number -> CONSUMPTION_OR_MATERIAL_USAGE
+non-output KONS* document      -> CONSUMPTION_OR_MATERIAL_USAGE
+non-output PB* document        -> PURCHASE_OR_RECEIVING
+non-output BLT* document       -> UNKNOWN_SCOPE_REVIEW
+```
+
+Do not generalize these rules to broad `SPK*` document handling. Output rows still use the existing Output KPI rules only.
+
+Official blocker package command:
+
+```bash
+pnpm bc:scoped-blocker-package
+```
+
+It writes `.tmp/bc-scoped-blocker-package/` from the resolution-package artifacts, keeps out-of-current-KPI rows visible, and uses deduped blocker rows instead of summing overlapping review files.
+
 ### P1.0 planned comparison command
 
 ```bash
