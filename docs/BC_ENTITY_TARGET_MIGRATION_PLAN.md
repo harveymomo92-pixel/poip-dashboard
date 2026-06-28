@@ -220,7 +220,7 @@ These rows remain exported in every report and are excluded only from P1.0 block
 
 ---
 
-## 10. P0.9f/P0.9g Scoped Blocker and Decision Review
+## 10. P0.9f/P0.9g/P0.9h Scoped Blocker, Decision, and Validation Review
 
 P0.9f narrows material/sparepart scope and packages remaining true P1.0 blockers:
 
@@ -242,7 +242,21 @@ Output folder:
 
 P0.9g writes `decision-board.csv`, family-specific review CSVs, `entity-family-rollup.csv`, `next-action-checklist.csv`, `summary.json`, and `README.md`.
 
-This package is a decision board only. It does not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` defaults to `false` for every decision row. P1.0 remains blocked while true scoped blockers or pending decision rows remain.
+P0.9h validates reviewed decision CSVs before any later execution planning:
+
+```bash
+pnpm bc:scoped-decision-validate
+```
+
+Output folder:
+
+```text
+.tmp/bc-scoped-decision-validation/
+```
+
+P0.9h writes `validation-errors.csv`, `validation-warnings.csv`, `approved-decision-summary.csv`, `pending-decision-summary.csv`, `blocked-execution-plan.csv`, `summary.json`, and `README.md`.
+
+These packages are decision review and validation only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`. P1.0 remains blocked while scoped blockers, pending blocking decisions, or invalid reviewed decisions remain.
 
 ---
 

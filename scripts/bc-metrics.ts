@@ -80,6 +80,14 @@ import {
   type ScopedDecisionReviewSummary
 } from "../packages/domain/src/master-data/scoped-decision-review.js";
 import {
+  buildScopedDecisionValidation,
+  type ScopedDecisionBlockedExecutionPlanRow,
+  type ScopedDecisionValidationInputRow,
+  type ScopedDecisionValidationIssueRow,
+  type ScopedDecisionValidationSummary,
+  type ScopedDecisionValidationSummaryRow
+} from "../packages/domain/src/master-data/scoped-decision-validation.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -131,6 +139,7 @@ type Command =
   | "unknown-scope-profile"
   | "scoped-blocker-package"
   | "scoped-decision-review"
+  | "scoped-decision-validate"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -833,6 +842,7 @@ const DEFAULT_UNKNOWN_SCOPE_PROFILE_JSON_PATH = ".tmp/bc-unknown-scope-profile.j
 const DEFAULT_RESOLUTION_PACKAGE_DIR = ".tmp/bc-resolution-package";
 const DEFAULT_SCOPED_BLOCKER_PACKAGE_DIR = ".tmp/bc-scoped-blocker-package";
 const DEFAULT_SCOPED_DECISION_REVIEW_DIR = ".tmp/bc-scoped-decision-review";
+const DEFAULT_SCOPED_DECISION_VALIDATION_DIR = ".tmp/bc-scoped-decision-validation";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -859,6 +869,13 @@ const SCOPED_DECISION_REVIEW_REJECT_ATTACHMENT_FILE = "reject-attachment-review.
 const SCOPED_DECISION_REVIEW_TARGET_PROFILE_FILE = "target-profile-dependency-review.csv";
 const SCOPED_DECISION_REVIEW_FAMILY_ROLLUP_FILE = "entity-family-rollup.csv";
 const SCOPED_DECISION_REVIEW_NEXT_ACTION_FILE = "next-action-checklist.csv";
+const SCOPED_DECISION_VALIDATION_SUMMARY_FILE = "summary.json";
+const SCOPED_DECISION_VALIDATION_README_FILE = "README.md";
+const SCOPED_DECISION_VALIDATION_ERRORS_FILE = "validation-errors.csv";
+const SCOPED_DECISION_VALIDATION_WARNINGS_FILE = "validation-warnings.csv";
+const SCOPED_DECISION_VALIDATION_APPROVED_FILE = "approved-decision-summary.csv";
+const SCOPED_DECISION_VALIDATION_PENDING_FILE = "pending-decision-summary.csv";
+const SCOPED_DECISION_VALIDATION_BLOCKED_EXECUTION_FILE = "blocked-execution-plan.csv";
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -1189,6 +1206,50 @@ const scopedDecisionNextActionCsvHeaders = [
   "status",
   "safe_to_auto_apply"
 ] as const satisfies readonly (keyof ScopedDecisionNextActionRow)[];
+
+const scopedDecisionValidationIssueCsvHeaders = [
+  "validation_id",
+  "severity",
+  "decision_id",
+  "decision_family",
+  "decision_category",
+  "source_values",
+  "field",
+  "code",
+  "message",
+  "approval_status",
+  "safe_to_auto_apply",
+  "safe_to_seed_target_profile",
+  "p10_gate_effect",
+  "rows"
+] as const satisfies readonly (keyof ScopedDecisionValidationIssueRow)[];
+
+const scopedDecisionValidationSummaryCsvHeaders = [
+  "decision_id",
+  "decision_family",
+  "decision_category",
+  "source_values",
+  "approval_status",
+  "reviewer",
+  "reviewer_notes",
+  "rows",
+  "p10_gate_effect",
+  "safe_to_auto_apply",
+  "safe_to_seed_target_profile"
+] as const satisfies readonly (keyof ScopedDecisionValidationSummaryRow)[];
+
+const scopedDecisionBlockedExecutionCsvHeaders = [
+  "block_id",
+  "decision_id",
+  "decision_family",
+  "decision_category",
+  "source_values",
+  "approval_status",
+  "blocker_reason",
+  "required_before_execution",
+  "p10_gate_effect",
+  "rows"
+] as const satisfies readonly (keyof ScopedDecisionBlockedExecutionPlanRow)[];
 
 const manualApprovalQueueCsvHeaders = [
   "priority",
@@ -5642,6 +5703,40 @@ async function readScopedBlockerRows(filePath: string): Promise<readonly ScopedD
   return rows;
 }
 
+async function readScopedDecisionValidationRows(filePath: string): Promise<readonly ScopedDecisionValidationInputRow[]> {
+  const rows: ScopedDecisionValidationInputRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      decision_id: row.decision_id ?? "",
+      decision_family: row.decision_family ?? "",
+      decision_category: row.decision_category ?? "",
+      source_values: row.source_values ?? "",
+      blocker_group_ids: row.blocker_group_ids ?? "",
+      blocker_categories: row.blocker_categories ?? "",
+      review_group_types: row.review_group_types ?? "",
+      rows: row.rows ?? "0",
+      risk_levels: row.risk_levels ?? "",
+      reason: row.reason ?? "",
+      recommended_action: row.recommended_action ?? "",
+      required_decision: row.required_decision ?? "",
+      safe_to_auto_apply: row.safe_to_auto_apply ?? "false",
+      decision_status: row.decision_status ?? "",
+      p10_gate_effect: row.p10_gate_effect ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      approval_status: row.approval_status ?? "",
+      reviewer: row.reviewer ?? "",
+      reviewer_notes: row.reviewer_notes ?? "",
+      safe_to_seed_target_profile: row.safe_to_seed_target_profile ?? "false",
+      entity_decision_status: row.entity_decision_status ?? "",
+      target_bucket: row.target_bucket ?? "",
+      target_qty: row.target_qty ?? "",
+      unit: row.unit ?? ""
+    });
+  });
+  return rows;
+}
+
 function buildScopedDecisionReviewReadme(summary: ScopedDecisionReviewSummary): string {
   return `# Business Central P0.9g Scoped Decision Review
 
@@ -5690,6 +5785,65 @@ ${summary.recommendedNextActions.map((action) => `- ${action}`).join("\n")}
 - No conditional rule change.
 - No dashboard switch.
 - P1.0 remains blocked while decision rows are pending.
+`;
+}
+
+function buildScopedDecisionValidationReadme(summary: ScopedDecisionValidationSummary): string {
+  return `# Business Central P0.9h Scoped Decision Validator
+
+Generated at: ${summary.generatedAt}
+
+Validation status: ${summary.validationStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Files
+
+- \`${SCOPED_DECISION_VALIDATION_SUMMARY_FILE}\`: validation counts, gate status, and safety flags.
+- \`${SCOPED_DECISION_VALIDATION_ERRORS_FILE}\`: invalid decision rows that must be fixed before execution.
+- \`${SCOPED_DECISION_VALIDATION_WARNINGS_FILE}\`: non-blocking review quality warnings.
+- \`${SCOPED_DECISION_VALIDATION_APPROVED_FILE}\`: approved decision rows, if any.
+- \`${SCOPED_DECISION_VALIDATION_PENDING_FILE}\`: pending decision rows.
+- \`${SCOPED_DECISION_VALIDATION_BLOCKED_EXECUTION_FILE}\`: execution blockers that keep P1.0 blocked.
+
+## Validation Rules
+
+- Empty \`approval_status\` is treated as \`pending\`.
+- \`approval_status\` must be one of \`pending\`, \`approved\`, \`rejected\`, or \`deferred\`.
+- Approved rows require a reviewer and should include reviewer notes.
+- \`safe_to_auto_apply=true\` requires strict approval evidence and is invalid for manual-review families.
+- OMSO, VFINE, LONGSUN, POLYPRINT, and THERMO HENGFENG decisions remain manual review unless later explicitly validated by narrower rules.
+- Blank/unmapped source rows cannot become canonical entities automatically.
+- Reject attachment rows cannot be converted into OK output scope.
+- Target profile seed rows require approved entity dependency, target bucket, target quantity, unit, reviewer, and notes.
+
+## Current Counts
+
+- Total decision rows: ${summary.totalDecisionRows}
+- Approved rows: ${summary.approvedRows}
+- Pending rows: ${summary.pendingRows}
+- Invalid rows: ${summary.invalidRows}
+- Warning rows: ${summary.warningRows}
+- Unsafe auto-apply rows: ${summary.unsafeAutoApplyRows}
+- Target profile blocked rows: ${summary.targetProfileBlockedRows}
+- Unknown source blocked rows: ${summary.unknownSourceBlockedRows}
+- Alias/canonical blocked rows: ${summary.aliasCanonicalBlockedRows}
+- Reject attachment blocked rows: ${summary.rejectAttachmentBlockedRows}
+
+## Safety
+
+- Reporting/validation only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` mutation.
+- No alias change.
+- No conditional rule change.
+- No dashboard switch.
+- P1.0 is not enabled by this command.
 `;
 }
 
@@ -5749,6 +5903,76 @@ async function runScopedDecisionReview() {
   for (const family of review.summary.topDecisionFamilies.slice(0, 10)) {
     console.log(`- ${family.decision_family}; rows=${family.grouped_rows}; groups=${family.blocker_groups}; categories=${family.categories}`);
   }
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
+async function runScopedDecisionValidate() {
+  const sourceFolder = resolveRepoPath(process.env.SCOPED_DECISION_REVIEW_DIR?.trim() || DEFAULT_SCOPED_DECISION_REVIEW_DIR);
+  const outputDir = resolveRepoPath(process.env.SCOPED_DECISION_VALIDATION_DIR?.trim() || DEFAULT_SCOPED_DECISION_VALIDATION_DIR);
+  const sourceFile = path.join(sourceFolder, SCOPED_DECISION_REVIEW_BOARD_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, SCOPED_DECISION_VALIDATION_SUMMARY_FILE),
+    readme: path.join(outputDir, SCOPED_DECISION_VALIDATION_README_FILE),
+    errors: path.join(outputDir, SCOPED_DECISION_VALIDATION_ERRORS_FILE),
+    warnings: path.join(outputDir, SCOPED_DECISION_VALIDATION_WARNINGS_FILE),
+    approved: path.join(outputDir, SCOPED_DECISION_VALIDATION_APPROVED_FILE),
+    pending: path.join(outputDir, SCOPED_DECISION_VALIDATION_PENDING_FILE),
+    blockedExecution: path.join(outputDir, SCOPED_DECISION_VALIDATION_BLOCKED_EXECUTION_FILE)
+  };
+
+  console.log("Business Central P0.9h scoped decision validator");
+  console.log("Mode: VALIDATION_ONLY");
+  console.log(`Source folder: ${displayRepoPath(sourceFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: reporting/validation only; database rows, target_profiles, aliases, conditional rules, and dashboard behavior are not changed.");
+
+  const inputRows = await readScopedDecisionValidationRows(sourceFile);
+  const validation = buildScopedDecisionValidation({
+    rows: inputRows,
+    sourceFolder: displayRepoPath(sourceFolder),
+    outputFolder: displayRepoPath(outputDir)
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(validation.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildScopedDecisionValidationReadme(validation.summary), "utf8");
+  await writeFile(outputFiles.errors, resolutionPackageCsv(scopedDecisionValidationIssueCsvHeaders, validation.validationErrors), "utf8");
+  await writeFile(outputFiles.warnings, resolutionPackageCsv(scopedDecisionValidationIssueCsvHeaders, validation.validationWarnings), "utf8");
+  await writeFile(outputFiles.approved, resolutionPackageCsv(scopedDecisionValidationSummaryCsvHeaders, validation.approvedDecisionSummary), "utf8");
+  await writeFile(outputFiles.pending, resolutionPackageCsv(scopedDecisionValidationSummaryCsvHeaders, validation.pendingDecisionSummary), "utf8");
+  await writeFile(outputFiles.blockedExecution, resolutionPackageCsv(scopedDecisionBlockedExecutionCsvHeaders, validation.blockedExecutionPlan), "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- validation_status=${validation.summary.validationStatus}`);
+  console.log(`- total_decision_rows=${validation.summary.totalDecisionRows}`);
+  console.log(`- approved_rows=${validation.summary.approvedRows}`);
+  console.log(`- pending_rows=${validation.summary.pendingRows}`);
+  console.log(`- rejected_rows=${validation.summary.rejectedRows}`);
+  console.log(`- deferred_rows=${validation.summary.deferredRows}`);
+  console.log(`- invalid_rows=${validation.summary.invalidRows}`);
+  console.log(`- warning_rows=${validation.summary.warningRows}`);
+  console.log(`- p1_blocking_pending_rows=${validation.summary.p1BlockingPendingRows}`);
+  console.log(`- p2_blocking_pending_rows=${validation.summary.p2BlockingPendingRows}`);
+  console.log(`- unsafe_auto_apply_rows=${validation.summary.unsafeAutoApplyRows}`);
+  console.log(`- target_profile_blocked_rows=${validation.summary.targetProfileBlockedRows}`);
+  console.log(`- unknown_source_blocked_rows=${validation.summary.unknownSourceBlockedRows}`);
+  console.log(`- alias_canonical_blocked_rows=${validation.summary.aliasCanonicalBlockedRows}`);
+  console.log(`- reject_attachment_blocked_rows=${validation.summary.rejectAttachmentBlockedRows}`);
+  console.log(`- p10_status=${validation.summary.p10Gate.status}`);
+
+  console.log("");
+  console.log("Top validation errors");
+  for (const row of validation.validationErrors.slice(0, 10)) console.log(`- ${row.validation_id}; ${row.decision_id}; ${row.code}; ${row.message}`);
+  if (validation.validationErrors.length === 0) console.log("- none");
+
+  console.log("");
+  console.log("Top warnings");
+  for (const row of validation.validationWarnings.slice(0, 10)) console.log(`- ${row.validation_id}; ${row.decision_id}; ${row.code}; ${row.message}`);
+  if (validation.validationWarnings.length === 0) console.log("- none");
 
   console.log("");
   console.log("Files written");
@@ -6420,11 +6644,15 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
+    return;
+  }
+  if (command === "scoped-decision-validate") {
+    await runScopedDecisionValidate();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });

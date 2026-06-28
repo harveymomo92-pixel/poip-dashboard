@@ -93,6 +93,14 @@ P0.9g consumes `.tmp/bc-scoped-blocker-package/true-p10-blockers.csv` and writes
 - Target profile rows depend on approved entity/canonical decisions.
 - P1.0 gate remains `BLOCKED` while decision rows remain pending.
 
+P0.9h consumes `.tmp/bc-scoped-decision-review/decision-board.csv` and writes `.tmp/bc-scoped-decision-validation/`. The validation contract is validation-only:
+
+- Empty `approval_status` is treated as `pending`; allowed statuses are `pending`, `approved`, `rejected`, and `deferred`.
+- Approved rows require `reviewer`; reviewer notes are expected and are required for blocking unknown-source resolution.
+- `safe_to_auto_apply=true` and `safe_to_seed_target_profile=true` are invalid unless strict reviewer, dependency, and deterministic-field requirements pass.
+- OMSO, VFINE, LONGSUN, POLYPRINT, THERMO HENGFENG, blank/unmapped, reject, and target-profile dependency safeguards remain manual-review gates.
+- Validation status is `INVALID`, `BLOCKED`, `PASS_WITH_WARNINGS`, or `PASS`; this command never enables P1.0.
+
 ## Target Rule
 
 1. Target must be matched by entity and effective date range.

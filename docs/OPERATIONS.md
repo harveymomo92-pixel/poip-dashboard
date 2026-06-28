@@ -843,16 +843,19 @@ PURCHASE -> PURCHASE_OR_RECEIVING
 
 They are all `OUT_OF_CURRENT_KPI_SCOPE`, remain visible in reports, and no longer block P1.0 after scope. Do not treat `NEGATIVE ADJMT.`, `POSITIVE ADJMT.`, or sparepart/material text-pattern candidates as implemented rules yet.
 
-P0.9f/P0.9g scoped review commands:
+P0.9f/P0.9g/P0.9h scoped review commands:
 
 ```bash
 pnpm bc:scoped-blocker-package
 pnpm bc:scoped-decision-review
+pnpm bc:scoped-decision-validate
 ```
 
 `bc:scoped-decision-review` reads `.tmp/bc-scoped-blocker-package/true-p10-blockers.csv` and writes `.tmp/bc-scoped-decision-review/`.
 
-Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Every row defaults `safe_to_auto_apply=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from this package. P1.0 remains blocked until pending decisions are reviewed and the dry-run gates are rerun.
+`bc:scoped-decision-validate` reads `.tmp/bc-scoped-decision-review/decision-board.csv` and writes `.tmp/bc-scoped-decision-validation/`.
+
+Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 
 ### P1.0 planned comparison command
 
