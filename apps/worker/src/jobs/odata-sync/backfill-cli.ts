@@ -220,7 +220,7 @@ export async function runBackfillCheck(): Promise<void> {
     maxPages: Number.parseInt(checkMaxPages, 10),
     forcePageSize: true
   };
-  const rows = await client.fetchProductionOutputs({
+  const rows = await client.fetchBcLedgerEntries({
     mode: "backfill",
     sourceSystem: env("BACKFILL_SOURCE_SYSTEM") ?? DEFAULT_SOURCE_SYSTEM,
     lastEntryNo: null,

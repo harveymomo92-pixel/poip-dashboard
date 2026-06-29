@@ -294,7 +294,7 @@ function maxEntryNo(rows: readonly Record<string, unknown>[]): bigint | null {
 }
 
 export class MockBusinessCentralODataClient implements ODataClient {
-  fetchProductionOutputs(request: ODataFetchRequest) {
+  fetchBcLedgerEntries(request: ODataFetchRequest) {
     const baseEntry = request.lastEntryNo ? Number(request.lastEntryNo) + 1 : 1001;
     const rows = [
       {
@@ -405,7 +405,7 @@ export class BusinessCentralODataClient implements ODataClient {
     return readBigintField(payload.value[0], fieldName);
   }
 
-  async fetchProductionOutputs(request: ODataFetchRequest) {
+  async fetchBcLedgerEntries(request: ODataFetchRequest) {
     let url = buildODataRequestUrl(this.endpointUrl, request);
     this.fetchStats = { ...emptyFetchStats };
     const maxPages =

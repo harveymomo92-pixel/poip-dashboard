@@ -76,7 +76,7 @@ export interface ODataFetchRequest {
 }
 
 export interface ODataClient {
-  fetchProductionOutputs(request: ODataFetchRequest): Promise<readonly ODataOutputRawRow[]>;
+  fetchBcLedgerEntries(request: ODataFetchRequest): Promise<readonly ODataOutputRawRow[]>;
   fetchLatestEntryNo?(request: ODataLatestEntryRequest): Promise<bigint | null>;
   sourceUrl(): string | null;
   lastFetchStats?(): ODataFetchStats;

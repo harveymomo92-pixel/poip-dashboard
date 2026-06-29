@@ -118,7 +118,7 @@ test("BusinessCentralODataClient preserves complex endpoint paths and builds saf
     }
   );
 
-  const rows = await client.fetchProductionOutputs(incrementalRequest);
+  const rows = await client.fetchBcLedgerEntries(incrementalRequest);
 
   assert.equal(rows.length, 1);
   const requestUrl = requireCaptured(captured.url ?? null);
@@ -280,7 +280,7 @@ test("BusinessCentralODataClient follows OData nextLink pagination", async () =>
     }
   );
 
-  const rows = await client.fetchProductionOutputs({
+  const rows = await client.fetchBcLedgerEntries({
     mode: "backfill",
     sourceSystem: "business-central",
     lastEntryNo: null,
@@ -317,7 +317,7 @@ test("BusinessCentralODataClient uses Entry_No keyset pagination when nextLink i
     }
   );
 
-  const rows = await client.fetchProductionOutputs({
+  const rows = await client.fetchBcLedgerEntries({
     mode: "backfill",
     sourceSystem: "business-central",
     lastEntryNo: null,
@@ -353,7 +353,7 @@ test("BusinessCentralODataClient preserves bearer auth behavior", async () => {
     }
   );
 
-  await client.fetchProductionOutputs(incrementalRequest);
+  await client.fetchBcLedgerEntries(incrementalRequest);
   assert.equal(authorization, "Bearer unit-test-bearer-token");
 });
 
@@ -369,7 +369,7 @@ test("OData network errors and source URLs do not leak credentials or query valu
   );
 
   await assert.rejects(
-    () => client.fetchProductionOutputs(incrementalRequest),
+    () => client.fetchBcLedgerEntries(incrementalRequest),
     (error: Error) => {
       assert.equal(error.message, "OData request failed before receiving a response");
       assert.doesNotMatch(error.message, /private-user|private-password/);
@@ -391,7 +391,7 @@ test("OData non-JSON responses produce sanitized errors", async () => {
   );
 
   await assert.rejects(
-    () => client.fetchProductionOutputs(incrementalRequest),
+    () => client.fetchBcLedgerEntries(incrementalRequest),
     (error: Error) => {
       assert.match(error.message, /OData response is not valid JSON/);
       assert.doesNotMatch(error.message, /private-user|private-password/);

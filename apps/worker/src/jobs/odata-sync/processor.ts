@@ -168,7 +168,7 @@ export class ODataSyncProcessor {
       strategy = decision.metadata;
       const rawRows = decision.skipFetch
         ? []
-        : await this.client.fetchProductionOutputs({
+        : await this.client.fetchBcLedgerEntries({
             mode: payload.mode,
             sourceSystem: payload.sourceSystem,
             lastEntryNo: decision.lastEntryNo,

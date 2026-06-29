@@ -2,7 +2,7 @@ import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Redis } from "ioredis";
-import { productionOutputs, syncCheckpoints, syncRuns } from "@poip/db";
+import { bcLedgerEntries, syncCheckpoints, syncRuns } from "@poip/db";
 import { DATABASE, type DatabaseConnection } from "../database/database.module.js";
 import type { ODataSyncJobPayload, ODataSyncMode } from "./sync.types.js";
 
@@ -152,9 +152,9 @@ export class SyncService implements OnModuleDestroy {
       .limit(1);
     const checkpoint = await this.getCheckpoint(sourceSystem);
     const [latestOutput] = await this.database.db
-      .select({ latestPostingDate: sql<string | null>`max(${productionOutputs.postingDate})` })
-      .from(productionOutputs)
-      .where(eq(productionOutputs.sourceSystem, sourceSystem));
+      .select({ latestPostingDate: sql<string | null>`max(${bcLedgerEntries.postingDate})` })
+      .from(bcLedgerEntries)
+      .where(eq(bcLedgerEntries.sourceSystem, sourceSystem));
 
     const freshnessMinutes =
       latestSuccessfulRun?.finishedAt

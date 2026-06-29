@@ -73,6 +73,27 @@ Sample files:
 
 This document records how Business Central OData output fields should be interpreted so future entity, target, reject, and data-quality work does not guess from column names.
 
+## Clean Ledger Table Direction
+
+The table formerly named `production_outputs` is now conceptually and physically `bc_ledger_entries`. The staging table formerly named `production_output_staging` is now `bc_ledger_entry_staging`.
+
+`bc_ledger_entries` is broader than production output KPI data. It retains Business Central output, reject, transfer, sales, purchase, consumption, inventory movement, scrap/waste, material, and future-use rows. Production dashboard reads must use `production_output_kpi_rows` or the equivalent filter:
+
+```sql
+bc_domain = 'PRODUCTION_OUTPUT'
+and mapping_status = 'MAPPED_READY'
+and dashboard_ready = true
+```
+
+Future-use rows are retained for later modules. They must not be forced into production KPI totals. Target data remains empty and untouched until rebuilt/imported separately through the approved clean path.
+
+Sync-time enrichment should classify ledger rows, choose OData identity evidence, and map only exact approved/current master data. Backfill enrichment requires an explicit preview and guarded apply:
+
+```bash
+pnpm bc:ledger-backfill-preview
+ALLOW_BC_LEDGER_BACKFILL_APPLY=true pnpm bc:ledger-backfill-apply --confirm
+```
+
 Safety rules:
 
 ```text

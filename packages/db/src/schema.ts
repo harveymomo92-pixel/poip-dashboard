@@ -161,7 +161,7 @@ export const syncCheckpoints = pgTable("sync_checkpoints", {
   updatedAt
 });
 
-export const productionOutputStaging = pgTable("production_output_staging", {
+export const bcLedgerEntryStaging = pgTable("bc_ledger_entry_staging", {
   id,
   syncRunId: uuid("sync_run_id")
     .notNull()
@@ -171,11 +171,19 @@ export const productionOutputStaging = pgTable("production_output_staging", {
   rowHash: text("row_hash").notNull(),
   validationStatus: text("validation_status").notNull().default("PENDING"),
   validationErrors: jsonb("validation_errors").notNull().default(sql`'[]'::jsonb`),
+  bcDomain: text("bc_domain"),
+  movementDomain: text("movement_domain"),
+  movementStatus: text("movement_status"),
+  mappingStatus: text("mapping_status"),
+  sourceIdentityField: text("source_identity_field"),
+  sourceIdentityValue: text("source_identity_value"),
+  classificationReason: text("classification_reason"),
+  mappingReason: text("mapping_reason"),
   createdAt
 });
 
-export const productionOutputs = pgTable(
-  "production_outputs",
+export const bcLedgerEntries = pgTable(
+  "bc_ledger_entries",
   {
     id,
     sourceSystem: text("source_system").notNull(),
@@ -203,17 +211,42 @@ export const productionOutputs = pgTable(
     rowHash: text("row_hash").notNull(),
     rawPayload: jsonb("raw_payload").notNull().default(sql`'{}'::jsonb`),
     syncRunId: uuid("sync_run_id").references(() => syncRuns.id),
+    bcDomain: text("bc_domain").notNull().default("UNKNOWN_REVIEW"),
+    movementDomain: text("movement_domain").notNull().default("UNKNOWN_REVIEW"),
+    movementStatus: text("movement_status").notNull().default("UNCLASSIFIED"),
+    mappingStatus: text("mapping_status").notNull().default("UNMAPPED_NEEDS_REVIEW"),
+    sourceIdentityField: text("source_identity_field"),
+    sourceIdentityValue: text("source_identity_value"),
+    dashboardReady: boolean("dashboard_ready").notNull().default(false),
+    futureUseReady: boolean("future_use_ready").notNull().default(false),
+    classificationReason: text("classification_reason"),
+    mappingReason: text("mapping_reason"),
+    classifiedAt: timestamp("classified_at", { withTimezone: true }),
+    mappedAt: timestamp("mapped_at", { withTimezone: true }),
     createdAt,
     updatedAt
   },
   (table) => [
-    unique("production_outputs_source_entry_unique").on(table.sourceSystem, table.entryNo),
-    index("idx_outputs_posting_date").on(table.postingDate),
-    index("idx_outputs_entity_date").on(table.entityId, table.postingDate),
-    index("idx_outputs_item_date").on(table.itemNo, table.postingDate),
-    index("idx_outputs_document_no").on(table.documentNo),
-    index("idx_outputs_machine_date").on(table.machineCenterNo, table.postingDate),
-    index("idx_outputs_raw_payload_gin").using("gin", table.rawPayload)
+    unique("bc_ledger_entries_source_entry_unique").on(table.sourceSystem, table.entryNo),
+    index("idx_bc_ledger_entries_posting_date").on(table.postingDate),
+    index("idx_bc_ledger_entries_entity_date").on(table.entityId, table.postingDate),
+    index("idx_bc_ledger_entries_item_date").on(table.itemNo, table.postingDate),
+    index("idx_bc_ledger_entries_document_no").on(table.documentNo),
+    index("idx_bc_ledger_entries_machine_date").on(table.machineCenterNo, table.postingDate),
+    index("idx_bc_ledger_entries_raw_payload_gin").using("gin", table.rawPayload),
+    index("idx_bc_ledger_entries_entry_no").on(table.entryNo),
+    index("idx_bc_ledger_entries_entry_type").on(table.entryType),
+    index("idx_bc_ledger_entries_normalized_output_type").on(table.normalizedOutputType),
+    index("idx_bc_ledger_entries_bc_domain").on(table.bcDomain),
+    index("idx_bc_ledger_entries_movement_domain").on(table.movementDomain),
+    index("idx_bc_ledger_entries_movement_status").on(table.movementStatus),
+    index("idx_bc_ledger_entries_mapping_status").on(table.mappingStatus),
+    index("idx_bc_ledger_entries_entity_id").on(table.entityId),
+    index("idx_bc_ledger_entries_dashboard_ready").on(table.dashboardReady),
+    index("idx_bc_ledger_entries_future_use_ready").on(table.futureUseReady),
+    index("idx_bc_ledger_entries_prod_line_description").on(table.prodLineDescription),
+    index("idx_bc_ledger_entries_prod_line_no").on(table.prodLineNo),
+    index("idx_bc_ledger_entries_machine_center_no").on(table.machineCenterNo)
   ]
 );
 

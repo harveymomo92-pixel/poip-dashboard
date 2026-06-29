@@ -92,7 +92,7 @@ Prepared after rollback cleanup: 2026-06-29
 
 ### Milestone 3 — OData Sync Pipeline
 
-- PRD purpose: implement sync runs/checkpoints, OData client, staging validation, production output upsert, data quality generation, sync center UI, manual sync, and worker job.
+- PRD purpose: implement sync runs/checkpoints, OData client, staging validation, Business Central ledger upsert, data quality generation, sync center UI, manual sync, and worker job.
 - Current status: `NEEDS_VERIFICATION`
 - Evidence from current repo:
   - Worker OData sync code exists under `apps/worker/src/jobs/odata-sync`.
@@ -102,6 +102,7 @@ Prepared after rollback cleanup: 2026-06-29
 - What remains:
   - Re-run mock and live sync checks after rollback.
   - Confirm current OData selected columns align with `docs/BC_ODATA_OUTPUT_COLUMN_MAP.md`.
+  - Confirm new sync rows are classified into `bc_ledger_entries` without treating every ledger movement as production output KPI.
   - Confirm data quality issue generation with current sample/live data.
 
 ### Milestone 4 — Output Dashboard and Detail Explorer
@@ -266,40 +267,55 @@ Prepared after rollback cleanup: 2026-06-29
 
 ## Clean Side Milestones
 
-### P0-clean-1: BC Smart Mapping Candidate Review
+### P0-clean-1: BC OData DB Mapping Alignment Audit
 
-- Command planned: `pnpm bc:smart-map-review`
-- Purpose: generate smart OData mapping candidates.
-- User role: review/edit suggestions only.
+- Command: `pnpm bc:odata-db-mapping-audit`
+- Purpose: inspect current database data and compare existing entity/mapping usage against Business Central OData identity evidence.
+- Output folder: `.tmp/bc-odata-db-mapping-audit/`
+- User role: review exported evidence before any remap dry-run.
+- DB apply: none.
+- Current status: `PARTIAL`
+- Notes:
+  - This is an audit alignment step, not a new mapping chain.
+  - It uses `docs/BC_ODATA_OUTPUT_COLUMN_MAP.md` identity precedence:
+    `gProdOrRotLine_Description`, then `gProdOrRotLine_No`, then `Machine_Center_No` as fallback evidence only.
+  - It does not apply DB changes, update aliases, update targets, or switch dashboard behavior.
+  - Smart mapping candidate generation should come only after understanding existing DB mismatch.
+
+### P0-clean-2-big: BC Ledger Entries Rename + Future-Use Semantic Structure
+
+- Commands:
+  - `pnpm bc:ledger-backfill-preview`
+  - `ALLOW_BC_LEDGER_BACKFILL_APPLY=true pnpm bc:ledger-backfill-apply --confirm`
+- Purpose: rename the broad Business Central movement table from `production_outputs` to `bc_ledger_entries`, retain future-use ledger domains, classify rows, enrich safe exact mappings, and keep the production dashboard limited to ready production output rows.
+- DB apply: schema migration plus guarded semantic enrichment only.
+- Current status: `NEEDS_VERIFICATION`
+- Evidence from current repo:
+  - Migration `packages/db/migrations/0007_bc_ledger_entries.sql` renames `production_outputs` to `bc_ledger_entries` and `production_output_staging` to `bc_ledger_entry_staging`.
+  - The migration adds ledger semantic columns, indexes, compatibility views, and safe read views: `production_output_kpi_rows`, `reject_attachment_rows`, `future_use_movement_rows`, and `bc_ledger_review_rows`.
+  - Drizzle schema exports use `bcLedgerEntries` and `bcLedgerEntryStaging`.
+  - Worker sync writes to `bc_ledger_entries`/`bc_ledger_entry_staging`, classifies domains, records OData identity source, and maps only exact approved/current entity evidence.
+  - Dashboard reads use `production_output_kpi_rows` or equivalent ready filters.
+  - Preview/apply commands exist for ledger backfill classification and mapping enrichment.
+- Notes:
+  - `Machine_Center_No` remains fallback evidence only and must not become primary identity unless explicitly reviewed later.
+  - Future-use domains are retained instead of forced into production output KPI.
+  - Target tables remain separate and must remain empty/untouched until rebuilt or imported through the approved target path.
+  - User review remains required before trusting or applying semantic enrichment output.
+
+### P0-clean-3: Reviewed Ledger Remap Apply Plan
+
+- Command planned: review output from `pnpm bc:ledger-backfill-preview`.
+- Purpose: review the ledger preview output, confirm safe remap/apply scope, and generate/approve a rollback-aware apply plan before any production apply.
 - DB apply: none.
 - Current status: `NOT_STARTED`
-- Notes: This must use `docs/BC_ODATA_OUTPUT_COLUMN_MAP.md` as reference evidence and must not switch dashboard behavior.
 
-### P0-clean-2: Smart Mapping Review Intake
+### P0-clean-4: Controlled Target Rebuild and Calculation Recheck
 
-- Command planned: `pnpm bc:smart-map-review-intake`
-- Purpose: validate the reviewed smart mapping file.
-- DB apply: none.
+- Purpose: rebuild/import target data correctly after ledger mapping is approved, then rerun P0.1 calculation verification.
+- DB apply: target import only through the approved clean path.
 - Current status: `NOT_STARTED`
-
-### P0-clean-3: Smart Mapping Apply Plan
-
-- Command planned: `pnpm bc:smart-map-apply-plan`
-- Purpose: generate SQL/apply plan and rollback plan.
-- DB apply: none.
-- Current status: `NOT_STARTED`
-
-### P0-clean-4: Controlled DB Apply
-
-- Command planned:
-
-```bash
-ALLOW_BC_SMART_MAP_APPLY=true pnpm bc:smart-map-apply --confirm-reviewed
-```
-
-- Purpose: apply reviewed mapping with audit and rollback safety.
-- DB apply: controlled and explicitly gated.
-- Current status: `NOT_STARTED`
+- Notes: Do not restore the old target profile dry-run chain.
 
 ### P1-clean: Dashboard Usable With Approved Mapping
 
@@ -322,11 +338,11 @@ Target code/schema may remain because target management is still required by the
 ## Recommended Next Work
 
 1. Finish and commit P0-clean-0.
-2. Implement P0-clean-1.
-3. Implement P0-clean-2.
-4. Implement P0-clean-3.
-5. Implement P0-clean-4.
+2. Finish and commit P0-clean-1.
+3. Finish and verify P0-clean-2-big.
+4. Review `pnpm bc:ledger-backfill-preview` output.
+5. Approve and run guarded ledger backfill apply only when the preview is accepted.
 6. Rebuild/import target data correctly through the approved clean path.
 7. Re-run P0.1 calculation verification.
 
-Recommended next milestone: `P0-clean-1: BC Smart Mapping Candidate Review`.
+Recommended next milestone: `P0-clean-3: Reviewed Ledger Remap Apply Plan`.

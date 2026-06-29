@@ -32,7 +32,7 @@ test("ODataSyncProcessor commits successful mocked OData rows", async () => {
   };
   const client: ODataClient = {
     sourceUrl: () => "mock://test",
-    fetchProductionOutputs: async (request) => {
+    fetchBcLedgerEntries: async (request) => {
       assert.equal(request.lastEntryNo, 1000n);
       return [
         {
@@ -77,7 +77,7 @@ test("ODataSyncProcessor marks failed run and leaves commit untouched", async ()
   };
   const client: ODataClient = {
     sourceUrl: () => "mock://test",
-    fetchProductionOutputs: async () => {
+    fetchBcLedgerEntries: async () => {
       throw new Error("OData unavailable");
     }
   };
@@ -132,7 +132,7 @@ test("ODataSyncProcessor forwards backfill options without using incremental che
       keysetPaginationUsed: false,
       truncatedByMaxPages: false
     }),
-    fetchProductionOutputs: async (request) => {
+    fetchBcLedgerEntries: async (request) => {
       receivedBackfillFrom = request.backfill?.from ?? null;
       receivedLastEntryNo = request.lastEntryNo;
       return [];
@@ -189,7 +189,7 @@ test("ODataSyncProcessor skips large pull when remote latest Entry_No is not new
   const client: ODataClient = {
     sourceUrl: () => "https://businesscentral.example.test/odata",
     fetchLatestEntryNo: async () => 1999n,
-    fetchProductionOutputs: async () => {
+    fetchBcLedgerEntries: async () => {
       fetchCalled = true;
       return [];
     }
@@ -240,7 +240,7 @@ test("ODataSyncProcessor fetches only Entry_No greater than latest local entry w
   const client: ODataClient = {
     sourceUrl: () => "https://businesscentral.example.test/odata",
     fetchLatestEntryNo: async () => 2001n,
-    fetchProductionOutputs: async (request) => {
+    fetchBcLedgerEntries: async (request) => {
       receivedLastEntryNo = request.lastEntryNo;
       return [
         {
@@ -298,7 +298,7 @@ test("ODataSyncProcessor uses a recent backfill scan window when remote latest i
   const client: ODataClient = {
     sourceUrl: () => "https://businesscentral.example.test/odata",
     fetchLatestEntryNo: async () => 2000n,
-    fetchProductionOutputs: async (request) => {
+    fetchBcLedgerEntries: async (request) => {
       receivedRange = request.range;
       return [];
     }

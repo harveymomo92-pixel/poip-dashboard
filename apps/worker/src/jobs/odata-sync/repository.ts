@@ -1,5 +1,15 @@
-import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, productionOutputStaging, productionOutputs, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
-import { createDuplicateEntryIssue, nextSyncCheckpoint, type DataQualitySignal } from "@poip/domain";
+import { createDatabase, dataQualityIssues, masterEntities, masterEntityAliases, bcLedgerEntryStaging, bcLedgerEntries, productionTargets, syncCheckpoints, syncRuns } from "@poip/db";
+import {
+  classifyBcLedgerEntry,
+  createDuplicateEntryIssue,
+  determineBcLedgerIdentity,
+  determineBcLedgerMapping,
+  nextSyncCheckpoint,
+  type DataQualitySignal,
+  type BcLedgerClassification,
+  type BcLedgerIdentity,
+  type BcLedgerMapping
+} from "@poip/domain";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDatabaseUrl } from "../../common/env.js";
 import type {
@@ -19,24 +29,9 @@ interface EntityLookup {
 }
 
 function normalizedLookupKey(value: string | null | undefined): string | null {
-  const compact = value?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
-  if (!compact) return null;
-  return compact;
-}
-
-function legacyMachineFamilyKey(value: string | null | undefined): string | null {
-  const compact = normalizedLookupKey(value);
-  if (!compact) return null;
-  if (compact.startsWith("LONGSUNG")) return "LONGSUN";
-  if (compact.startsWith("BORCH")) return "BORCHE";
-  if (compact.startsWith("HENGFENG") || /^HF\d*/.test(compact)) return "HENGFENG";
-  if (compact.startsWith("TF") || compact.startsWith("ILLIG")) return "ILLIG";
-  if (compact.startsWith("VFINE") || compact.startsWith("VF")) return "VFINE";
-  if (compact.startsWith("CHUMPOWER") || /^CP\d*/.test(compact)) return "CHUMPOWER";
-  if (compact.startsWith("POLY")) return "POLYPRINT";
-  if (compact.startsWith("NEWDO")) return "NEWDO";
-  if (compact.startsWith("OMSO")) return "OMSO";
-  return compact;
+  const normalized = value?.trim().toUpperCase();
+  if (!normalized) return null;
+  return normalized;
 }
 
 function addEntityLookupKey(map: Map<string, string>, key: string | null | undefined, entityId: string): void {
@@ -44,15 +39,6 @@ function addEntityLookupKey(map: Map<string, string>, key: string | null | undef
   if (exact && !map.has(exact)) map.set(exact, entityId);
   const normalized = normalizedLookupKey(key);
   if (normalized && !map.has(normalized)) map.set(normalized, entityId);
-}
-
-function addLegacyMachineFamilyLookupKey(
-  map: Map<string, string>,
-  key: string | null | undefined,
-  entityId: string
-): void {
-  const family = legacyMachineFamilyKey(key);
-  if (family && !map.has(family)) map.set(family, entityId);
 }
 
 function checkpointToJson(checkpoint: SyncCheckpointSnapshot) {
@@ -122,6 +108,12 @@ function metadataSql(metadata: Record<string, unknown> | undefined) {
   return sql`${syncRuns.metadata} || ${JSON.stringify(metadata ?? {})}::jsonb`;
 }
 
+interface LedgerEnrichment {
+  readonly classification: BcLedgerClassification;
+  readonly identity: BcLedgerIdentity;
+  readonly mapping: BcLedgerMapping;
+}
+
 export class DrizzleSyncRunRepository implements SyncRunRepository {
   private readonly database = createDatabase({ connectionString: getDatabaseUrl() });
 
@@ -131,9 +123,9 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
 
   async getLatestLocalEntryNo(sourceSystem: string): Promise<bigint | null> {
     const [row] = await this.database.db
-      .select({ latestEntryNo: sql<bigint | null>`max(${productionOutputs.entryNo})` })
-      .from(productionOutputs)
-      .where(eq(productionOutputs.sourceSystem, sourceSystem));
+      .select({ latestEntryNo: sql<bigint | null>`max(${bcLedgerEntries.entryNo})` })
+      .from(bcLedgerEntries)
+      .where(eq(bcLedgerEntries.sourceSystem, sourceSystem));
     return row?.latestEntryNo ?? null;
   }
 
@@ -213,12 +205,12 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       const existingRows =
         committedEntryNos.length > 0
           ? await tx
-              .select({ entryNo: productionOutputs.entryNo, rowHash: productionOutputs.rowHash })
-              .from(productionOutputs)
+              .select({ entryNo: bcLedgerEntries.entryNo, rowHash: bcLedgerEntries.rowHash })
+              .from(bcLedgerEntries)
               .where(
                 and(
-                  eq(productionOutputs.sourceSystem, input.run.sourceSystem),
-                  inArray(productionOutputs.entryNo, committedEntryNos)
+                  eq(bcLedgerEntries.sourceSystem, input.run.sourceSystem),
+                  inArray(bcLedgerEntries.entryNo, committedEntryNos)
                 )
               )
           : [];
@@ -240,7 +232,8 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       }[] = [];
 
       for (const row of input.rows) {
-        const entityId = this.resolveEntityId(row, context);
+        const enrichment = this.enrichLedgerRow(row, context);
+        const entityId = enrichment.mapping.entityId;
         const issues = [...row.issues];
         if (row.normalized.entryNo !== null && (!maxSeenEntryNo || row.normalized.entryNo > maxSeenEntryNo)) {
           maxSeenEntryNo = row.normalized.entryNo;
@@ -252,14 +245,14 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           if (previousHash && previousHash !== row.rowHash) issues.push(createDuplicateEntryIssue());
           seenHashByEntry.set(pendingEntryKey, row.rowHash);
         }
-        if (row.normalized.machineCenterNo && !entityId) {
+        if (enrichment.classification.bcDomain === "PRODUCTION_OUTPUT" && !enrichment.mapping.dashboardReady) {
           issues.push({
             code: "UNKNOWN_MACHINE",
             severity: "WARNING",
-            description: `Machine ${row.normalized.machineCenterNo} is not mapped to a master entity`
+            description: enrichment.mapping.mappingReason
           });
         }
-        if (entityId && row.normalized.postingDate && !this.hasTarget(entityId, row.normalized.postingDate, context)) {
+        if (enrichment.mapping.dashboardReady && entityId && row.normalized.postingDate && !this.hasTarget(entityId, row.normalized.postingDate, context)) {
           issues.push({
             code: "MISSING_TARGET",
             severity: "WARNING",
@@ -267,13 +260,21 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           });
         }
 
-        await tx.insert(productionOutputStaging).values({
+        await tx.insert(bcLedgerEntryStaging).values({
           syncRunId: input.run.id,
           sourceSystem: input.run.sourceSystem,
           rawPayload: row.rawPayload,
           rowHash: row.rowHash,
           validationStatus: hasCriticalIssue(issues) ? "INVALID" : "VALID",
-          validationErrors: issues.map(serializeIssue)
+          validationErrors: issues.map(serializeIssue),
+          bcDomain: enrichment.classification.bcDomain,
+          movementDomain: enrichment.classification.movementDomain,
+          movementStatus: enrichment.classification.movementStatus,
+          mappingStatus: enrichment.mapping.mappingStatus,
+          sourceIdentityField: enrichment.identity.sourceIdentityField,
+          sourceIdentityValue: enrichment.identity.sourceIdentityValue,
+          classificationReason: enrichment.classification.classificationReason,
+          mappingReason: enrichment.mapping.mappingReason
         });
 
         issueCandidates.push({ row, entityId, issues });
@@ -292,7 +293,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
           rowsSkipped += 1;
         } else {
           await tx
-            .insert(productionOutputs)
+            .insert(bcLedgerEntries)
             .values({
               sourceSystem: input.run.sourceSystem,
               entryNo: row.normalized.entryNo,
@@ -318,10 +319,22 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
               rejectPcsEq: numeric(row.normalized.rejectPcsEq),
               rowHash: row.rowHash,
               rawPayload: row.rawPayload,
-              syncRunId: input.run.id
+              syncRunId: input.run.id,
+              bcDomain: enrichment.classification.bcDomain,
+              movementDomain: enrichment.classification.movementDomain,
+              movementStatus: enrichment.classification.movementStatus,
+              mappingStatus: enrichment.mapping.mappingStatus,
+              sourceIdentityField: enrichment.identity.sourceIdentityField,
+              sourceIdentityValue: enrichment.identity.sourceIdentityValue,
+              dashboardReady: enrichment.mapping.dashboardReady,
+              futureUseReady: enrichment.classification.futureUseReady,
+              classificationReason: enrichment.classification.classificationReason,
+              mappingReason: enrichment.mapping.mappingReason,
+              classifiedAt: new Date(),
+              mappedAt: new Date()
             })
             .onConflictDoUpdate({
-              target: [productionOutputs.sourceSystem, productionOutputs.entryNo],
+              target: [bcLedgerEntries.sourceSystem, bcLedgerEntries.entryNo],
               set: {
                 postingDate: row.normalized.postingDate,
                 documentDate: row.normalized.documentDate,
@@ -333,7 +346,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
                 itemDescription: row.normalized.itemDescription,
                 itemCategoryCode: row.normalized.itemCategoryCode,
                 machineCenterNo: row.normalized.machineCenterNo,
-                entityId,
+                entityId: sql`coalesce(excluded.entity_id, ${bcLedgerEntries.entityId})`,
                 prodLineNo: row.normalized.prodLineNo,
                 prodLineDescription: row.normalized.prodLineDescription,
                 shiftCode: row.normalized.shiftCode,
@@ -346,6 +359,18 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
                 rowHash: row.rowHash,
                 rawPayload: row.rawPayload,
                 syncRunId: input.run.id,
+                bcDomain: enrichment.classification.bcDomain,
+                movementDomain: enrichment.classification.movementDomain,
+                movementStatus: enrichment.classification.movementStatus,
+                mappingStatus: enrichment.mapping.mappingStatus,
+                sourceIdentityField: enrichment.identity.sourceIdentityField,
+                sourceIdentityValue: enrichment.identity.sourceIdentityValue,
+                dashboardReady: enrichment.mapping.dashboardReady,
+                futureUseReady: enrichment.classification.futureUseReady,
+                classificationReason: enrichment.classification.classificationReason,
+                mappingReason: enrichment.mapping.mappingReason,
+                classifiedAt: sql`now()`,
+                mappedAt: sql`now()`,
                 updatedAt: sql`now()`
               }
             });
@@ -480,12 +505,9 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
       addEntityLookupKey(entityByAlias, entity.displayName, entity.id);
       addEntityLookupKey(entityByAlias, entity.lineCode, entity.id);
       addEntityLookupKey(entityByAlias, entity.reportGroup, entity.id);
-      addLegacyMachineFamilyLookupKey(entityByAlias, entity.code, entity.id);
-      addLegacyMachineFamilyLookupKey(entityByAlias, entity.displayName, entity.id);
     }
     for (const alias of aliases) {
       addEntityLookupKey(entityByAlias, alias.alias, alias.entityId);
-      addLegacyMachineFamilyLookupKey(entityByAlias, alias.alias, alias.entityId);
     }
 
     return {
@@ -497,18 +519,41 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
     };
   }
 
-  private resolveEntityId(row: StagedOutputRow, context: EntityLookup): string | null {
-    const machine = row.normalized.machineCenterNo;
-    if (!machine) return null;
-    const exact = machine.trim().toUpperCase();
-    const normalized = normalizedLookupKey(machine);
-    const family = legacyMachineFamilyKey(machine);
+  private enrichLedgerRow(row: StagedOutputRow, context: EntityLookup): LedgerEnrichment {
+    const classification = classifyBcLedgerEntry({
+      entryType: row.normalized.entryType,
+      normalizedOutputType: row.normalized.normalizedOutputType,
+      itemNo: row.normalized.itemNo,
+      itemDescription: row.normalized.itemDescription,
+      itemCategoryCode: row.normalized.itemCategoryCode,
+      uom: row.normalized.uom,
+      documentNo: row.normalized.documentNo,
+      quantity: row.normalized.quantity,
+      rawPayload: row.rawPayload
+    });
+    const identity = determineBcLedgerIdentity({
+      prodLineDescription: row.normalized.prodLineDescription,
+      prodLineNo: row.normalized.prodLineNo,
+      machineCenterNo: row.normalized.machineCenterNo
+    });
+    const resolvedEntityId = this.resolveEntityId(identity, context);
+    return {
+      classification,
+      identity,
+      mapping: determineBcLedgerMapping({
+        ...classification,
+        ...identity,
+        resolvedEntityId
+      })
+    };
+  }
+
+  private resolveEntityId(identity: BcLedgerIdentity, context: EntityLookup): string | null {
+    if (!identity.sourceIdentityValue) return null;
+    const exact = normalizedLookupKey(identity.sourceIdentityValue);
     return (
-      context.entityByCode.get(exact) ??
-      (normalized ? context.entityByCode.get(normalized) : null) ??
-      context.entityByAlias.get(exact) ??
-      (normalized ? context.entityByAlias.get(normalized) : null) ??
-      (family ? context.entityByAlias.get(family) : null) ??
+      (exact ? context.entityByCode.get(exact) : null) ??
+      (exact ? context.entityByAlias.get(exact) : null) ??
       null
     );
   }
@@ -553,7 +598,7 @@ export class DrizzleSyncRunRepository implements SyncRunRepository {
         await tx.insert(dataQualityIssues).values({
           issueCode: issue.code,
           severity: issue.severity,
-          entityType: "production_output",
+          entityType: "bc_ledger_entry",
           entityId: candidate.entityId,
           sourceSystem,
           sourceRef: ref,

@@ -219,7 +219,7 @@ export class DashboardReadRepository {
           coalesce(sum(case when po.normalized_output_type = 'OK' and po.quantity > 0 then po.quantity else 0 end), 0) as output_ok_qty,
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent
-        from production_outputs po
+        from production_output_kpi_rows po
         where ${where.where}
         group by po.posting_date
         order by po.posting_date asc
@@ -290,7 +290,7 @@ export class DashboardReadRepository {
           coalesce(sum(case when po.reject_kg > 0 then po.reject_kg else 0 end), 0) as reject_kg,
           coalesce(sum(case when po.reject_pcs_eq > 0 then po.reject_pcs_eq else 0 end), 0) as reject_pcs_equivalent,
           count(*) as row_count
-        from production_outputs po
+        from production_output_kpi_rows po
         left join master_entities me on me.id = po.entity_id
         where ${where.where}
         group by ${group.key}, ${group.label}
@@ -321,7 +321,7 @@ export class DashboardReadRepository {
     } as const;
     const offset = (filters.page - 1) * filters.pageSize;
     const countResult = await this.database.pool.query<{ total: string | number }>(
-      `select count(*) as total from production_outputs po where ${where.where}`,
+      `select count(*) as total from production_output_kpi_rows po where ${where.where}`,
       where.params
     );
     const totalRows = numberValue(countResult.rows[0]?.total);
@@ -363,7 +363,7 @@ export class DashboardReadRepository {
           po.reject_kg,
           po.reject_pcs_eq,
           po.sync_run_id
-        from production_outputs po
+        from production_output_kpi_rows po
         left join master_entities me on me.id = po.entity_id
         where ${where.where}
         order by ${sortColumns[filters.sortBy]} ${filters.sortDir}, po.id asc
@@ -405,7 +405,7 @@ export class DashboardReadRepository {
           po.reject_kg,
           po.reject_pcs_eq,
           po.sync_run_id
-        from production_outputs po
+        from production_output_kpi_rows po
         left join master_entities me on me.id = po.entity_id
         where po.id = $1
         limit 1
@@ -556,7 +556,7 @@ export class DashboardReadRepository {
           count(*) filter (where po.reject_kg > 0 and po.reject_pcs_eq is null) as incomplete_reject_conversion_count,
           count(distinct po.posting_date) filter (where po.normalized_output_type = 'OK' and po.quantity > 0) as active_days,
           count(*) as row_count
-        from production_outputs po
+        from production_output_kpi_rows po
         where ${where.where}
       `,
       where.params
@@ -577,7 +577,7 @@ export class DashboardReadRepository {
     const result = await this.database.pool.query<ActiveEntityDayRow>(
       `
         select po.entity_id, po.posting_date::text
-        from production_outputs po
+        from production_output_kpi_rows po
         where ${where.where}
           and po.entity_id is not null
           and po.normalized_output_type = 'OK'

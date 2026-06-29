@@ -100,7 +100,7 @@ Older failed runs should remain in audit/history but must not override a newer s
 Normal live sync must not refetch full history after the initial backfill:
 
 1. Probe latest remote `Entry_No` using `$orderby=Entry_No desc&$top=1`.
-2. Read latest local `entry_no` from `production_outputs` where `source_system = 'business-central'`.
+2. Read latest local `entry_no` from `bc_ledger_entries` where `source_system = 'business-central'`.
 3. If remote latest is newer, fetch only `Entry_No gt <local latest>` in ascending order.
 4. If remote latest is not newer, run the configured recent posting-date scan window (`BC_ODATA_BACKFILL_SCAN_DAYS`, default `14`) for late-arriving/corrected rows, or skip fetching when the scan window is `0`.
 5. Follow Business Central `@odata.nextLink`; when absent and a full `Entry_No asc` page is returned, continue with keyset pagination.
@@ -112,7 +112,7 @@ Total live BC rows:
 
 ```sql
 select count(*) as total_outputs, min(posting_date), max(posting_date)
-from production_outputs
+from bc_ledger_entries
 where source_system = 'business-central';
 ```
 
@@ -120,7 +120,7 @@ Rows by month:
 
 ```sql
 select date_trunc('month', posting_date)::date as month, count(*) as rows
-from production_outputs
+from production_output_kpi_rows
 where source_system = 'business-central'
 group by 1
 order by 1;

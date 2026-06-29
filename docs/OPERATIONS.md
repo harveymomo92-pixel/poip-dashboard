@@ -82,7 +82,7 @@ Normal live sync strategy:
 
 - Canonical live source-system value is `business-central`.
 - The worker probes the latest remote `Entry_No` first.
-- If remote latest `Entry_No` is newer than local `production_outputs.entry_no`, it fetches only `Entry_No gt <local latest>`.
+- If remote latest `Entry_No` is newer than local `bc_ledger_entries.entry_no`, it fetches only `Entry_No gt <local latest>`.
 - If remote latest is not newer, it does not pull full history again. It either skips fetching when `BC_ODATA_BACKFILL_SCAN_DAYS=0`, or scans the recent `BC_ODATA_BACKFILL_SCAN_DAYS` posting-date window for late-arriving/corrected rows.
 - Re-running sync/backfill is idempotent through the natural key `source_system + entry_no` and row-hash no-op detection.
 - `sync_runs.metadata.syncStrategy` records remote/latest entry numbers, selected mode, and the scan window when used.
@@ -169,6 +169,66 @@ pnpm bc:target-coverage
 `pnpm bc:target-coverage` groups positive OK output by month and entity/machine, then labels rows as `COVERED`, `TARGET_MISSING`, or `UNMAPPED_ENTITY`. Load/approve master entities and targets before expecting achievement to become numeric.
 
 The dashboard contract is documented in `docs/BC_METRIC_CONTRACT.md`. In short: OK Output uses positive `normalized_output_type = 'OK'` rows from `source_system = 'business-central'`; targets must be approved/active and effective for the entity/date; missing targets produce `N/A`, not zero; unmapped machines remain visible as data-quality gaps.
+
+### BC OData DB mapping alignment audit
+
+Before building any smart mapping candidate flow, inspect the current database against the OData mapping rules:
+
+```bash
+pnpm bc:odata-db-mapping-audit
+```
+
+The command writes read-only audit exports to:
+
+```text
+.tmp/bc-odata-db-mapping-audit/
+```
+
+This is P0-clean-1: BC OData DB Mapping Alignment Audit. It is not a new mapping chain, does not generate final mappings, does not apply database changes, does not update `bc_ledger_entries`, `production_targets`, `target_profiles`, or aliases, and does not switch dashboard behavior.
+
+Identity precedence follows `docs/BC_ODATA_OUTPUT_COLUMN_MAP.md`:
+
+1. `gProdOrRotLine_Description`
+2. `gProdOrRotLine_No`
+3. `Machine_Center_No` as fallback evidence only
+
+`Machine_Center_No` must not become primary identity unless explicitly reviewed later. Smart mapping candidate generation should come after understanding current DB mismatch. User review remains required before any apply.
+
+P0-clean-1 is now an OData DB mapping alignment audit, not a smart mapping candidate chain. Smart mapping candidate generation should come after the existing DB mismatch is understood.
+
+### BC ledger entries semantic backfill
+
+P0-clean-2-big renames the broad Business Central movement table from `production_outputs` to `bc_ledger_entries` and `production_output_staging` to `bc_ledger_entry_staging`. Compatibility views may exist during the transition, but application code should use the ledger-aware names.
+
+`bc_ledger_entries` retains output, reject, transfer, sales, purchase, consumption, inventory movement, scrap/waste, material, and future-use Business Central rows. Production dashboard queries must read only `production_output_kpi_rows` or the equivalent safe filter:
+
+```sql
+bc_domain = 'PRODUCTION_OUTPUT'
+and mapping_status = 'MAPPED_READY'
+and dashboard_ready = true
+```
+
+Run the read-only preview before applying any semantic enrichment:
+
+```bash
+pnpm bc:ledger-backfill-preview
+```
+
+The command writes:
+
+```text
+.tmp/bc-ledger-backfill-preview/
+```
+
+The preview classifies ledger domains, computes source identity using `prod_line_description`, then `prod_line_no`, then `machine_center_no` as fallback evidence only, and reports mapping/dashboard/future-use readiness. It does not mutate the database.
+
+The guarded apply command is intentionally explicit:
+
+```bash
+ALLOW_BC_LEDGER_BACKFILL_APPLY=true pnpm bc:ledger-backfill-apply --confirm
+```
+
+It refuses without both the environment guard and `--confirm`. Apply updates only semantic enrichment columns and safe exact-match `entity_id` values in `bc_ledger_entries`; it does not update `production_targets`, `target_profiles`, or aliases. Target data remains empty and untouched until rebuilt/imported through a separate approved path.
 
 ## Data quality operations
 

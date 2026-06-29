@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  bcLedgerEntries,
   downtimeEvents,
   masterEntities,
   masterEntityAliases,
-  productionOutputs,
   waParserRows,
   waParserRuns
 } from "@poip/db";
@@ -283,7 +283,7 @@ export class WaParserRepository {
     const entryNo = syntheticEntryNo(payload.naturalKey);
     const hash = rowHash(payload);
     const [output] = await tx
-      .insert(productionOutputs)
+      .insert(bcLedgerEntries)
       .values({
         sourceSystem,
         entryNo,
@@ -299,10 +299,24 @@ export class WaParserRepository {
         quantity: decimal(payload.quantity),
         rejectKg: decimal(payload.rejectKg),
         rowHash: hash,
-        rawPayload: payload
+        rawPayload: payload,
+        bcDomain: "PRODUCTION_OUTPUT",
+        movementDomain: "PRODUCTION_OUTPUT",
+        movementStatus: "CLASSIFIED",
+        mappingStatus: entityId ? "MAPPED_READY" : "UNMAPPED_NEEDS_REVIEW",
+        sourceIdentityField: payload.machineCode ? "machine_center_no" : null,
+        sourceIdentityValue: payload.machineCode ?? null,
+        dashboardReady: Boolean(entityId),
+        futureUseReady: false,
+        classificationReason: "WhatsApp parser production payload.",
+        mappingReason: entityId
+          ? "WhatsApp production payload matched an existing entity."
+          : "WhatsApp production payload has no mapped entity.",
+        classifiedAt: new Date(),
+        mappedAt: new Date()
       })
       .onConflictDoUpdate({
-        target: [productionOutputs.sourceSystem, productionOutputs.entryNo],
+        target: [bcLedgerEntries.sourceSystem, bcLedgerEntries.entryNo],
         set: {
           postingDate: payload.postingDate,
           documentDate: payload.postingDate,
@@ -317,10 +331,24 @@ export class WaParserRepository {
           rejectKg: decimal(payload.rejectKg),
           rowHash: hash,
           rawPayload: payload,
+          bcDomain: "PRODUCTION_OUTPUT",
+          movementDomain: "PRODUCTION_OUTPUT",
+          movementStatus: "CLASSIFIED",
+          mappingStatus: entityId ? "MAPPED_READY" : "UNMAPPED_NEEDS_REVIEW",
+          sourceIdentityField: payload.machineCode ? "machine_center_no" : null,
+          sourceIdentityValue: payload.machineCode ?? null,
+          dashboardReady: Boolean(entityId),
+          futureUseReady: false,
+          classificationReason: "WhatsApp parser production payload.",
+          mappingReason: entityId
+            ? "WhatsApp production payload matched an existing entity."
+            : "WhatsApp production payload has no mapped entity.",
+          classifiedAt: sql`now()`,
+          mappedAt: sql`now()`,
           updatedAt: sql`now()`
         }
       })
-      .returning({ id: productionOutputs.id });
+      .returning({ id: bcLedgerEntries.id });
     if (!output) throw new Error("Production output commit failed");
     return output.id;
   }

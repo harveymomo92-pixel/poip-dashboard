@@ -66,7 +66,7 @@ BC_ODATA_PASSWORD=replace-with-odata-password
 
 Restart the worker after changing any `BC_ODATA_*` value. The worker reads these values at startup.
 
-Normal live sync uses the v1-style `Entry_No` strategy: first probe the latest remote `Entry_No`, compare it with the latest local `production_outputs.entry_no` for `source_system = 'business-central'`, fetch only `Entry_No gt <local latest>` when new rows exist, and otherwise run the configured recent backfill scan window for late-arriving rows. It must not silently fall back to mock mode when `ODATA_SYNC_MODE=live`.
+Normal live sync uses the v1-style `Entry_No` strategy: first probe the latest remote `Entry_No`, compare it with the latest local `bc_ledger_entries.entry_no` for `source_system = 'business-central'`, fetch only `Entry_No gt <local latest>` when new rows exist, and otherwise run the configured recent backfill scan window for late-arriving rows. It must not silently fall back to mock mode when `ODATA_SYNC_MODE=live`.
 
 Backfill variables can be supplied inline per run instead of being stored permanently in `.env`:
 

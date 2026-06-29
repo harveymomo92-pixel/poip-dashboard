@@ -14,6 +14,22 @@
 
 ---
 
+## Clean Rebuild Addendum: Business Central Ledger Semantics
+
+Untuk clean rebuild setelah rollback, nama tabel historis `production_outputs` tidak lagi dipakai sebagai model backend utama. Business Central rows disimpan sebagai `bc_ledger_entries`, dengan staging `bc_ledger_entry_staging`, karena sumber OData berisi ledger/movement rows yang lebih luas dari KPI output produksi.
+
+Dashboard output produksi hanya boleh membaca row yang sudah aman untuk KPI, melalui `production_output_kpi_rows` atau filter ekuivalen:
+
+```sql
+bc_domain = 'PRODUCTION_OUTPUT'
+and mapping_status = 'MAPPED_READY'
+and dashboard_ready = true
+```
+
+Rows transfer, consumption, sales, purchase, reject, scrap/waste, material, inventory movement, source gap, dan unknown review tetap disimpan untuk future-use atau review, tetapi tidak boleh dipaksa masuk KPI output produksi. `Machine_Center_No` tetap fallback evidence saja, bukan primary identity, kecuali ada review eksplisit di milestone berikutnya. Target data tetap dipisah dan tidak boleh diisi ulang melalui patch ledger ini.
+
+---
+
 ## 0. Cara Menggunakan Dokumen Ini untuk Vibecoding
 
 Dokumen ini dirancang agar bisa dipakai langsung oleh AI coding agent seperti Cursor, Windsurf, Claude Code, Copilot Workspace, atau tool vibecoding lain.
