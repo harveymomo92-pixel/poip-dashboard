@@ -185,6 +185,12 @@ import {
   type AuthoritativeReviewDecisionSampleRow
 } from "../packages/domain/src/master-data/authoritative-review-decision-sample-fixture.js";
 import {
+  buildAuthoritativeReviewDecisionBulkPrefill,
+  type AuthoritativeReviewDecisionBulkPrefillRuleReportRow,
+  type AuthoritativeReviewDecisionBulkPrefillRiskReportRow,
+  type AuthoritativeReviewDecisionBulkPrefillSummary
+} from "../packages/domain/src/master-data/authoritative-review-decision-bulk-prefill.js";
+import {
   buildAuthoritativeMasterAcceptedDecisionDryRun,
   type AuthoritativeAcceptedDecisionApplicationPlanRow,
   type AuthoritativeBlockedDecisionApplicationPlanRow,
@@ -258,6 +264,7 @@ type Command =
   | "authoritative-master-review-workspace"
   | "authoritative-master-review-decision-intake"
   | "authoritative-review-decision-sample-fixture"
+  | "authoritative-review-decision-bulk-prefill"
   | "authoritative-master-accepted-decision-dry-run"
   | "resolution-package";
 
@@ -974,6 +981,7 @@ const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR = ".tmp/bc-authoritative
 const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR = ".tmp/bc-authoritative-master-review-input";
 const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR = ".tmp/bc-authoritative-master-review-decision-intake";
 const DEFAULT_AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FIXTURE_DIR = ".tmp/bc-authoritative-review-decision-sample-fixture";
+const DEFAULT_AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_DIR = ".tmp/bc-authoritative-review-decision-bulk-prefill";
 const DEFAULT_AUTHORITATIVE_MASTER_ACCEPTED_DECISION_DRY_RUN_DIR = ".tmp/bc-authoritative-master-accepted-decision-dry-run";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
@@ -1125,6 +1133,15 @@ const AUTHORITATIVE_REVIEW_DECISION_SAFE_DEFER_FILE = "reviewer-decisions.safe-d
 const AUTHORITATIVE_REVIEW_DECISION_MIXED_FILE = "reviewer-decisions.mixed-simulation.csv";
 const AUTHORITATIVE_REVIEW_DECISION_EXPECTATIONS_FILE = "sample-validation-expectations.csv";
 const AUTHORITATIVE_REVIEW_DECISION_USAGE_FILE = "sample-usage-instructions.md";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_README_FILE = "README.md";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_FILE = "reviewer-decisions.bulk-prefill.csv";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_SAFE_ACCEPTED_FILE = "reviewer-decisions.safe-auto-accepted.csv";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_HUMAN_REVIEW_FILE = "reviewer-decisions.requires-human-review.csv";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_RULE_REPORT_FILE = "bulk-prefill-rule-report.csv";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_RISK_REPORT_FILE = "bulk-prefill-risk-report.csv";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_USAGE_FILE = "bulk-prefill-usage-instructions.md";
+const AUTHORITATIVE_REVIEW_DECISION_BULK_MANIFEST_FILE = "import-manifest.json";
 const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SUMMARY_FILE = "summary.json";
 const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_README_FILE = "README.md";
 const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CANONICAL_FILE = "canonical-entities.merged-preview.csv";
@@ -1546,6 +1563,21 @@ const authoritativeReviewDecisionSampleExpectationCsvHeaders = [
   "expected_p10_status",
   "expected_safety"
 ] as const satisfies readonly (keyof AuthoritativeReviewDecisionSampleExpectationRow)[];
+const authoritativeReviewDecisionBulkPrefillRuleCsvHeaders = [
+  "review_id",
+  "review_type",
+  "rule_id",
+  "rule_result",
+  "approved_action",
+  "rule_reason"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionBulkPrefillRuleReportRow)[];
+const authoritativeReviewDecisionBulkPrefillRiskCsvHeaders = [
+  "review_id",
+  "review_type",
+  "risk_level",
+  "risk_reason",
+  "requires_human_review"
+] as const satisfies readonly (keyof AuthoritativeReviewDecisionBulkPrefillRiskReportRow)[];
 const authoritativeAcceptedDecisionApplicationPlanCsvHeaders = [
   "review_id",
   "review_type",
@@ -7189,6 +7221,165 @@ async function readAuthoritativeMasterReviewerDecisionRows(filePath: string): Pr
   return rows;
 }
 
+async function readAuthoritativeReviewEntityRows(filePath: string): Promise<readonly AuthoritativeMasterEntityReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterEntityReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      priority: row.priority === "P1" || row.priority === "P2" || row.priority === "P3" ? row.priority : "P3",
+      entity_family: row.entity_family ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      proposed_canonical_entity_display_name: row.proposed_canonical_entity_display_name ?? "",
+      proposed_entity_type: row.proposed_entity_type ?? "",
+      row_coverage_count: Number(row.row_coverage_count ?? 0),
+      p10_output_rows: Number(row.p10_output_rows ?? 0),
+      reject_rows: Number(row.reject_rows ?? 0),
+      future_use_rows: Number(row.future_use_rows ?? 0),
+      conflict_rows: Number(row.conflict_rows ?? 0),
+      source_data_gap_rows: Number(row.source_data_gap_rows ?? 0),
+      legacy_current_entity_codes: row.legacy_current_entity_codes ?? "",
+      sample_source_values: row.sample_source_values ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeReviewSourceMappingRows(filePath: string): Promise<readonly AuthoritativeMasterSourceMappingReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterSourceMappingReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      priority: row.priority === "P1" || row.priority === "P2" || row.priority === "P3" ? row.priority : "P3",
+      source_system: row.source_system ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      mapping_type: row.mapping_type ?? "",
+      confidence: row.confidence ?? "",
+      rows_covered: Number(row.rows_covered ?? 0),
+      bc_future_use_domains: row.bc_future_use_domains ?? "",
+      p10_inclusion_statuses: row.p10_inclusion_statuses ?? "",
+      legacy_current_entity_codes: row.legacy_current_entity_codes ?? "",
+      conflict_flag: row.conflict_flag === "true" ? "true" : "false",
+      conflict_reason: row.conflict_reason ?? "",
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeReviewTargetProfileRows(filePath: string): Promise<readonly AuthoritativeMasterTargetProfileReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterTargetProfileReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      priority: row.priority === "P1" || row.priority === "P2" || row.priority === "P3" ? row.priority : "P3",
+      canonical_entity_code: row.canonical_entity_code ?? "",
+      target_bucket: row.target_bucket ?? "",
+      machine_center_no: row.machine_center_no ?? "",
+      affected_output_rows: Number(row.affected_output_rows ?? 0),
+      affected_reject_rows: Number(row.affected_reject_rows ?? 0),
+      target_profile_required: row.target_profile_required === "true" || row.target_profile_required === "conditional" ? row.target_profile_required : "false",
+      target_profile_status: row.target_profile_status ?? "",
+      proposed_target_qty: row.proposed_target_qty ?? "",
+      proposed_unit: row.proposed_unit ?? "",
+      effective_from: row.effective_from ?? "",
+      effective_to: row.effective_to ?? "",
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeReviewConflictRows(filePath: string): Promise<readonly AuthoritativeMasterConflictReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterConflictReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      priority: row.priority === "P1" || row.priority === "P2" || row.priority === "P3" ? row.priority : "P3",
+      conflict_type: row.conflict_type ?? "",
+      source_field: row.source_field ?? "",
+      source_value: row.source_value ?? "",
+      proposed_canonical_entity_code: row.proposed_canonical_entity_code ?? "",
+      legacy_current_entity_codes: row.legacy_current_entity_codes ?? "",
+      v2_entity_codes: row.v2_entity_codes ?? "",
+      rows: Number(row.rows ?? 0),
+      bc_future_use_domains: row.bc_future_use_domains ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      risk_level: row.risk_level ?? "",
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeReviewSourceDataGapRows(filePath: string): Promise<readonly AuthoritativeMasterSourceDataGapReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterSourceDataGapReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      priority: row.priority === "P1" || row.priority === "P2" || row.priority === "P3" ? row.priority : "P3",
+      source_gap_type: row.source_gap_type ?? "",
+      rows: Number(row.rows ?? 0),
+      bc_future_use_domains: row.bc_future_use_domains ?? "",
+      p10_inclusion_statuses: row.p10_inclusion_statuses ?? "",
+      sample_documents: row.sample_documents ?? "",
+      sample_items: row.sample_items ?? "",
+      item_category_codes: row.item_category_codes ?? "",
+      machine_center_nos: row.machine_center_nos ?? "",
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
+async function readAuthoritativeReviewFutureUseDomainRows(filePath: string): Promise<readonly AuthoritativeMasterFutureUseDomainReviewRow[]> {
+  if (!(await fileExists(filePath))) return [];
+  const rows: AuthoritativeMasterFutureUseDomainReviewRow[] = [];
+  await readCsvRows(filePath, (row) => {
+    rows.push({
+      review_id: row.review_id ?? "",
+      future_use_domain: row.future_use_domain ?? "",
+      future_module_candidate: row.future_module_candidate ?? "",
+      rows: Number(row.rows ?? 0),
+      authoritative_entity_status_counts: row.authoritative_entity_status_counts ?? "",
+      target_profile_required_rows: Number(row.target_profile_required_rows ?? 0),
+      target_profile_not_required_rows: Number(row.target_profile_not_required_rows ?? 0),
+      unknown_rows: Number(row.unknown_rows ?? 0),
+      source_data_gap_rows: Number(row.source_data_gap_rows ?? 0),
+      recommended_action: row.recommended_action ?? "",
+      approval_status: "pending",
+      reviewer: "",
+      reviewer_notes: ""
+    });
+  });
+  return rows;
+}
+
 function isBusinessCentralCurrentKpiScope(value: unknown): value is BusinessCentralCurrentKpiScope {
   return value === "OUTPUT_KPI_OK_SCOPE" || value === "OUTPUT_KPI_REJECT_SCOPE" || value === "OUT_OF_CURRENT_KPI_SCOPE" || value === "UNKNOWN_SCOPE_REVIEW";
 }
@@ -8683,6 +8874,183 @@ async function runAuthoritativeReviewDecisionSampleFixture() {
   if (workspaceRows.length > 0) console.log(`- ${displayRepoPath(convenienceSampleFile)}`);
 }
 
+function buildAuthoritativeReviewDecisionBulkPrefillReadme(summary: AuthoritativeReviewDecisionBulkPrefillSummary): string {
+  return `# Business Central P0.9t-pre Authoritative Review Decision Bulk Prefill
+
+Generated at: ${summary.generatedAt}
+
+Prefill status: ${summary.prefillStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This command generates a conservative bulk-prefilled reviewer decision CSV from the P0.9p authoritative review workspace.
+
+It reduces manual editing by pre-filling low-risk exact decisions, deferring conflict and fallback rows, routing source gaps to backlog, routing non-production future-use domains to future-use-only, and marking incomplete production target profiles as needs-correction.
+
+Every generated decision still requires user/business review before it can be copied to \`${AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE}\`.
+
+## Files
+
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_SUMMARY_FILE}\`: prefill counts, P1.0 gate, and safety flags.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_FILE}\`: complete bulk-prefilled reviewer decision CSV.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_SAFE_ACCEPTED_FILE}\`: rows prefilled as approved by conservative rules.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_HUMAN_REVIEW_FILE}\`: deferred or needs-correction rows.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_RULE_REPORT_FILE}\`: rule applied to each row.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_RISK_REPORT_FILE}\`: risk notes for each row.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_USAGE_FILE}\`: copy/validation instructions.
+- \`${AUTHORITATIVE_REVIEW_DECISION_BULK_MANIFEST_FILE}\`: source, reviewer defaults, and safety manifest.
+
+## Current Counts
+
+- Total template rows: ${summary.totalTemplateRows}
+- Approved prefill rows: ${summary.approvedPrefillRows}
+- Deferred prefill rows: ${summary.deferredPrefillRows}
+- Needs-correction rows: ${summary.needsCorrectionRows}
+- Source data backlog rows: ${summary.sourceDataBacklogRows}
+- Future-use only rows: ${summary.futureUseOnlyRows}
+- Target profile needs-correction rows: ${summary.targetProfileNeedsCorrectionRows}
+- Conflict deferred rows: ${summary.conflictDeferredRows}
+- Wrote convenience prefill file: ${summary.wroteConveniencePrefillFile}
+- Overwrote real reviewer decision file: ${summary.overwroteRealReviewerDecisionFile}
+
+## Safety
+
+- Prefill/export only.
+- No database mutation.
+- No authoritative master input mutation.
+- No \`target_profiles\` mutation.
+- No alias creation/update/delete.
+- No dashboard switch.
+- Does not write or overwrite \`${AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE}\`.
+- P1.0 remains blocked.
+`;
+}
+
+function buildAuthoritativeReviewDecisionBulkPrefillUsageInstructions(): string {
+  return `# Bulk Prefill Usage
+
+Run bulk prefill:
+
+\`\`\`bash
+pnpm bc:authoritative-review-decision-bulk-prefill
+\`\`\`
+
+Review generated file:
+
+\`\`\`text
+.tmp/bc-authoritative-master-review-input/reviewer-decisions.bulk-prefill.csv
+\`\`\`
+
+If the reviewer/business accepts the prefilled decisions, copy it manually:
+
+\`\`\`bash
+cp .tmp/bc-authoritative-master-review-input/reviewer-decisions.bulk-prefill.csv \\
+ .tmp/bc-authoritative-master-review-input/reviewer-decisions.csv
+\`\`\`
+
+Validate:
+
+\`\`\`bash
+pnpm bc:authoritative-master-review-decision-intake
+pnpm bc:authoritative-master-accepted-decision-dry-run
+\`\`\`
+
+If acceptedRows > 0, continue to apply plan:
+
+\`\`\`bash
+pnpm bc:authoritative-master-apply-plan
+\`\`\`
+
+This command never writes \`reviewer-decisions.csv\` directly. P1.0 remains blocked until later approved apply planning.
+`;
+}
+
+async function runAuthoritativeReviewDecisionBulkPrefill() {
+  const workspaceDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR);
+  const inputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_DIR?.trim() || DEFAULT_AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_DIR);
+  const workspaceTemplateFile = path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_DECISION_TEMPLATE_FILE);
+  const conveniencePrefillFile = path.join(inputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_FILE);
+  const realReviewerDecisionFile = path.join(inputDir, AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_README_FILE),
+    prefill: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_PREFILL_FILE),
+    safeAccepted: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_SAFE_ACCEPTED_FILE),
+    humanReview: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_HUMAN_REVIEW_FILE),
+    ruleReport: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_RULE_REPORT_FILE),
+    riskReport: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_RISK_REPORT_FILE),
+    usage: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_USAGE_FILE),
+    importManifest: path.join(outputDir, AUTHORITATIVE_REVIEW_DECISION_BULK_MANIFEST_FILE)
+  };
+
+  console.log("Business Central P0.9t-pre authoritative review decision bulk prefill");
+  console.log("Mode: PREFILL_EXPORT_ONLY");
+  console.log(`Source workspace folder: ${displayRepoPath(workspaceDir)}`);
+  console.log(`Reviewer input folder: ${displayRepoPath(inputDir)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: prefill/export only; reviewer-decisions.csv, database rows, production_outputs.entity_id, target_profiles, aliases, authoritative masters, conditional rules, and dashboard behavior are not changed.");
+
+  const workspaceExists = await fileExists(workspaceTemplateFile);
+  const prefill = buildAuthoritativeReviewDecisionBulkPrefill({
+    templateRows: await readAuthoritativeMasterReviewerDecisionTemplateRows(workspaceTemplateFile),
+    entityRows: await readAuthoritativeReviewEntityRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_ENTITY_FILE)),
+    sourceMappingRows: await readAuthoritativeReviewSourceMappingRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_SOURCE_MAPPING_FILE)),
+    targetProfileRows: await readAuthoritativeReviewTargetProfileRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_TARGET_PROFILE_FILE)),
+    conflictRows: await readAuthoritativeReviewConflictRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_CONFLICT_FILE)),
+    sourceDataGapRows: await readAuthoritativeReviewSourceDataGapRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_SOURCE_GAP_FILE)),
+    futureUseDomainRows: await readAuthoritativeReviewFutureUseDomainRows(path.join(workspaceDir, AUTHORITATIVE_MASTER_REVIEW_FUTURE_USE_FILE)),
+    priorityRows: [],
+    workspaceExists,
+    sourceWorkspaceFolder: displayRepoPath(workspaceDir),
+    outputFolder: displayRepoPath(outputDir),
+    wroteConveniencePrefillFile: workspaceExists
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await mkdir(inputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(prefill.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeReviewDecisionBulkPrefillReadme(prefill.summary), "utf8");
+  await writeFile(outputFiles.prefill, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, prefill.bulkPrefillRows), "utf8");
+  await writeFile(outputFiles.safeAccepted, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, prefill.safeAutoAcceptedRows), "utf8");
+  await writeFile(outputFiles.humanReview, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, prefill.requiresHumanReviewRows), "utf8");
+  await writeFile(outputFiles.ruleReport, resolutionPackageCsv(authoritativeReviewDecisionBulkPrefillRuleCsvHeaders, prefill.ruleReportRows), "utf8");
+  await writeFile(outputFiles.riskReport, resolutionPackageCsv(authoritativeReviewDecisionBulkPrefillRiskCsvHeaders, prefill.riskReportRows), "utf8");
+  await writeFile(outputFiles.usage, buildAuthoritativeReviewDecisionBulkPrefillUsageInstructions(), "utf8");
+  await writeFile(outputFiles.importManifest, `${JSON.stringify(prefill.importManifest, null, 2)}\n`, "utf8");
+  if (prefill.summary.prefillStatus === "GENERATED") {
+    await writeFile(conveniencePrefillFile, resolutionPackageCsv(authoritativeReviewDecisionNormalizedCsvHeaders, prefill.bulkPrefillRows), "utf8");
+  }
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- prefill_status=${prefill.summary.prefillStatus}`);
+  console.log(`- total_template_rows=${prefill.summary.totalTemplateRows}`);
+  console.log(`- approved_prefill_rows=${prefill.summary.approvedPrefillRows}`);
+  console.log(`- deferred_prefill_rows=${prefill.summary.deferredPrefillRows}`);
+  console.log(`- needs_correction_rows=${prefill.summary.needsCorrectionRows}`);
+  console.log(`- source_data_backlog_rows=${prefill.summary.sourceDataBacklogRows}`);
+  console.log(`- future_use_only_rows=${prefill.summary.futureUseOnlyRows}`);
+  console.log(`- target_profile_needs_correction_rows=${prefill.summary.targetProfileNeedsCorrectionRows}`);
+  console.log(`- conflict_deferred_rows=${prefill.summary.conflictDeferredRows}`);
+  console.log(`- wrote_convenience_prefill_file=${prefill.summary.wroteConveniencePrefillFile}`);
+  console.log(`- overwrote_real_reviewer_decision_file=${prefill.summary.overwroteRealReviewerDecisionFile}`);
+  console.log(`- p10_status=${prefill.summary.p10Gate.status}`);
+  console.log(`- p10_reason=${prefill.summary.p10Gate.reason}`);
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+  if (prefill.summary.prefillStatus === "GENERATED") console.log(`- ${displayRepoPath(conveniencePrefillFile)}`);
+  console.log(`- not written: ${displayRepoPath(realReviewerDecisionFile)}`);
+}
+
 function buildAuthoritativeAcceptedDecisionDryRunReadme(summary: AuthoritativeAcceptedDecisionDryRunSummary): string {
   return `# Business Central P0.9s Authoritative Master Accepted Decision Dry-Run
 
@@ -9689,8 +10057,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "authoritative-master-review-decision-intake", "authoritative-review-decision-sample-fixture", "authoritative-master-accepted-decision-dry-run", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|authoritative-master-review-decision-intake|authoritative-review-decision-sample-fixture|authoritative-master-accepted-decision-dry-run|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "authoritative-master-review-decision-intake", "authoritative-review-decision-sample-fixture", "authoritative-review-decision-bulk-prefill", "authoritative-master-accepted-decision-dry-run", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|authoritative-master-review-decision-intake|authoritative-review-decision-sample-fixture|authoritative-review-decision-bulk-prefill|authoritative-master-accepted-decision-dry-run|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -9734,6 +10102,10 @@ async function main() {
   }
   if (command === "authoritative-review-decision-sample-fixture") {
     await runAuthoritativeReviewDecisionSampleFixture();
+    return;
+  }
+  if (command === "authoritative-review-decision-bulk-prefill") {
+    await runAuthoritativeReviewDecisionBulkPrefill();
     return;
   }
   if (command === "authoritative-master-accepted-decision-dry-run") {

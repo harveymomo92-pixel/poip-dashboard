@@ -47,6 +47,7 @@
     "bc:authoritative-master-review-workspace": "bash scripts/bc-metrics.sh authoritative-master-review-workspace",
     "bc:authoritative-master-review-decision-intake": "bash scripts/bc-metrics.sh authoritative-master-review-decision-intake",
     "bc:authoritative-review-decision-sample-fixture": "bash scripts/bc-metrics.sh authoritative-review-decision-sample-fixture",
+    "bc:authoritative-review-decision-bulk-prefill": "bash scripts/bc-metrics.sh authoritative-review-decision-bulk-prefill",
     "bc:authoritative-master-accepted-decision-dry-run": "bash scripts/bc-metrics.sh authoritative-master-accepted-decision-dry-run",
     "bc:kpi-compare-v1-v2": "bash scripts/bc-metrics.sh kpi-compare-v1-v2",
     "v1:master-profile": "bash scripts/v1-master.sh profile",

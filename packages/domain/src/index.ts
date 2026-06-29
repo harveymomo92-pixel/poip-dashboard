@@ -16,6 +16,7 @@ export * from "./master-data/authoritative-master-accepted-decision-dry-run.js";
 export * from "./master-data/authoritative-master-review-decision-intake.js";
 export * from "./master-data/authoritative-master-review-workspace.js";
 export * from "./master-data/authoritative-review-decision-sample-fixture.js";
+export * from "./master-data/authoritative-review-decision-bulk-prefill.js";
 export * from "./master-data/authoritative-master-seed-draft.js";
 export * from "./master-data/future-use-raw-registry.js";
 export * from "./master-data/bc-data-scope.js";
