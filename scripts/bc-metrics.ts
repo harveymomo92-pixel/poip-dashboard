@@ -109,7 +109,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       count(*) filter (where reject_kg > 0) as reject_rows,
       count(*) filter (where entity_id is null) as unmapped_rows,
       count(*) filter (where reject_kg > 0 and reject_pcs_eq is null) as conversion_gaps
-    from production_outputs
+    from bc_ledger_entries
     where source_system = $1
   `, [SOURCE_SYSTEM]);
   const total = totals.rows[0];
@@ -122,13 +122,13 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
 
   await printRows(
     "Rows by source system",
-    pool.query("select source_system, count(*) as rows from production_outputs group by source_system order by rows desc")
+    pool.query("select source_system, count(*) as rows from bc_ledger_entries group by source_system order by rows desc")
   );
   await printRows(
     "Rows by month",
     pool.query(
       `select date_trunc('month', posting_date)::date::text as month, count(*) as rows
-       from production_outputs
+       from bc_ledger_entries
        where source_system = $1
        group by 1
        order by 1`,
@@ -139,7 +139,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
     "Rows by Entry_Type",
     pool.query(
       `select coalesce(entry_type, '(blank)') as entry_type, count(*) as rows
-       from production_outputs
+       from bc_ledger_entries
        where source_system = $1
        group by 1
        order by rows desc, entry_type asc
@@ -151,7 +151,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
     "Rows by normalized output type",
     pool.query(
       `select normalized_output_type, count(*) as rows, coalesce(sum(quantity), 0) as quantity
-       from production_outputs
+       from bc_ledger_entries
        where source_system = $1
        group by 1
        order by rows desc, normalized_output_type asc`,
@@ -164,7 +164,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
       `select coalesce(machine_center_no, '(blank)') as machine_center_no,
               count(*) as rows,
               coalesce(sum(case when normalized_output_type = 'OK' and quantity > 0 then quantity else 0 end), 0) as ok_qty
-       from production_outputs
+       from bc_ledger_entries
        where source_system = $1 and entity_id is null
        group by 1
        order by ok_qty desc, rows desc
@@ -179,7 +179,7 @@ async function runProfile(pool: ReturnType<typeof createDatabase>["pool"]) {
               left(coalesce(max(item_description), ''), 60) as item_description,
               count(*) as rows,
               coalesce(sum(quantity), 0) as ok_qty
-       from production_outputs
+       from bc_ledger_entries
        where source_system = $1 and normalized_output_type = 'OK' and quantity > 0
        group by item_no
        order by ok_qty desc
@@ -219,7 +219,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
           count(distinct posting_date) filter (where normalized_output_type = 'OK' and quantity > 0) as active_days,
           count(*) as raw_rows,
           count(*) filter (where not (normalized_output_type = 'OK' and quantity > 0)) as excluded_rows
-        from production_outputs
+        from production_output_kpi_rows
         where ${where.where}
       `,
       where.params
@@ -227,7 +227,7 @@ async function runReconcile(pool: ReturnType<typeof createDatabase>["pool"]) {
     pool.query<{ entity_id: string; posting_date: string }>(
       `
         select entity_id, posting_date::text
-        from production_outputs
+        from production_output_kpi_rows
         where ${where.where}
           and entity_id is not null
           and normalized_output_type = 'OK'
@@ -390,7 +390,7 @@ function targetCoverageSummary(pool: ReturnType<typeof createDatabase>["pool"]) 
             ) then 'COVERED'
             else 'TARGET_MISSING'
           end as coverage_status
-        from production_outputs po
+        from production_output_kpi_rows po
         where po.source_system = $1
           and po.normalized_output_type = 'OK'
           and po.quantity > 0
