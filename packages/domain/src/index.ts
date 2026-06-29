@@ -12,6 +12,7 @@ export * from "./kpi/daily-item-resume.js";
 export * from "./kpi/target-bucket.js";
 export * from "./master-data/alias.js";
 export * from "./master-data/authoritative-master-intake.js";
+export * from "./master-data/authoritative-master-accepted-decision-dry-run.js";
 export * from "./master-data/authoritative-master-review-decision-intake.js";
 export * from "./master-data/authoritative-master-review-workspace.js";
 export * from "./master-data/authoritative-review-decision-sample-fixture.js";

@@ -49,6 +49,10 @@ pnpm bc:scoped-decision-apply-dry-run
 pnpm bc:authoritative-master-intake
 pnpm bc:authoritative-master-seed-draft
 pnpm bc:future-use-raw-registry
+pnpm bc:authoritative-master-review-workspace
+pnpm bc:authoritative-master-review-decision-intake
+pnpm bc:authoritative-review-decision-sample-fixture
+pnpm bc:authoritative-master-accepted-decision-dry-run
 pnpm bc:kpi-compare-v1-v2
 ```
 
@@ -120,6 +124,20 @@ pnpm bc:future-use-raw-registry
 This writes `.tmp/bc-future-use-raw-registry/`. The registry is not KPI output. It gives every available raw Business Central row a current KPI scope, future-use domain, registry status, P1.0 inclusion status, future module candidate, authoritative entity coverage status, and target profile requirement status.
 
 Use the registry to keep sales, purchase/receiving, transfer/inventory, consumption/material usage, sparepart/material, scrap/waste, master-data-quality, source-data-gap, and unknown-review rows visible for future modules. Target profile coverage is required for production output rows by default; non-production future-use domains do not become target-profile blockers unless a future module explicitly requires it.
+
+### 7. Simulate accepted authoritative decisions
+
+```bash
+pnpm bc:authoritative-master-review-workspace
+pnpm bc:authoritative-master-review-decision-intake
+pnpm bc:authoritative-master-accepted-decision-dry-run
+```
+
+The dry-run reads only `.tmp/bc-authoritative-master-review-decision-intake/accepted-review-decisions.csv` and writes `.tmp/bc-authoritative-master-accepted-decision-dry-run/`.
+
+Use the merged preview CSVs and impact reports for final approval/apply planning. Do not copy dry-run previews back into `.tmp/bc-authoritative-master-input/` without a separate approved apply procedure. Sample fixture files are safe test aids only; they are ignored unless explicitly copied into `reviewer-decisions.csv` and accepted by P0.9q.
+
+P0.9s does not mutate the database, `production_outputs.entity_id`, `target_profiles`, aliases, conditional rules, dashboard behavior, or P1.0 gate. P1.0 remains blocked even when the dry-run status is `DRY_RUN_READY_FOR_FINAL_REVIEW`.
 
 ## Operational Meaning of Legacy Data
 
@@ -1036,6 +1054,28 @@ pnpm bc:authoritative-master-review-workspace
 `bc:authoritative-master-review-workspace` reads `.tmp/bc-authoritative-master-seed-draft/`, `.tmp/bc-authoritative-master-intake/`, and `.tmp/bc-future-use-raw-registry/`, then writes `.tmp/bc-authoritative-master-review-workspace/`. Use the generated workbooks for human review of canonical entities, source mappings, conflicts, source-data gaps, future-use domains, and target profiles. The command is export-only and keeps every review row pending.
 
 Target profile review is scoped by domain: production output dashboard rows are target-profile-required by default, reject attachment rows are conditional, and future-use non-production rows stay visible without becoming target-profile blockers by default.
+
+P0.9q authoritative master review decision intake:
+
+```bash
+pnpm bc:authoritative-master-review-decision-intake
+```
+
+`bc:authoritative-master-review-decision-intake` reads `.tmp/bc-authoritative-master-review-input/reviewer-decisions.csv` and validates it against `.tmp/bc-authoritative-master-review-workspace/`. If reviewer input is missing, it creates `.tmp/bc-authoritative-master-review-input/reviewer-decisions.template.csv`, writes `.tmp/bc-authoritative-master-review-decision-intake/summary.json`, and returns `AWAITING_REVIEWER_DECISIONS`.
+
+Accepted decision previews are for future dry-run review only. The command does not edit the P0.9p workspace, does not edit authoritative master input files, does not create aliases, does not create target profiles, and does not unblock P1.0.
+
+P0.9s authoritative accepted decision dry-run:
+
+```bash
+pnpm bc:authoritative-master-accepted-decision-dry-run
+```
+
+`bc:authoritative-master-accepted-decision-dry-run` reads `.tmp/bc-authoritative-master-review-decision-intake/accepted-review-decisions.csv` and writes dry-run merged master previews plus coverage impact estimates under `.tmp/bc-authoritative-master-accepted-decision-dry-run/`. If the accepted decision input is missing it returns `BLOCKED_MISSING_INPUTS`; if it is present but empty it returns `NO_ACCEPTED_DECISIONS`.
+
+Only accepted P0.9q rows are candidates. Pending, rejected, deferred, invalid, duplicate, unknown, and non-apply rows are not applied. `SOURCE_DATA_BACKLOG` and `FUTURE_USE_ONLY` affect gap/impact reports only. Non-production future-use rows do not become target-profile blockers by default.
+
+The command is dry-run/export only. It does not write the DB, does not update `production_outputs.entity_id`, does not insert/update/delete `target_profiles`, does not create/update/delete aliases, does not overwrite authoritative master input files, does not change conditional rules, does not switch dashboard behavior, and does not enable P1.0.
 
 Use the decision review package to route blockers by family (`OMSO`, `POLYPRINT`, `VFINE`, `LONGSUN`, `THERMO HENGFENG`, `(blank)/UNMAPPED`, `MOCK`, `OTHER`) and by category. Use the validation package to check reviewed CSVs before any later execution plan. Every row defaults `safe_to_auto_apply=false`, and target profile rows default `safe_to_seed_target_profile=false`. Do not apply aliases, create canonical entities, create target profiles, change conditional rules, or switch the dashboard from these packages. P1.0 remains blocked until pending decisions are reviewed, validation passes, and the dry-run gates are rerun.
 

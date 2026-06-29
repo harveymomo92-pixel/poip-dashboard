@@ -185,6 +185,18 @@ import {
   type AuthoritativeReviewDecisionSampleRow
 } from "../packages/domain/src/master-data/authoritative-review-decision-sample-fixture.js";
 import {
+  buildAuthoritativeMasterAcceptedDecisionDryRun,
+  type AuthoritativeAcceptedDecisionApplicationPlanRow,
+  type AuthoritativeBlockedDecisionApplicationPlanRow,
+  type AuthoritativeCoverageImpactPreviewRow,
+  type AuthoritativeFutureUseCoverageImpactRow,
+  type AuthoritativeP10ReadinessImpactRow,
+  type AuthoritativeTargetProfileGapAfterDryRunRow,
+  type AuthoritativeSourceDataGapAfterDryRunRow,
+  type AuthoritativeConflictRiskAfterDryRunRow,
+  type AuthoritativeAcceptedDecisionDryRunSummary
+} from "../packages/domain/src/master-data/authoritative-master-accepted-decision-dry-run.js";
+import {
   buildBusinessCentralCanonicalEntityCatalog,
   classifyBusinessCentralEntityV2MismatchReview,
   classifyBusinessCentralEntityV2Review,
@@ -246,6 +258,7 @@ type Command =
   | "authoritative-master-review-workspace"
   | "authoritative-master-review-decision-intake"
   | "authoritative-review-decision-sample-fixture"
+  | "authoritative-master-accepted-decision-dry-run"
   | "resolution-package";
 
 type DatabasePool = ReturnType<typeof createDatabase>["pool"];
@@ -961,6 +974,7 @@ const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR = ".tmp/bc-authoritative
 const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_INPUT_DIR = ".tmp/bc-authoritative-master-review-input";
 const DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR = ".tmp/bc-authoritative-master-review-decision-intake";
 const DEFAULT_AUTHORITATIVE_REVIEW_DECISION_SAMPLE_FIXTURE_DIR = ".tmp/bc-authoritative-review-decision-sample-fixture";
+const DEFAULT_AUTHORITATIVE_MASTER_ACCEPTED_DECISION_DRY_RUN_DIR = ".tmp/bc-authoritative-master-accepted-decision-dry-run";
 const RESOLUTION_PACKAGE_SUMMARY_FILE = "summary.json";
 const RESOLUTION_PACKAGE_CANONICAL_FILE = "canonical-entity-creation-plan.csv";
 const RESOLUTION_PACKAGE_ALIAS_FILE = "alias-cleanup-review-plan.csv";
@@ -1111,6 +1125,21 @@ const AUTHORITATIVE_REVIEW_DECISION_SAFE_DEFER_FILE = "reviewer-decisions.safe-d
 const AUTHORITATIVE_REVIEW_DECISION_MIXED_FILE = "reviewer-decisions.mixed-simulation.csv";
 const AUTHORITATIVE_REVIEW_DECISION_EXPECTATIONS_FILE = "sample-validation-expectations.csv";
 const AUTHORITATIVE_REVIEW_DECISION_USAGE_FILE = "sample-usage-instructions.md";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SUMMARY_FILE = "summary.json";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_README_FILE = "README.md";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CANONICAL_FILE = "canonical-entities.merged-preview.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_MAP_FILE = "source-to-entity-map.merged-preview.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_PROFILES_FILE = "target-profiles.merged-preview.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_ACCEPTED_PLAN_FILE = "accepted-decision-application-plan.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_BLOCKED_PLAN_FILE = "blocked-decision-application-plan.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_COVERAGE_IMPACT_FILE = "coverage-impact-preview.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_P10_IMPACT_FILE = "p10-readiness-impact.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_FUTURE_USE_IMPACT_FILE = "future-use-coverage-impact.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_GAP_FILE = "target-profile-gap-after-dry-run.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_GAP_FILE = "source-data-gap-after-dry-run.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CONFLICT_RISK_FILE = "conflict-risk-after-dry-run.csv";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SAFETY_FILE = "dry-run-safety-report.json";
+const AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_MANIFEST_FILE = "import-manifest.json";
 const authoritativeMasterValidationIssueCsvHeaders = [
   "issue_id",
   "severity",
@@ -1517,6 +1546,69 @@ const authoritativeReviewDecisionSampleExpectationCsvHeaders = [
   "expected_p10_status",
   "expected_safety"
 ] as const satisfies readonly (keyof AuthoritativeReviewDecisionSampleExpectationRow)[];
+const authoritativeAcceptedDecisionApplicationPlanCsvHeaders = [
+  "review_id",
+  "review_type",
+  "approved_action",
+  "application_status",
+  "preview_artifact",
+  "canonical_entity_code",
+  "source_field",
+  "source_value",
+  "target_bucket",
+  "machine_center_no",
+  "warning_code",
+  "warning_message"
+] as const satisfies readonly (keyof AuthoritativeAcceptedDecisionApplicationPlanRow)[];
+const authoritativeBlockedDecisionApplicationPlanCsvHeaders = [
+  "review_id",
+  "review_type",
+  "approval_status",
+  "approved_action",
+  "blocker_code",
+  "blocker_message"
+] as const satisfies readonly (keyof AuthoritativeBlockedDecisionApplicationPlanRow)[];
+const authoritativeCoverageImpactPreviewCsvHeaders = [
+  "metric",
+  "before",
+  "after",
+  "delta"
+] as const satisfies readonly (keyof AuthoritativeCoverageImpactPreviewRow)[];
+const authoritativeP10ReadinessImpactCsvHeaders = [
+  "metric",
+  "rows"
+] as const satisfies readonly (keyof AuthoritativeP10ReadinessImpactRow)[];
+const authoritativeFutureUseCoverageImpactCsvHeaders = [
+  "bc_future_use_domain",
+  "rows",
+  "authoritative_mapped_rows_before",
+  "authoritative_mapped_rows_after",
+  "target_profile_missing_rows_before",
+  "target_profile_missing_rows_after",
+  "future_use_only_rows"
+] as const satisfies readonly (keyof AuthoritativeFutureUseCoverageImpactRow)[];
+const authoritativeTargetProfileGapAfterDryRunCsvHeaders = [
+  "bc_future_use_domain",
+  "canonical_entity_code",
+  "target_bucket",
+  "machine_center_no",
+  "rows",
+  "p10_blocker"
+] as const satisfies readonly (keyof AuthoritativeTargetProfileGapAfterDryRunRow)[];
+const authoritativeSourceDataGapAfterDryRunCsvHeaders = [
+  "source_field",
+  "source_value",
+  "bc_future_use_domain",
+  "rows",
+  "p10_blocker"
+] as const satisfies readonly (keyof AuthoritativeSourceDataGapAfterDryRunRow)[];
+const authoritativeConflictRiskAfterDryRunCsvHeaders = [
+  "source_field",
+  "source_value",
+  "bc_future_use_domain",
+  "rows",
+  "p10_blocker"
+] as const satisfies readonly (keyof AuthoritativeConflictRiskAfterDryRunRow)[];
 const entityV2CsvHeaders = [
   "posting_date",
   "document_no",
@@ -8591,6 +8683,164 @@ async function runAuthoritativeReviewDecisionSampleFixture() {
   if (workspaceRows.length > 0) console.log(`- ${displayRepoPath(convenienceSampleFile)}`);
 }
 
+function buildAuthoritativeAcceptedDecisionDryRunReadme(summary: AuthoritativeAcceptedDecisionDryRunSummary): string {
+  return `# Business Central P0.9s Authoritative Master Accepted Decision Dry-Run
+
+Generated at: ${summary.generatedAt}
+
+Dry-run status: ${summary.dryRunStatus}
+
+P1.0 status: ${summary.p10Gate.status}
+
+Reason:
+
+${summary.p10Gate.reason}
+
+## Purpose
+
+This command simulates accepted P0.9q reviewer decisions only. It reads \`${AUTHORITATIVE_MASTER_REVIEW_ACCEPTED_FILE}\` from the decision-intake output and produces merged preview CSVs plus coverage impact estimates.
+
+It does not use sample fixture files unless a human explicitly copied them into \`${AUTHORITATIVE_MASTER_REVIEW_DECISIONS_FILE}\` and P0.9q accepted them first.
+
+## Files
+
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SUMMARY_FILE}\`: dry-run status, coverage impact, P1.0 gate, and safety flags.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CANONICAL_FILE}\`: dry-run canonical entity merged preview.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_MAP_FILE}\`: dry-run source-to-entity map merged preview.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_PROFILES_FILE}\`: dry-run target profile merged preview.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_ACCEPTED_PLAN_FILE}\`: accepted decisions simulated into previews or backlog/future-use impact.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_BLOCKED_PLAN_FILE}\`: accepted-input rows that are not apply candidates.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_COVERAGE_IMPACT_FILE}\`: before/after coverage estimate.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_P10_IMPACT_FILE}\`: P1.0 readiness estimate.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_FUTURE_USE_IMPACT_FILE}\`: domain-level future-use impact.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_GAP_FILE}\`: target profile gaps after dry-run.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_GAP_FILE}\`: source data gaps after dry-run.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CONFLICT_RISK_FILE}\`: conflict risks after dry-run.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SAFETY_FILE}\`: explicit no-mutation safety report.
+- \`${AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_MANIFEST_FILE}\`: dry-run import manifest.
+
+## Current Counts
+
+- Accepted decision rows: ${summary.acceptedDecisionRows}
+- Applied preview rows: ${summary.appliedPreviewRows}
+- Blocked application rows: ${summary.blockedApplicationRows}
+- Canonical preview rows: ${summary.canonicalEntityPreviewRows}
+- Source mapping preview rows: ${summary.sourceMappingPreviewRows}
+- Target profile preview rows: ${summary.targetProfilePreviewRows}
+- Source data backlog rows: ${summary.sourceDataBacklogRows}
+- Future-use only rows: ${summary.futureUseOnlyRows}
+
+## Safety
+
+- Dry-run/export only.
+- No database mutation.
+- No \`production_outputs.entity_id\` update.
+- No \`target_profiles\` insert/update/delete.
+- No alias creation/update/delete.
+- No authoritative master input overwrite.
+- No conditional rule changes.
+- No dashboard switch.
+- Next step is final approval/apply planning, not direct mutation.
+- P1.0 remains blocked.
+`;
+}
+
+async function runAuthoritativeMasterAcceptedDecisionDryRun() {
+  const inputFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INPUT_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INPUT_DIR);
+  const intakeFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_INTAKE_DIR);
+  const reviewWorkspaceFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_WORKSPACE_DIR);
+  const decisionIntakeFolder = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE_DIR);
+  const registryFolder = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
+  const outputDir = resolveRepoPath(process.env.AUTHORITATIVE_MASTER_ACCEPTED_DECISION_DRY_RUN_DIR?.trim() || DEFAULT_AUTHORITATIVE_MASTER_ACCEPTED_DECISION_DRY_RUN_DIR);
+  const acceptedDecisionFile = path.join(decisionIntakeFolder, AUTHORITATIVE_MASTER_REVIEW_ACCEPTED_FILE);
+  const outputFiles = {
+    summary: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SUMMARY_FILE),
+    readme: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_README_FILE),
+    canonical: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CANONICAL_FILE),
+    sourceMap: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_MAP_FILE),
+    targetProfiles: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_PROFILES_FILE),
+    acceptedPlan: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_ACCEPTED_PLAN_FILE),
+    blockedPlan: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_BLOCKED_PLAN_FILE),
+    coverageImpact: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_COVERAGE_IMPACT_FILE),
+    p10Impact: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_P10_IMPACT_FILE),
+    futureUseImpact: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_FUTURE_USE_IMPACT_FILE),
+    targetGap: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_TARGET_GAP_FILE),
+    sourceGap: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SOURCE_GAP_FILE),
+    conflictRisk: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_CONFLICT_RISK_FILE),
+    safety: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_SAFETY_FILE),
+    importManifest: path.join(outputDir, AUTHORITATIVE_ACCEPTED_DECISION_DRY_RUN_MANIFEST_FILE)
+  };
+
+  console.log("Business Central P0.9s authoritative master accepted decision dry-run");
+  console.log("Mode: DRY_RUN_EXPORT_ONLY");
+  console.log(`Authoritative input folder: ${displayRepoPath(inputFolder)}`);
+  console.log(`Authoritative intake folder: ${displayRepoPath(intakeFolder)}`);
+  console.log(`Review workspace folder: ${displayRepoPath(reviewWorkspaceFolder)}`);
+  console.log(`Decision intake folder: ${displayRepoPath(decisionIntakeFolder)}`);
+  console.log(`Future-use registry folder: ${displayRepoPath(registryFolder)}`);
+  console.log(`Output folder: ${displayRepoPath(outputDir)}`);
+  console.log("Safety: dry-run/export only; database rows, production_outputs.entity_id, target_profiles, aliases, authoritative master inputs, conditional rules, and dashboard behavior are not changed.");
+
+  const acceptedDecisionInputExists = await fileExists(acceptedDecisionFile);
+  const dryRun = buildAuthoritativeMasterAcceptedDecisionDryRun({
+    acceptedDecisionRows: await readAuthoritativeMasterReviewerDecisionRows(acceptedDecisionFile) as readonly AuthoritativeReviewDecisionNormalizedRow[],
+    acceptedDecisionInputExists,
+    canonicalEntityRows: await readAuthoritativeCanonicalEntityRows(path.join(intakeFolder, AUTHORITATIVE_MASTER_CANONICAL_NORMALIZED_FILE)),
+    sourceMappingRows: await readAuthoritativeSourceMapRows(path.join(intakeFolder, AUTHORITATIVE_MASTER_SOURCE_MAP_NORMALIZED_FILE)),
+    targetProfileRows: await readAuthoritativeTargetProfileRows(path.join(intakeFolder, AUTHORITATIVE_MASTER_TARGET_PROFILES_NORMALIZED_FILE)),
+    registryRows: await readFutureUseRegistryRows(path.join(registryFolder, FUTURE_USE_RAW_REGISTRY_FILE)),
+    outputFolder: displayRepoPath(outputDir),
+    inputSources: [
+      displayRepoPath(inputFolder),
+      displayRepoPath(intakeFolder),
+      displayRepoPath(reviewWorkspaceFolder),
+      displayRepoPath(decisionIntakeFolder),
+      displayRepoPath(registryFolder)
+    ]
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFiles.summary, `${JSON.stringify(dryRun.summary, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.readme, buildAuthoritativeAcceptedDecisionDryRunReadme(dryRun.summary), "utf8");
+  await writeFile(outputFiles.canonical, resolutionPackageCsv(authoritativeReviewDecisionPreviewCanonicalCsvHeaders, dryRun.canonicalEntityMergedPreviewRows), "utf8");
+  await writeFile(outputFiles.sourceMap, resolutionPackageCsv(authoritativeReviewDecisionPreviewSourceMapCsvHeaders, dryRun.sourceMappingMergedPreviewRows), "utf8");
+  await writeFile(outputFiles.targetProfiles, resolutionPackageCsv(authoritativeReviewDecisionPreviewTargetProfileCsvHeaders, dryRun.targetProfileMergedPreviewRows), "utf8");
+  await writeFile(outputFiles.acceptedPlan, resolutionPackageCsv(authoritativeAcceptedDecisionApplicationPlanCsvHeaders, dryRun.acceptedDecisionApplicationPlanRows), "utf8");
+  await writeFile(outputFiles.blockedPlan, resolutionPackageCsv(authoritativeBlockedDecisionApplicationPlanCsvHeaders, dryRun.blockedDecisionApplicationPlanRows), "utf8");
+  await writeFile(outputFiles.coverageImpact, resolutionPackageCsv(authoritativeCoverageImpactPreviewCsvHeaders, dryRun.coverageImpactPreviewRows), "utf8");
+  await writeFile(outputFiles.p10Impact, resolutionPackageCsv(authoritativeP10ReadinessImpactCsvHeaders, dryRun.p10ReadinessImpactRows), "utf8");
+  await writeFile(outputFiles.futureUseImpact, resolutionPackageCsv(authoritativeFutureUseCoverageImpactCsvHeaders, dryRun.futureUseCoverageImpactRows), "utf8");
+  await writeFile(outputFiles.targetGap, resolutionPackageCsv(authoritativeTargetProfileGapAfterDryRunCsvHeaders, dryRun.targetProfileGapAfterDryRunRows), "utf8");
+  await writeFile(outputFiles.sourceGap, resolutionPackageCsv(authoritativeSourceDataGapAfterDryRunCsvHeaders, dryRun.sourceDataGapAfterDryRunRows), "utf8");
+  await writeFile(outputFiles.conflictRisk, resolutionPackageCsv(authoritativeConflictRiskAfterDryRunCsvHeaders, dryRun.conflictRiskAfterDryRunRows), "utf8");
+  await writeFile(outputFiles.safety, `${JSON.stringify(dryRun.dryRunSafetyReport, null, 2)}\n`, "utf8");
+  await writeFile(outputFiles.importManifest, `${JSON.stringify(dryRun.importManifest, null, 2)}\n`, "utf8");
+
+  console.log("");
+  console.log("Summary");
+  console.log(`- dry_run_status=${dryRun.summary.dryRunStatus}`);
+  console.log(`- accepted_decision_rows=${dryRun.summary.acceptedDecisionRows}`);
+  console.log(`- applied_preview_rows=${dryRun.summary.appliedPreviewRows}`);
+  console.log(`- blocked_application_rows=${dryRun.summary.blockedApplicationRows}`);
+  console.log(`- authoritative_mapped_rows_before=${dryRun.summary.coverageImpact.authoritativeMappedRowsBefore}`);
+  console.log(`- authoritative_mapped_rows_after=${dryRun.summary.coverageImpact.authoritativeMappedRowsAfter}`);
+  console.log(`- target_profile_missing_rows_after=${dryRun.summary.coverageImpact.targetProfileMissingRowsAfter}`);
+  console.log(`- p10_missing_entity_rows=${dryRun.summary.p10ReadinessImpact.productionOutputRowsMissingApprovedEntity}`);
+  console.log(`- p10_missing_target_profile_rows=${dryRun.summary.p10ReadinessImpact.productionOutputRowsMissingApprovedTargetProfile}`);
+  console.log(`- p10_status=${dryRun.summary.p10Gate.status}`);
+  console.log(`- p10_reason=${dryRun.summary.p10Gate.reason}`);
+
+  console.log("");
+  console.log("Remaining blockers");
+  console.log(`- source_data_gaps_after=${dryRun.sourceDataGapAfterDryRunRows.reduce((sum, row) => sum + row.rows, 0)}`);
+  console.log(`- conflict_risks_after=${dryRun.conflictRiskAfterDryRunRows.reduce((sum, row) => sum + row.rows, 0)}`);
+  console.log(`- target_profile_gaps_after=${dryRun.targetProfileGapAfterDryRunRows.reduce((sum, row) => sum + row.rows, 0)}`);
+
+  console.log("");
+  console.log("Files written");
+  for (const file of Object.values(outputFiles)) console.log(`- ${displayRepoPath(file)}`);
+}
+
 async function runFutureUseRawRegistry() {
   const outputDir = resolveRepoPath(process.env.FUTURE_USE_RAW_REGISTRY_DIR?.trim() || DEFAULT_FUTURE_USE_RAW_REGISTRY_DIR);
   const entitySourceFile = (await fileExists(resolveRepoPath(DEFAULT_ENTITY_V2_CSV_PATH)))
@@ -9439,8 +9689,8 @@ async function printRows(title: string, rowsPromise: Promise<{ rows: Record<stri
 
 async function main() {
   const command = (process.argv[2] ?? "profile") as Command;
-  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "authoritative-master-review-decision-intake", "authoritative-review-decision-sample-fixture", "kpi-compare-v1-v2"].includes(command)) {
-    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|authoritative-master-review-decision-intake|authoritative-review-decision-sample-fixture|kpi-compare-v1-v2>");
+  if (!["profile", "reconcile", "target-coverage", "daily-item-resume", "mapping-candidates", "mapping-apply", "mapping-plan", "mapping-plan-apply", "entity-v2-dry-run", "target-profile-dry-run", "entity-v2-backfill-dry-run", "target-profile-backfill-dry-run", "high-risk-review-plan", "resolution-package", "unknown-scope-profile", "scoped-blocker-package", "scoped-decision-review", "scoped-decision-validate", "scoped-decision-approval-workspace", "scoped-decision-apply-dry-run", "scoped-decision-approval-intake", "authoritative-master-intake", "authoritative-master-seed-draft", "future-use-raw-registry", "authoritative-master-review-workspace", "authoritative-master-review-decision-intake", "authoritative-review-decision-sample-fixture", "authoritative-master-accepted-decision-dry-run", "kpi-compare-v1-v2"].includes(command)) {
+    throw new Error("Usage: bc-metrics <profile|reconcile|target-coverage|daily-item-resume|mapping-candidates|mapping-apply|mapping-plan|mapping-plan-apply|entity-v2-dry-run|target-profile-dry-run|entity-v2-backfill-dry-run|target-profile-backfill-dry-run|high-risk-review-plan|resolution-package|unknown-scope-profile|scoped-blocker-package|scoped-decision-review|scoped-decision-validate|scoped-decision-approval-workspace|scoped-decision-apply-dry-run|scoped-decision-approval-intake|authoritative-master-intake|authoritative-master-seed-draft|future-use-raw-registry|authoritative-master-review-workspace|authoritative-master-review-decision-intake|authoritative-review-decision-sample-fixture|authoritative-master-accepted-decision-dry-run|kpi-compare-v1-v2>");
   }
   if (command === "scoped-decision-review") {
     await runScopedDecisionReview();
@@ -9484,6 +9734,10 @@ async function main() {
   }
   if (command === "authoritative-review-decision-sample-fixture") {
     await runAuthoritativeReviewDecisionSampleFixture();
+    return;
+  }
+  if (command === "authoritative-master-accepted-decision-dry-run") {
+    await runAuthoritativeMasterAcceptedDecisionDryRun();
     return;
   }
   const database = createDatabase({ connectionString: requireEnv("DATABASE_URL") });

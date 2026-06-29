@@ -121,6 +121,16 @@ This command registers every available Business Central raw report row into a cu
 
 Target profiles are required only for `PRODUCTION_OUTPUT_DASHBOARD` rows by default. Non-production future-use domains can carry authoritative entity coverage later without becoming P1.0 target-profile blockers. The command is registry/export/coverage only and never enables P1.0.
 
+P0.9s implements:
+
+```bash
+pnpm bc:authoritative-master-accepted-decision-dry-run
+```
+
+This command simulates only P0.9q accepted reviewer decisions. It writes dry-run merged previews for canonical entities, source mappings, and target profiles plus coverage impact, future-use impact, source-data gaps, conflict risk, P1.0 readiness impact, safety, and manifest files under `.tmp/bc-authoritative-master-accepted-decision-dry-run/`.
+
+The dry-run never mutates the database, never overwrites authoritative master input files, never creates aliases or target profiles, and never enables P1.0. Even when the preview status is `DRY_RUN_READY_FOR_FINAL_REVIEW`, the next step is final approval/apply planning.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Entity & Target Migration Plan
@@ -476,6 +486,28 @@ pnpm bc:authoritative-master-review-workspace
 It reads P0.9n seed drafts and the P0.9o raw registry, then writes `.tmp/bc-authoritative-master-review-workspace/` with entity, source mapping, target profile, conflict, source-data-gap, future-use-domain, reviewer-decision, priority, checklist, and manifest files. Every review row defaults to `pending`; no canonical entity, source map, target profile, alias, conditional rule, or dashboard setting is approved or applied.
 
 Target profile review is domain-scoped: `PRODUCTION_OUTPUT_DASHBOARD` requires target profile by default, `REJECT_ATTACHMENT` is conditional, and future-use non-production domains do not become P1 target-profile blockers only because a target profile is missing.
+
+P0.9q adds authoritative master review decision intake:
+
+```bash
+pnpm bc:authoritative-master-review-decision-intake
+```
+
+It reads `.tmp/bc-authoritative-master-review-input/reviewer-decisions.csv` against the P0.9p workspace, validates reviewer decisions, and writes accepted, blocked, invalid, duplicate, unknown, pending, rejected, deferred, and preview CSVs under `.tmp/bc-authoritative-master-review-decision-intake/`. If reviewer input is missing, it creates `reviewer-decisions.template.csv`, returns `AWAITING_REVIEWER_DECISIONS`, and keeps P1.0 blocked.
+
+Accepted previews are import-ready evidence for a future dry-run only. P0.9q does not approve canonical entities, source mappings, aliases, target profiles, conditional rules, or dashboard behavior, and it does not mutate authoritative master input files.
+
+P0.9s adds accepted authoritative decision dry-run:
+
+```bash
+pnpm bc:authoritative-master-accepted-decision-dry-run
+```
+
+It reads `.tmp/bc-authoritative-master-review-decision-intake/accepted-review-decisions.csv` and simulates applying only accepted P0.9q rows into merged preview outputs. It writes `.tmp/bc-authoritative-master-accepted-decision-dry-run/` with `canonical-entities.merged-preview.csv`, `source-to-entity-map.merged-preview.csv`, `target-profiles.merged-preview.csv`, decision application plans, coverage impact previews, future-use impact, source/target/conflict gap reports, a safety report, manifest, summary, and README.
+
+`SOURCE_DATA_BACKLOG` and `FUTURE_USE_ONLY` do not create canonical, source-map, or target-profile rows. Pending, rejected, deferred, invalid, duplicate, and unknown decisions are not applied. Target profile gaps only block P1.0 by default for `PRODUCTION_OUTPUT_DASHBOARD`; non-production future-use rows remain visible without becoming target-profile blockers.
+
+P0.9s is dry-run/export only. It never writes the DB, never updates `production_outputs.entity_id`, never inserts/updates/deletes `target_profiles`, never changes aliases or conditional rules, never overwrites authoritative master input files, and never enables P1.0. `DRY_RUN_READY_FOR_FINAL_REVIEW` still leaves P1.0 blocked pending final approval/apply planning.
 
 These packages are decision review, validation, approval-template preparation, dry-run planning, and approval intake only. They do not create aliases, canonical entities, target profiles, conditional rules, or dashboard switches. `safe_to_auto_apply` and `safe_to_seed_target_profile` default to `false`, and even accepted reviewer decisions are never applied by P0.9k/P0.9l. P1.0 remains blocked while scoped blockers, pending blocking decisions, invalid reviewed decisions, unapproved workspace rows, blocked dry-run rows, or missing/invalid reviewer input remain.
 

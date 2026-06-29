@@ -145,6 +145,22 @@ Target profile requirement is production-output-first: `PRODUCTION_OUTPUT_DASHBO
 
 The command never mutates data and never enables P1.0.
 
+## P0.9s Accepted Decision Dry-Run Contract
+
+`pnpm bc:authoritative-master-accepted-decision-dry-run` consumes P0.9q accepted reviewer decisions and writes `.tmp/bc-authoritative-master-accepted-decision-dry-run/`.
+
+The dry-run contract is export-only:
+
+- it reads only accepted decisions from `.tmp/bc-authoritative-master-review-decision-intake/accepted-review-decisions.csv`;
+- it must not use sample fixture files unless they were copied into `reviewer-decisions.csv` and accepted by P0.9q;
+- approved canonical entity, source mapping, reviewed alias, and target profile decisions produce merged preview CSV rows only;
+- `SOURCE_DATA_BACKLOG` and `FUTURE_USE_ONLY` affect backlog/impact outputs only;
+- pending, rejected, deferred, invalid, duplicate, unknown, or non-apply actions are not applied;
+- target profile requirement remains production-output-first: `PRODUCTION_OUTPUT_DASHBOARD` rows require coverage by default, non-production future-use domains do not become target-profile blockers by default;
+- P1.0 gate is always `BLOCKED`.
+
+Status values are `BLOCKED_MISSING_INPUTS`, `NO_ACCEPTED_DECISIONS`, `DRY_RUN_WITH_REMAINING_BLOCKERS`, or `DRY_RUN_READY_FOR_FINAL_REVIEW`. The last status means final review/apply planning can be prepared; it does not enable P1.0.
+
 <!-- P0.9M_AUTHORITATIVE_MASTER_END -->
 
 # Business Central Metric Contract
@@ -291,6 +307,8 @@ P0.9m adds `bc:authoritative-master-intake`. The command creates/validates autho
 P0.9n adds `bc:authoritative-master-seed-draft`. The command writes seed draft CSVs, review queue, excluded source values, warnings, legacy crosswalk, `summary.json`, and `README.md`. It may fill empty authoritative master input CSVs, but does not overwrite non-empty human input files unless explicitly forced. It never approves generated rows, applies master data, or enables P1.0.
 
 P0.9o adds `bc:future-use-raw-registry`. The command writes a raw registry, domain rollups, module readiness rollups, P1.0-vs-future split, source coverage, review queues, source-data-gap and unknown-review backlogs, authoritative coverage by domain, target profile requirements, `summary.json`, `README.md`, and `future-use-safety-report.json`. It never treats the registry as KPI output and never enables P1.0.
+
+P0.9s adds `bc:authoritative-master-accepted-decision-dry-run`. The command writes dry-run merged master previews, accepted/blocked decision application plans, coverage impact estimates, P1.0 readiness impact, future-use impact, post-dry-run target/source/conflict gap reports, `summary.json`, `README.md`, `dry-run-safety-report.json`, and `import-manifest.json`. It never mutates DB rows, master input files, aliases, target profiles, conditional rules, dashboard behavior, or P1.0 gates.
 
 ## Target Rule
 
@@ -639,3 +657,51 @@ Contract rules:
 - `REJECT_ATTACHMENT` target profile need is conditional;
 - future-use non-production domains do not become target-profile P1 blockers by default;
 - P1.0 remains `BLOCKED` because the workspace is export-only.
+
+<!-- P0_9Q_AUTHORITATIVE_MASTER_REVIEW_DECISION_INTAKE -->
+## P0.9q Authoritative Master Review Decision Intake
+
+`pnpm bc:authoritative-master-review-decision-intake` is decision intake/validation/export only. It reads human reviewer decisions from `.tmp/bc-authoritative-master-review-input/reviewer-decisions.csv`, validates them against the P0.9p workspace/import manifest, and writes normalized accepted, blocked, invalid, duplicate, unknown, pending, rejected, deferred, and preview CSVs.
+
+Contract rules:
+
+- missing reviewer input creates `reviewer-decisions.template.csv` and returns `AWAITING_REVIEWER_DECISIONS`;
+- only `approval_status=approved` rows can become accepted decisions;
+- approved rows require `reviewer`, `reviewer_notes`, valid action for the review type, and all action-specific fields;
+- source mappings cannot approve blank, `UNMAPPED`, broad unsafe aliases, or `current_entity_code` as source of truth;
+- target profile approvals require target bucket, positive numeric quantity, unit, and effective date;
+- source-data backlog and future-use-only decisions do not require canonical entity or target profile fields;
+- accepted preview files are not DB changes and do not update authoritative master input files;
+- P1.0 remains `BLOCKED` because this command never applies or enables anything.
+
+<!-- P0_9S_AUTHORITATIVE_MASTER_ACCEPTED_DECISION_DRY_RUN -->
+## P0.9s Authoritative Accepted Decision Dry-Run
+
+`pnpm bc:authoritative-master-accepted-decision-dry-run` is dry-run/export only. It simulates accepted P0.9q decisions against authoritative master previews and the future-use raw registry, producing before/after coverage estimates without applying master data.
+
+Required outputs:
+
+- `summary.json`
+- `README.md`
+- `canonical-entities.merged-preview.csv`
+- `source-to-entity-map.merged-preview.csv`
+- `target-profiles.merged-preview.csv`
+- `accepted-decision-application-plan.csv`
+- `blocked-decision-application-plan.csv`
+- `coverage-impact-preview.csv`
+- `p10-readiness-impact.csv`
+- `future-use-coverage-impact.csv`
+- `target-profile-gap-after-dry-run.csv`
+- `source-data-gap-after-dry-run.csv`
+- `conflict-risk-after-dry-run.csv`
+- `dry-run-safety-report.json`
+- `import-manifest.json`
+
+Gate logic:
+
+- missing P0.9q accepted input returns `BLOCKED_MISSING_INPUTS`;
+- zero accepted rows returns `NO_ACCEPTED_DECISIONS`;
+- accepted rows with remaining production output blockers return `DRY_RUN_WITH_REMAINING_BLOCKERS`;
+- fully covered production output requirements return `DRY_RUN_READY_FOR_FINAL_REVIEW`, but P1.0 still remains `BLOCKED`.
+
+Safety flags must remain false for database updates, `production_outputs` updates, `target_profiles` updates, alias changes, conditional rule changes, dashboard changes, P1.0 enablement, and master data application.
